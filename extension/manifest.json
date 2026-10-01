@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Lineleaf",
+  "version": "0.1.0",
+  "description": "Clearer writing. Still your words. Proofread and rewrite selections through your shared Seatline companion.",
+  "minimum_chrome_version": "124",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4X+P/MSnT15r48bmuQIMSnoVnl021utv2mNG4tiFe5sh3caspzoipa7Lre+TR2heKRnMD8fgbHLoPNErdK3E0bRZ2D1oYnDyTrQEjmVQuuvt29ZkKBtID3f4ulFYOHHq/cMjwlEdY4PtVS2HL0CNXjdF9L56azuusEDuwKNhhPYx7dw3d46A0jQ9zhEUzU8Eg6/M4hmdGamjwC+ZWeYA4CSzVBNbAvvJQSN1lwD6+SgvMskrTxcf+Z3uB7LFvY6XBBETRmPpdDjgNge7XDCy8kpxCoXsyMvpNAg1IKdSsxUEbToNfWRVId9TG2fqGOCG3yYwGPgErmXRpdyj7ZkP9wIDAQAB",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "nativeMessaging"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "incognito": "not_allowed",
+  "background": {
+    "service_worker": "worker.mjs",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Lineleaf"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'"
+  }
+}

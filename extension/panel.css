@@ -1,0 +1,23 @@
+:host { all: initial; color-scheme: light; font: 14px/1.5 system-ui, sans-serif; color: #233b33; }
+* { box-sizing: border-box; }
+.panel { position: fixed; z-index: 2147483647; right: 24px; bottom: 24px; width: min(390px, calc(100vw - 32px)); max-height: min(700px, calc(100vh - 40px)); overflow: auto; background: #fbfcf8; border: 1px solid #d6dfd6; border-radius: 20px; box-shadow: 0 14px 60px #16372930; padding: 20px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h2 { font-size: 21px; margin: 0; letter-spacing: -.6px; }
+.tagline, .muted { color: #63766a; font-size: 12px; margin: 3px 0 14px; }
+button, select { font: inherit; border-radius: 9px; border: 1px solid #cad7cc; background: white; color: #244d38; padding: 8px 12px; }
+button { cursor: pointer; } button:hover { background: #edf4e9; } button:disabled { opacity: .5; cursor: default; }
+button.primary { background: #285c3f; color: white; border-color: #285c3f; } button.primary:hover { background: #204c34; }
+button.quiet { border: 0; background: transparent; padding: 5px 9px; }
+button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #84ad77; outline-offset: 2px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+label { font-weight: 600; } select { width: 100%; margin-top: 5px; }
+blockquote { margin: 8px 0; padding: 10px 12px; border-left: 3px solid #a6c395; background: #f0f5ed; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 110px; overflow: auto; font-size: 13px; }
+#status { margin: 12px 0; min-height: 21px; overflow-wrap: anywhere; }
+.card { border-top: 1px solid #dbe4d8; margin-top: 15px; padding-top: 14px; }
+.category { color: #567c45; font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: 1px; }
+.before { text-decoration: line-through; color: #856955; } .after { color: #285c3f; font-weight: 600; }
+.change { white-space: pre-wrap; overflow-wrap: anywhere; margin: 7px 0; }
+.explanation { color: #586b5c; font-size: 12px; }
+textarea { width: 100%; min-height: 85px; font: inherit; margin-top: 8px; border: 1px solid #cad7cc; border-radius: 8px; padding: 9px; }
+[hidden] { display: none !important; }
+@media (max-width: 480px) { .panel { right: 16px; bottom: 16px; } }

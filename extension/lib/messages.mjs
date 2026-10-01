@@ -1,0 +1,21 @@
+export const MESSAGES = {
+  NATIVE_UNAVAILABLE: 'Seatline is unavailable. Install the shared companion and authorize the Lineleaf extension ID.',
+  PROTOCOL_ERROR: 'Seatline returned an unsupported response. Check the companion version.',
+  EXECUTABLE_NOT_FOUND: 'Codex was not found by Seatline. Install the supported Codex CLI.',
+  LOGIN_REQUIRED: 'Sign in to Codex, then try again.', AUTH_REJECTED: 'Codex sign-in was rejected. Sign in again.',
+  SUBSCRIPTION_REQUIRED: 'This prototype requires a Codex subscription sign-in. API-key and unknown configurations are not enabled.',
+  TOOL_ISOLATION_UNAVAILABLE: 'This provider configuration cannot guarantee a request with no tools.',
+  APP_NOT_AUTHORIZED: 'Authorize Lineleaf for Codex using the existing Seatline companion.',
+  PROVIDER_RATE_LIMITED: 'The provider reached a limit. Wait a minute before trying again.',
+  QUEUE_FULL: 'Seatline is busy. Wait briefly before trying again.', PROVIDER_TIMEOUT: 'The request timed out and was cancelled.',
+  PROVIDER_UNAVAILABLE: 'The provider is unavailable. Check Codex and Seatline.', PROVIDER_FAILED: 'The provider could not finish this request.',
+  MODEL_NOT_SUPPORTED: 'This model is not supported. Check the model setting.',
+  INVALID_OUTPUT: 'The response could not be safely matched to your selection. No changes were made.',
+  INVALID_REQUEST: 'Select between 1 and 2,000 characters in an eligible field.',
+  SITE_DISABLED: 'Enable this site in Lineleaf before checking text.', PAUSED: 'Lineleaf is paused. Resume it in settings.',
+  BUSY: 'Another Lineleaf request is running. Cancel it or wait for it to finish.',
+  CANCELLED: 'Cancelled. No changes were made.', STALE: 'The selection changed. Select text and check again.',
+  UNAVAILABLE: 'Lineleaf could not complete this action. Reopen the extension and try again.',
+  RESTRICTED_PAGE: 'Lineleaf is available on ordinary HTTP and HTTPS pages in the main frame.',
+};
+export const messageFor = code => MESSAGES[code] ?? MESSAGES.UNAVAILABLE;
