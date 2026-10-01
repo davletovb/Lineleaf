@@ -39,6 +39,11 @@ test('writing requests are bounded, ephemeral and have no tools/continuation', (
   }
   assert.throws(() => writingTurn('a'.repeat(2001), 'proofread', preferences(null)), /INVALID_REQUEST/);
 });
+test('proofread prompt states the same explanation limit enforced by candidate validation', () => {
+  assert.match(writingTurn('go', 'proofread', preferences(null)).system, /at most 280 UTF-16 code units per explanation/);
+  assert.equal(candidates(output([{...correction(), explanation: 'a'.repeat(280)}]), 'go', 'proofread').length, 1);
+  rejects(() => candidates(output([{...correction(), explanation: 'a'.repeat(281)}]), 'go', 'proofread'));
+});
 test('settings permit only exact HTTP(S) origins and safe provider models', () => {
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
   assert.equal(sitePattern('https://writing.test:8443'), 'https://writing.test/*');

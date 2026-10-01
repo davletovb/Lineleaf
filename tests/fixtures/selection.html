@@ -6,9 +6,9 @@
 window.controlledState = controlled.value;
 controlled.addEventListener('input', () => { window.controlledState = controlled.value; queueMicrotask(() => { controlled.value = window.controlledState; }); });
 const event = () => ({listeners: [], addListener(listener) { this.listeners.push(listener); }, emit(...args) { for (const fn of this.listeners) fn(...args); }});
-window.fixture = {enabled: true, hold: false, checks: [], ports: [], runtimeMessages: event(), after: 'goes'};
+window.fixture = {enabled: true, code: null, hold: false, checks: [], ports: [], runtimeMessages: event(), after: 'goes'};
 const runtime = {id: 'lnbkadelggojehiapgnhonicnfonobal', onMessage: fixture.runtimeMessages,
-  async sendMessage() { return {ok: fixture.enabled, value: {enabled: fixture.enabled}}; },
+  async sendMessage() { return fixture.code ? {ok: false, code: fixture.code} : {ok: fixture.enabled, value: {enabled: fixture.enabled}}; },
   connect() {
     const port = {onMessage: event(), onDisconnect: event(), sent: [], closed: false}; fixture.ports.push(port);
     port.disconnect = () => { if (!port.closed) { port.closed = true; port.onDisconnect.emit(); } };

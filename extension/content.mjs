@@ -1,4 +1,4 @@
-import {captureSelection} from './lib/selection.mjs';
+import {captureSelection, editorOf} from './lib/selection.mjs';
 import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
 import {errorCode} from './lib/policy.mjs';
@@ -67,7 +67,7 @@ export function mountContent(api) {
     }
   }
   function create() {
-    host = document.createElement('div'); host.dataset.lineleafRoot = ''; root = host.attachShadow({mode: 'open'});
+    host = document.createElement('div'); host.dataset.lineleafRoot = ''; root = host.attachShadow({mode: 'closed'});
     const sheet = new CSSStyleSheet(); sheet.replaceSync(styles); root.adoptedStyleSheets = [sheet];
     const node = (tag, text = '', attrs = {}, children = []) => {
       const element = document.createElement(tag); element.textContent = text;
@@ -96,15 +96,16 @@ export function mountContent(api) {
     query('#check').addEventListener('click', event => { if (event.isTrusted) void run(); });
     root.addEventListener('keydown', event => { if (event.key === 'Escape' && event.isTrusted) close(); });
   }
-  async function enabled() {
-    try { return (await api.runtime.sendMessage({type: 'site-state', payload: null})).ok; } catch { return false; }
+  async function siteState() {
+    try { return await api.runtime.sendMessage({type: 'site-state', payload: null}); }
+    catch { return {ok: false, code: 'UNAVAILABLE'}; }
   }
   async function open() {
     // Capture while the original field still holds its selection, before focusing panel controls.
     let next, failure;
     try {
       if (composing.size) throw new Error();
-      next = captureSelection(focused);
+      next = captureSelection(editorOf(document.activeElement) ? document.activeElement : focused);
     } catch (error) { failure = errorCode(error) === 'UNAVAILABLE' ? 'INVALID_REQUEST' : errorCode(error); }
     clear(); if (!host?.isConnected) create(); stale = false; capture = next ?? null;
     query('#undo').hidden = true; query('#results').replaceChildren(); query('#selected').textContent = capture?.text ?? '';
@@ -114,7 +115,9 @@ export function mountContent(api) {
       if (!host?.isConnected) { close(); return; }
       if (!stale && capture?.adapter && !capture.adapter.current(capture.snapshot)) markStale();
     }, 500);
-    if (!await enabled()) { stop(); status(messageFor('SITE_DISABLED')); query('#check').disabled = true; }
+    const openedRoot = root, selected = capture, state = await siteState();
+    if (root !== openedRoot || capture !== selected) return;
+    if (!state?.ok) { stop(); status(messageFor(state?.code ?? 'SITE_DISABLED')); query('#check').disabled = true; }
     query('#mode').focus();
   }
   async function run() {
@@ -122,8 +125,9 @@ export function mountContent(api) {
     if (stale || (capture.adapter && !capture.adapter.current(capture.snapshot))) { markStale(); return; }
     starting = true; query('#check').disabled = true;
     const selected = capture;
-    if (!await enabled()) { starting = false; status(messageFor('SITE_DISABLED')); return; }
+    const state = await siteState();
     if (!starting || capture !== selected || stale || !root) return;
+    if (!state?.ok) { starting = false; status(messageFor(state?.code ?? 'SITE_DISABLED')); return; }
     edits = []; render(); query('#check').disabled = true; query('#cancel').hidden = false;
     const id = crypto.randomUUID(); requestId = id;
     try {
@@ -148,7 +152,9 @@ export function mountContent(api) {
   document.addEventListener('input', input, true);
   document.addEventListener('compositionstart', event => { composing.add(event.target); input(event); }, true);
   document.addEventListener('compositionend', event => { composing.delete(event.target); }, true);
-  document.addEventListener('mouseup', event => { if (event.target !== host && !host?.contains(event.target)) focused = event.target; }, true);
+  document.addEventListener('mouseup', event => {
+    if (event.target !== host && !host?.contains(event.target)) focused = editorOf(document.activeElement) ? document.activeElement : event.target;
+  }, true);
   api.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== api.runtime.id) return;
     if (message.type === 'lineleaf-open') void open();

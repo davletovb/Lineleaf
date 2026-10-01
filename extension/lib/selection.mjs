@@ -2,9 +2,10 @@ import {EditorAdapter} from '../../prototypes/editor/editor-adapter.mjs';
 import {boundaries} from './candidates.mjs';
 import {validText, LineleafError} from './policy.mjs';
 
+const EXCLUDED = '[data-lineleaf-ignore], [aria-hidden="true"], pre, code';
 export function excluded(element) {
   if (!(element instanceof Element)) return true;
-  if (element.closest('[data-lineleaf-ignore], [aria-hidden="true"], pre, code')) return true;
+  if (element.closest(EXCLUDED)) return true;
   if (element instanceof HTMLInputElement && !['text', 'search'].includes(element.type)) return true;
   return /(?:password|one-time-code|cc-|credit.?card|security.?code|cvc|cvv)/i.test(
     [element.getAttribute('autocomplete'), element.getAttribute('name'), element.id].filter(Boolean).join(' '));
@@ -28,8 +29,11 @@ export function captureSelection(focused) {
     start = active.selectionStart; end = active.selectionEnd; source = active.value;
   } else if (selection?.rangeCount && !selection.isCollapsed) {
     const range = selection.getRangeAt(0), anchor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+    if (!validText(range.toString())) throw new LineleafError('INVALID_REQUEST');
     element = editorOf(anchor);
-    if (excluded(anchor) || (element && excluded(element))) throw new LineleafError('INVALID_REQUEST');
+    if (excluded(anchor) || (element && excluded(element)) || range.cloneContents().querySelector(EXCLUDED)) {
+      throw new LineleafError('INVALID_REQUEST');
+    }
     if (element && element.textContent.length <= 100000 && element.contains(range.startContainer) && element.contains(range.endContainer)) {
       const prefix = range.cloneRange(); prefix.selectNodeContents(element); prefix.setEnd(range.startContainer, range.startOffset);
       start = prefix.toString().length; source = element.textContent;

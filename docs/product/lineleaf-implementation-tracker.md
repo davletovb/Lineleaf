@@ -9,6 +9,8 @@ Foundation implementation: [PR #1](https://github.com/davletovb/Lineleaf/pull/1)
 
 Selection implementation: [PR #2](https://github.com/davletovb/Lineleaf/pull/2). Code commit `ac3ec6e36ee093fadeaa2e328c9fe8daad96e52a` passed 80 tests on each of Linux/macOS plus fifteen shared-companion native checks in [CI run 36874657265](https://github.com/davletovb/Lineleaf/actions/runs/36874657265). [Selection evidence](../evidence/selection-prototype-ci.md) records job IDs, test boundaries, and byte-identical Linux/macOS/local package provenance. Actual Chrome-to-Seatline setup and live writing remain B-02/B-03 verification gates.
 
+PR #2 review follow-up preserves drag selections, refuses ranges spanning excluded descendants, retains pause diagnostics, closes the panel shadow root, and aligns prompt explanation bounds. Browser regression coverage includes the production worker-to-panel path through synthetic Chrome/native ports. The native permission-prompt lifecycle remains part of actual-device acceptance; the setup guide records popup-close recovery.
+
 ## Progress
 
 - Planned implementation items: **21**

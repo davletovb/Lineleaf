@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {before, after, test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {panelFor} from './fixtures/panel-driver.mjs';
 let context, worker, options;
 const id = 'lnbkadelggojehiapgnhonicnfonobal';
 before(async () => {
@@ -52,10 +53,12 @@ test('explicit optional permission enables only the chosen site, panel opens, di
     return chrome.runtime.sendMessage({type: 'open-panel', payload: {tabId: tab.id}});
   });
   assert.equal(opened.ok, true);
-  await writing.getByRole('button', {name: 'Check selection'}).waitFor();
-  assert.equal(await writing.locator('[data-lineleaf-root] #selected').textContent(), 'He go to work.');
+  const panel = panelFor(writing);
+  await panel.button('Check selection').waitFor();
+  assert.equal(await panel.locator('#selected').textContent(), 'He go to work.');
+  assert.equal(await writing.locator('[data-lineleaf-root]').evaluate(el => el.shadowRoot), null);
   await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: false}}));
-  await writing.waitForFunction(() => document.querySelector('[data-lineleaf-root]').shadowRoot.querySelector('#check').disabled);
+  await panel.locator('#check').waitFor(el => el.disabled);
   assert.equal(await worker.evaluate(() => chrome.permissions.contains({origins: ['https://writing.test/*']})), false);
   await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
