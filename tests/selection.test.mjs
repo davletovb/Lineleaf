@@ -87,12 +87,19 @@ test('sensitive fields, active composition and disabled sites issue no writing r
   await open(); await page.waitForFunction(() => document.querySelector('[data-lineleaf-root]').shadowRoot.querySelector('#check').disabled);
   assert.equal(await page.evaluate(() => fixture.checks.length), 0);
 });
-test('markup in model replacements is rendered and inserted as literal text', async () => {
-  await page.evaluate(() => { fixture.after = '<img src=x onerror=alert(1)>'; }); await open('editable'); await check();
+test('markup in replacements stays literal; contenteditable normalization restores the original', async () => {
+  await page.evaluate(() => { fixture.after = '<img src=x onerror=alert(1)>'; }); await open(); await check();
   assert.equal(await page.locator('[data-lineleaf-root] .after img').count(), 0);
   await page.getByRole('button', {name: 'Accept', exact: true}).click();
+  assert.equal(await page.locator('#textarea').inputValue(), 'He <img src=x onerror=alert(1)> to work.');
+  await open('editable'); await check();
+  await page.getByRole('button', {name: 'Accept', exact: true}).click();
   assert.equal(await page.locator('#editable img').count(), 0);
-  assert.match(await page.locator('#editable').textContent(), /<img src=x/);
+  const value = await page.locator('#editable').textContent();
+  if (value === 'He go to work.') {
+    assert.match(await status(), /Original text restored/);
+    assert.equal(await page.locator('#editable').innerHTML(), 'He <strong>go</strong> to work.');
+  } else assert.equal(value, 'He <img src=x onerror=alert(1)> to work.');
 });
 test('panel works under Trusted Types and blocked inline styles; synthetic clicks cannot submit', async () => {
   await page.goto('https://selection.lineleaf.test/?strict'); await open();
@@ -100,4 +107,27 @@ test('panel works under Trusted Types and blocked inline styles; synthetic click
   assert.equal(await page.evaluate(() => fixture.checks.length), 0);
   await check(); assert.equal(await page.locator('[data-lineleaf-root] .panel').evaluate(el => getComputedStyle(el).position), 'fixed');
   await page.getByRole('button', {name: 'Accept', exact: true}).click(); assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work.');
+});
+test('controlled normalization on acceptance restores text and site state before copy fallback', async () => {
+  await page.evaluate(() => controlled.addEventListener('input', () => {
+    if (controlled.value.includes('goes')) controlled.value = controlled.value.toUpperCase();
+    window.controlledState = controlled.value;
+  }));
+  await open('controlled'); await check(); await page.getByRole('button', {name: 'Accept', exact: true}).click();
+  assert.equal(await page.locator('#controlled').inputValue(), 'He go to work.');
+  assert.equal(await page.evaluate(() => controlledState), 'He go to work.'); assert.match(await status(), /Original text restored/);
+  await open('controlled'); await check(); assert.equal(await page.getByRole('button', {name: 'Accept', exact: true}).isDisabled(), true);
+});
+test('partial maxlength insertion is rolled back rather than left in the field', async () => {
+  await page.locator('#input').evaluate(el => { el.maxLength = 15; }); await open('input'); await check();
+  await page.getByRole('button', {name: 'Accept', exact: true}).click(); assert.equal(await page.locator('#input').inputValue(), 'He go to work.');
+  assert.match(await status(), /Original text restored/);
+});
+test('a site handler that removes formatting is rolled back to the original inline nodes', async () => {
+  await page.locator('#editable').evaluate(el => {
+    el.innerHTML = 'He <!--kept--><strong>go</strong> to work.';
+    el.addEventListener('input', () => { el.textContent = el.textContent; });
+  });
+  await open('editable'); await check(); await page.getByRole('button', {name: 'Accept', exact: true}).click();
+  assert.equal(await page.locator('#editable').innerHTML(), 'He <!--kept--><strong>go</strong> to work.'); assert.match(await status(), /Original text restored/);
 });

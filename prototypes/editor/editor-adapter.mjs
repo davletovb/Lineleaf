@@ -1,5 +1,6 @@
 // A-04 investigation: deliberately small Chromium adapter, not a site integration.
 const INLINE = new Set(["SPAN", "B", "STRONG", "I", "EM", "U", "S"]);
+const UNSAFE = new WeakSet();
 const copies = reason => ({status: "copy", reason});
 const text = element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
   ? element.value : element.textContent;
@@ -18,7 +19,7 @@ export function validSpan(source, edit) {
 }
 
 function supported(element) {
-  if (!element.isConnected || element.disabled || element.readOnly) return false;
+  if (UNSAFE.has(element) || !element.isConnected || element.disabled || element.readOnly) return false;
   if (element instanceof HTMLTextAreaElement) return true;
   if (element instanceof HTMLInputElement) return ["text", "search"].includes(element.type);
   if (element.getAttribute("contenteditable") !== "true" || !element.isContentEditable) return false;
@@ -74,6 +75,29 @@ function select(element, selected) {
 const transformed = (offset, edit) => offset <= edit.start ? offset
   : offset >= edit.end ? offset + edit.after.length - (edit.end - edit.start) : edit.start + edit.after.length;
 
+function saveTree(node) {
+  return {node, data: node instanceof CharacterData ? node.data : null,
+    attributes: node instanceof Element ? [...node.attributes].map(x => [x.name, x.value]) : [],
+    children: [...node.childNodes].map(saveTree)};
+}
+function sameTree(saved, node = saved.node, root = true, replacement = null) {
+  if (node.nodeType !== saved.node.nodeType) return false;
+  if (saved.data !== null) return node.data === (replacement?.node === saved.node ? replacement.data : saved.data);
+  if (node !== saved.node || (!root && JSON.stringify([...node.attributes].map(x => [x.name, x.value])) !== JSON.stringify(saved.attributes))) return false;
+  return node.childNodes.length === saved.children.length && saved.children.every((child, i) => sameTree(child, node.childNodes[i], false, replacement));
+}
+function restoreTree(saved, root = true) {
+  if (saved.data !== null) saved.node.data = saved.data;
+  else {
+    if (!root && saved.node instanceof Element) {
+      for (const attribute of [...saved.node.attributes]) saved.node.removeAttribute(attribute.name);
+      for (const [name, value] of saved.attributes) saved.node.setAttribute(name, value);
+    }
+    for (const child of saved.children) restoreTree(child, false);
+    saved.node.replaceChildren(...saved.children.map(x => x.node));
+  }
+}
+
 export class EditorAdapter {
   constructor(element) {
     this.element = element;
@@ -114,28 +138,60 @@ export class EditorAdapter {
     if (!validSpan(snapshot.source, edit)) return copies("invalid_span");
     const element = this.element;
     const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
-    if (!input && !textNodes(element).some(x => edit.start >= x.start && edit.end <= x.end)) {
+    const target = input ? null : textNodes(element).find(x => edit.start >= x.start && edit.end <= x.end);
+    if (!input && !target) {
       return copies("crosses_format_boundary");
     }
     element.focus({preventScroll: true});
     if (!this.current(snapshot)) return copies("changed_on_focus");
     const oldSelection = selection(element);
     if (!oldSelection) return copies("selection_unavailable");
+    const beforeTree = input ? null : saveTree(element);
+    const replacement = input ? null : {node: target.node, data: target.node.data.slice(0, edit.start - target.start)
+      + edit.after + target.node.data.slice(edit.end - target.start)};
+    const beforeDocumentRevision = this.documentRevision;
     select(element, {start: edit.start, end: edit.end});
     const expected = snapshot.source.slice(0, edit.start) + edit.after + snapshot.source.slice(edit.end);
-    // insertText is deprecated but retains Chromium's native undo history. No DOM/value rewrite fallback.
+    // insertText retains Chromium's undo history. Direct restoration is only failed-edit recovery.
     let succeeded = false;
     try { succeeded = document.execCommand("insertText", false, edit.after); } catch { /* refuse below */ }
     this.flush();
-    if (!succeeded || text(element) !== expected || !supported(element)) {
+    if (!succeeded || text(element) !== expected || !supported(element) || (!input && !sameTree(beforeTree, element, true, replacement))) {
       this.lastEdit = null;
-      if (text(element) === snapshot.source && supported(element)) select(element, oldSelection);
-      return copies("native_edit_not_confirmed");
+      const recovered = this.restore(snapshot.source, oldSelection, beforeTree, beforeDocumentRevision);
+      return {...copies("native_edit_not_confirmed"), ...recovered};
     }
     select(element, {...oldSelection, start: transformed(oldSelection.start, edit), end: transformed(oldSelection.end, edit)});
-    this.lastEdit = {before: snapshot.source, after: expected, selection: oldSelection,
+    this.lastEdit = {before: snapshot.source, after: expected, selection: oldSelection, beforeTree,
       revision: this.revision, documentRevision: this.documentRevision};
     return {status: "applied"};
+  }
+
+  restore(source, oldSelection, beforeTree, beforeDocumentRevision) {
+    const element = this.element;
+    let stateUncertain = false;
+    // A synchronous site handler may edit another field. Never pop that field's global undo entry.
+    if (text(element) !== source && document.activeElement === element
+        && this.documentRevision === beforeDocumentRevision + 1) {
+      try { document.execCommand("undo"); } catch { /* field-local recovery below */ }
+    }
+    if (text(element) !== source || (beforeTree && !sameTree(beforeTree))) {
+      const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+      const reset = () => {
+        if (input) {
+          const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+          Object.getOwnPropertyDescriptor(prototype, "value").set.call(element, source);
+        } else restoreTree(beforeTree);
+      };
+      reset();
+      // Notify controlled state using the restored value. A site that rejects even the original is copy-only.
+      element.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "historyUndo"}));
+      if (text(element) !== source || (beforeTree && !sameTree(beforeTree))) { reset(); stateUncertain = true; }
+    }
+    this.flush();
+    try { if (element.isConnected && text(element) === source) select(element, oldSelection); } catch { stateUncertain = true; }
+    UNSAFE.add(element); // Future adapters for this field refuse replacement until the page reloads.
+    return {restored: text(element) === source && (!beforeTree || sameTree(beforeTree)), stateUncertain};
   }
 
   undo() {
@@ -150,7 +206,9 @@ export class EditorAdapter {
     let succeeded = false;
     try { succeeded = document.execCommand("undo"); } catch { /* refuse below */ }
     this.flush();
-    if (!succeeded || text(this.element) !== edit.before) return copies("native_undo_not_confirmed");
+    if (!succeeded || text(this.element) !== edit.before || (edit.beforeTree && !sameTree(edit.beforeTree))) {
+      return {...copies("native_undo_not_confirmed"), ...this.restore(edit.before, edit.selection, edit.beforeTree, edit.documentRevision)};
+    }
     select(this.element, edit.selection);
     return {status: "undone"};
   }

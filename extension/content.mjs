@@ -45,7 +45,12 @@ export function mountContent(api) {
           stop(); edits = []; stale = true; query('#results').replaceChildren();
           query('#selected').textContent = ''; query('#check').disabled = true;
           query('#undo').hidden = false; status('Applied. You can undo this edit. Select text and reopen Lineleaf for another check.');
-        } else { stale = true; status('Safe replacement is unavailable. Copy the suggestion below.'); render(); }
+        } else {
+          stale = true;
+          status(result?.restored ? `Original text restored. This editor rejected the change; use Copy.${result.stateUncertain ? ' Its internal state could not be verified.' : ''}`
+            : 'Safe replacement is unavailable. Copy the suggestion below.');
+          render();
+        }
       });
       const dismiss = document.createElement('button'); dismiss.textContent = 'Dismiss';
       dismiss.addEventListener('click', event => { if (!event.isTrusted) return; edits = edits.filter(x => x !== edit); render(); if (!edits.length) status('Suggestions dismissed. Your text is unchanged.'); });
@@ -84,7 +89,9 @@ export function mountContent(api) {
     query('#cancel').addEventListener('click', event => { if (event.isTrusted) { stop(); status(messageFor('CANCELLED')); } });
     query('#undo').addEventListener('click', event => {
       if (!event.isTrusted) return; const result = capture?.adapter?.undo(); query('#undo').hidden = true;
-      status(result?.status === 'undone' ? 'Undone. Your original text is restored.' : 'Undo is unavailable after other edits. Use the editor’s own undo control.');
+      status(result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored
+        ? 'Original text restored. This editor could not confirm native undo; further edits use copy only.'
+        : 'Undo is unavailable after other edits. Use the editor’s own undo control.');
     });
     query('#check').addEventListener('click', event => { if (event.isTrusted) void run(); });
     root.addEventListener('keydown', event => { if (event.key === 'Escape' && event.isTrusted) close(); });
