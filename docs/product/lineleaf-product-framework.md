@@ -43,6 +43,8 @@ Google Docs, complex Notion editors, Monaco/code editors, and difficult embedded
 
 Default interaction: the user enables assistance for a site, types normally, and receives suggestions after a pause. Corrections require acceptance. Rewrites are explicit actions with a preview. Include keyboard access, a clear checking state, a pause control, and visible connection errors.
 
+The [A-05 implementation decision](../architecture/mvp-scope-and-toolchain.md) starts validation with explicit requests on simple tested editors. Automatic checking remains gated on live provider measurements; the pause-based interaction above is the later C milestone target.
+
 ## Component ownership
 
 [Seatline integration](../architecture/seatline-integration.md) defines component ownership, the intended connection, the API investigation, and the safe editing pipeline. All writing-specific functionality belongs in Lineleaf.
@@ -84,9 +86,9 @@ These are proposed targets, not measured results:
 
 ## Decisions to establish during implementation
 
-- Current shared-companion readiness, consumer authorization, and the exact versioned API.
+- Shared-companion API is audited in [A-01](../investigations/seatline-api-audit.md); actual Chrome/store authorization acceptance remains A-02.
 - Initial provider based on measured quality, latency, and output reliability.
-- Extension toolchain, documented during A-05/B-01.
+- Native MV3 ES modules and development tooling are selected in [A-05](../architecture/mvp-scope-and-toolchain.md); product scaffolding/packaging remains B-01.
 - Beta editor requirements and fallback-only surfaces.
 - Whether an extension-owned local spelling/rule component is necessary after benchmarking.
 - Distribution and business model after the usable prototype.

@@ -1,0 +1,13 @@
+{
+  "name": "lineleaf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=24"},
+  "scripts": {
+    "test": "npm run test:python && npm run test:browser",
+    "test:python": "python3 -m unittest discover -s tests -p 'test_*.py' -v",
+    "test:browser": "node --test tests/editor.test.mjs"
+  },
+  "devDependencies": {"playwright": "1.62.1"}
+}

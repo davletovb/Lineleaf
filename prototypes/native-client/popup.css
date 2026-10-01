@@ -1,0 +1,4 @@
+body { width: 340px; margin: 20px; font: 14px/1.5 system-ui, sans-serif; color: #183c2d; }
+h1 { font-size: 18px; }
+button { padding: 8px 12px; margin-right: 4px; cursor: pointer; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #f1f6f2; padding: 12px; }
