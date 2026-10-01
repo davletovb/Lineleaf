@@ -28,7 +28,7 @@ export function installController(api, {now = Date.now} = {}) {
           for (let current = window; current !== current.top; current = current.parent) {
             const frame = current.frameElement;
             if (!frame || frame.hasAttribute('sandbox') || !frame.getClientRects().length) return null;
-            for (let node = frame; node; node = node.parentElement ?? node.getRootNode().host) {
+            for (let node = frame; node; node = node.assignedSlot ?? node.parentElement ?? node.getRootNode().host) {
               if (node.matches('[data-lineleaf-ignore], [aria-hidden="true"], pre, code') || current.parent.getComputedStyle(node).visibility !== 'visible') return null;
             }
           }

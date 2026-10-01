@@ -1,7 +1,7 @@
 // Only the active editor's composed ancestry is inspected; no page-wide shadow traversal.
 export function ancestry(element) {
   const result = [];
-  for (let node = element; node; node = node.parentNode ?? node.host) result.push(node);
+  for (let node = element; node; node = node.assignedSlot ?? node.parentNode ?? node.host) result.push(node);
   return result;
 }
 export function deepActive() {

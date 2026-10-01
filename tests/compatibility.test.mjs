@@ -34,6 +34,43 @@ async function automatic(id = 'textarea') {
   await page.locator(`#${id}`).fill('He go to work.'); await inline.locator('.underline').waitFor();
 }
 const sends = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+async function slotted() {
+  await page.evaluate(() => {
+    const host = document.createElement('section'); host.id = 'slotted'; document.body.prepend(host);
+    const root = host.attachShadow({mode: 'open'}), wrap = document.createElement('section'); wrap.id = 'slot-wrap'; wrap.style.cssText = 'overflow:hidden;width:130px;height:70px';
+    const slot = document.createElement('slot'); slot.name = 'draft'; wrap.append(slot);
+    const other = document.createElement('section'); other.id = 'other-slot-wrap';
+    const alternate = document.createElement('slot'); alternate.name = 'other'; other.append(alternate); root.append(wrap, other);
+    const field = document.createElement('textarea'); field.id = 'slotted-field'; field.slot = 'draft'; field.value = 'He go to work.';
+    field.style.cssText = 'width:300px;height:100px;margin:0'; host.append(field);
+  });
+}
+test('slotted fields inherit slot and shadow-wrapper exclusions before any text submission', async () => {
+  for (const [selector, attribute, value] of [['#slot-wrap', 'data-lineleaf-ignore', ''], ['#slot-wrap slot', 'aria-hidden', 'true']]) {
+    await load(); await slotted(); await page.locator(selector).evaluate((el, [attribute, value]) => el.setAttribute(attribute, value), [attribute, value]);
+    await page.locator('#slotted-field').fill('He go to work.'); await page.waitForTimeout(1700); assert.equal((await sends()).length, 0);
+    await open('slotted-field'); assert.equal(await panel.locator('#selected').textContent(), '');
+    assert.equal(await panel.button('Check selection').isDisabled(), true);
+  }
+  await load(); await slotted(); await page.locator('#other-slot-wrap').evaluate(el => el.setAttribute('data-lineleaf-ignore', ''));
+  await page.locator('#slotted-field').fill('He go to work.'); await page.locator('#slotted-field').evaluate(el => { el.slot = 'other'; });
+  await page.waitForTimeout(1700); assert.equal((await sends()).length, 0);
+});
+test('slotted geometry clips to the shadow wrapper and still preserves native acceptance/undo', async () => {
+  await load(); await slotted(); await automatic('slotted-field');
+  const bounds = await page.locator('#slot-wrap').boundingBox();
+  assert.equal(await inline.locator('.underline').evaluate((_, bounds, lines) => lines.every(line => {
+    const r = line.getBoundingClientRect(); return r.left >= bounds.x && r.right <= bounds.x + bounds.width && r.bottom <= bounds.y + bounds.height;
+  }), bounds), true);
+  await page.keyboard.press('Alt+Shift+l'); await inline.button('Accept').click();
+  assert.equal(await page.locator('#slotted-field').inputValue(), 'He goes to work.');
+  await inline.button('Undo last edit').click(); assert.equal(await page.locator('#slotted-field').inputValue(), 'He go to work.');
+});
+test('slot reassignment ABA invalidates a captured selection before accepting an edit', async () => {
+  await load(); await slotted(); await open('slotted-field'); await check();
+  await page.locator('#slotted-field').evaluate(el => { el.slot = 'other'; el.slot = 'draft'; });
+  await panel.button('Accept').click(); assert.equal(await page.locator('#slotted-field').inputValue(), 'He go to work.');
+});
 for (const [name, url, id, canApply] of [
   ['Gmail compose boundary', 'https://mail.google.com/mail/u/0/?automatic', 'editable', false],
   ['GitHub comment textarea boundary', 'https://github.com/example/synthetic/issues/1?automatic', 'textarea', true],

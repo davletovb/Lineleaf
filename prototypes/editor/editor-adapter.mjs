@@ -128,8 +128,10 @@ export class EditorAdapter {
       if (records.some(record => record.type === 'attributes' || [...record.addedNodes, ...record.removedNodes].some(node => path.includes(node)))) this.revision++;
     };
     this.contextObserver = new MutationObserver(this.contextChanged);
+    this.slots = path.filter(node => node.nodeType === Node.ELEMENT_NODE && node.localName === 'slot');
+    for (const slot of this.slots) slot.addEventListener('slotchange', this.changed);
     for (const parent of path.slice(1)) this.contextObserver.observe(parent, parent.nodeType === Node.ELEMENT_NODE ? {childList: true, attributes: true,
-      attributeFilter: ['data-lineleaf-ignore', 'aria-hidden', 'contenteditable', 'class', 'sandbox', 'data-slate-editor', 'data-lexical-editor']} : {childList: true});
+      attributeFilter: ['data-lineleaf-ignore', 'aria-hidden', 'contenteditable', 'class', 'sandbox', 'slot', 'name', 'data-slate-editor', 'data-lexical-editor']} : {childList: true});
   }
 
   flush() { if (this.observer.takeRecords().length) this.revision++; this.contextChanged(this.contextObserver.takeRecords()); }
@@ -239,6 +241,7 @@ export class EditorAdapter {
   dispose() {
     this.observer.disconnect();
     this.contextObserver.disconnect();
+    for (const slot of this.slots) slot.removeEventListener('slotchange', this.changed);
     this.element.removeEventListener("input", this.changed);
     this.element.removeEventListener("compositionstart", this.compositionStart);
     this.element.removeEventListener("compositionend", this.compositionEnd);

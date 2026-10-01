@@ -10,7 +10,7 @@ This report covers synthetic editor boundaries, dynamic-document safety and a fe
 - [Inline geometry](../../extension/lib/geometry.mjs) intersects the viewport, field and composed scroll/clip ancestors. Offscreen/hidden/transformed/perspective/shaped-clipping fields do not start an automatic check. Container movement and resize redraw the overlay; existing text/formatting is unchanged.
 - [Worker](../../extension/lib/controller.mjs) permits matching same-origin HTTP(S) frames, validates the exact live document ID/frame/URL/top origin before each provider phase, addresses the focused document and broadcasts policy invalidation to all installed documents. Cross-origin, sandboxed and opaque URLs remain denied. Extension/native permissions and the Seatline protocol are unchanged. Seatline main was rechecked at the existing audited `dc1086582c8b98498aa48dae91c8d174bc3cfc3c`.
 
-## Regression boundaries
+## Regression boundaries before the slot review follow-up
 
 [Twenty-four compatibility browser tests](../../tests/compatibility.test.mjs) exercise the bundled production content script and worker with synthetic Chrome/native ports. They cover four intercepted priority-host boundaries; Google Docs proxy/pasted text; five complex markers; push/replace/hash/ABA routes, inline SPA cancellation/late output; identical replacement fields; removal/reinsertion and ancestor exclusions; open shadow native apply/undo; legacy selection without `getComposedRanges`; shadow IME; closed roots; denied clipboard; nested scroll clipping, container resizing and transforms, plus parent-frame navigation/hidden/excluded/sandbox guards.
 
@@ -20,11 +20,11 @@ This report covers synthetic editor boundaries, dynamic-document safety and a fe
 
 ## Local validation and CI provenance
 
-Local browser regressions use Chromium 153.0.8010.0 through the documented constrained-runner override. This browser does not expose installed extension service workers; the pinned full Playwright browser download is unavailable here. Installed MV3 acceptance is therefore checked in CI, not claimed from that local browser. Local `npm test` passes **146 checks**: 26 Python, 40 extension logic, 16 adapter, 20 selection, 20 inline and 24 compatibility browser regressions. The local package and verified final code/CI provenance are recorded below.
+Local browser regressions use Chromium 153.0.8010.0 through the documented constrained-runner override. This browser does not expose installed extension service workers; the pinned full Playwright browser download is unavailable here. Installed MV3 acceptance is therefore checked in CI, not claimed from that local browser. The draft-switch baseline local `npm test` passes **146 checks**: 26 Python, 40 extension logic, 16 adapter, 20 selection, 20 inline and 24 compatibility browser regressions. The local package and verified final code/CI provenance are recorded below.
 
 Live writing, human screen-reader acceptance, real-site draft state, device-specific zoom/IME and provider latency remain their existing tracker gates. This slice does not release a beta.
 
-Package candidate: `lineleaf-0.1.0.zip`, **37,499 bytes**, SHA-256 `7e9f7937c488cf20faeba2924f89c1c31e640ebd24495cedc5c73bd7980a4cc8`. The manifest retains version `0.1.0` and development ID `lnbkadelggojehiapgnhonicnfonobal`. The Linux/macOS CI packages were downloaded and verified byte-identical to this local package; their outer artifact digests were also checked.
+Draft-switch baseline package: `lineleaf-0.1.0.zip`, **37,499 bytes**, SHA-256 `7e9f7937c488cf20faeba2924f89c1c31e640ebd24495cedc5c73bd7980a4cc8`. The manifest retains version `0.1.0` and development ID `lnbkadelggojehiapgnhonicnfonobal`. The Linux/macOS CI packages were downloaded and verified byte-identical to this local package; their outer artifact digests were also checked.
 
 Initial code `fc5a1244429ccf51e20ffa09217124cc39fcbf76` passed **150 checks per OS plus fifteen native checks** in [run 36937709228](https://github.com/davletovb/Lineleaf/actions/runs/36937709228), including the actual installed-frame test. The final follow-up adds two browser regressions for draft changes during insertion/undo/recovery.
 
@@ -45,3 +45,9 @@ Code commit **`eebe79dd2a3d16976b0f8a94011a7a031064903d`**, tree `33819b3c3f486a
 | native-authorization | `11198971698` | `4072f751d798b189809f92e6561a21367e2b19d8a68692049c14546a99235170` |
 
 Both extension artifact inner ZIPs equal the local 37,499-byte package above. The native report identifies the audited Seatline revision, protocol 1, Linux, the stable development ID and an upstream synthetic provider; it explicitly leaves store identity, native Chrome permission UI and live authentication unverified. D-02 is DONE for the declared development boundaries and D-03 for its separate feasibility result. D-01 real-editor acceptance remains IMPLEMENTED — VERIFY. A subsequent documentation-only commit records this result without changing tested extension code.
+
+## Slot review follow-up
+
+Review finding `discussion_r4161341755` identified that the ancestry walker skipped assigned slots. The walk now follows `assignedSlot` before the light-DOM parent and continues through the open shadow root/host. Exclusion and clip ancestors therefore include the actual rendering tree, including a slotted iframe's embedding metadata check. Adapter listeners/observations track slot changes and `slot`/`name` reassignment and are disposed with the capture.
+
+Three added browser regressions verify slot and shadow-wrapper ignore/hidden flags (including reassignment before idle), wrapper clipping with native apply/undo, and slot-reassignment ABA refusal. The updated local suite passes **149 checks** (26 Python, 40 logic, 83 browser; 27 compatibility tests). Linux/macOS installed-extension CI acceptance for this follow-up is pending. Current package: **37,584 bytes**, SHA-256 **`705302794816113f652a027fee404066b6dbe51c5daa155fc61b6e93ef383437`**. Earlier package/CI tables above describe the draft-switch baseline, not this changed code.
