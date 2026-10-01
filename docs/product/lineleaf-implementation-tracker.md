@@ -5,7 +5,7 @@ Status: A-01 through A-05 implemented in one foundation slice; native/device/pro
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
-Foundation implementation: [PR #1](https://github.com/davletovb/Lineleaf/pull/1). [CI run 36831880759](https://github.com/davletovb/Lineleaf/actions/runs/36831880759) passed 16 Python regressions, 15 Chromium editor regressions, and native authorization against the pinned shared Seatline binary.
+Foundation implementation: [PR #1](https://github.com/davletovb/Lineleaf/pull/1). The original implementation at commit `4e34703` passed 16 Python regressions, 15 Linux Chromium editor regressions, and eleven native checks in [CI run 36832723008](https://github.com/davletovb/Lineleaf/actions/runs/36832723008). Review follow-ups extend this coverage; provenance and current evidence are recorded in the investigation reports.
 
 ## Progress
 
@@ -30,6 +30,8 @@ Repository setup is recorded separately below and is not counted as product impl
 
 Keep IDs stable. Record ownership before starting and update progress counts when statuses change. Link the issue/pull request and validation evidence. Check currently merged code and open work before implementing anything. Dependencies must be DONE or have documented acceptance evidence for the dependent slice; unfinished dependencies keep the dependent item unstarted.
 
+A staged decision can have separate dependency gates only when the decision log explicitly names the accepted slice and its evidence. `IMPLEMENTED — VERIFY` does not release downstream implementation. A-05's toolchain/editor-boundary decision relies on accepted A-01/A-04 evidence; its final provider, latency, and installation freeze still requires A-02/A-03 acceptance. B-01 may reuse the toolchain decision for planning, but stays TODO until A-05 is DONE; this exception authorizes no B-01 implementation.
+
 ## Milestones
 
 | Milestone | Outcome | Items |
@@ -45,10 +47,10 @@ Keep IDs stable. Record ownership before starting and update progress counts whe
 | ID | Item | Depends on | Acceptance criterion | Status | Owner | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | A-01 | Inspect the current shared Seatline consumer API/release | — | Record supported transport, methods/events, versions, authentication/capabilities, and exact missing dependencies | DONE | Codex | [Pinned source/binary audit](../investigations/seatline-api-audit.md); protocol 1, no tagged release |
-| A-02 | Validate extension authorization and IDs | A-01 | One installed companion accepts the approved development/store consumer; no per-product installation | IMPLEMENTED — VERIFY | Codex | [Stable ID, probe, validator](../investigations/extension-authorization.md); native CI passes one installation/two consumers, rotation, revocation, and origin isolation; actual Chrome/macOS and issued store ID remain |
+| A-02 | Validate extension authorization and IDs | A-01 | One installed companion accepts the approved development/store consumer; no per-product installation | IMPLEMENTED — VERIFY | Codex | [Stable ID, probe, validator](../investigations/extension-authorization.md); native CI passes one installation/two consumers, reauthorization disconnect/reconnect, revocation, and origin isolation; actual Chrome/macOS and issued store ID remain |
 | A-03 | Benchmark one supported provider | A-01 | Measure cold/warm latency, structured-output reliability, cancellation, and limits for representative writing requests | IMPLEMENTED — VERIFY | Codex | [Benchmark harness and procedure](../investigations/provider-benchmark.md); fixture verified; live authenticated provider unavailable |
 | A-04 | Prototype safe editor mutation | — | Textarea, text input, basic contenteditable, and a controlled-input fixture preserve content, caret, formatting where applicable, and undo | DONE | Codex | [Compatibility report](../investigations/editor-compatibility.md); 15 actual Chromium regression tests pass |
-| A-05 | Freeze MVP scope and extension toolchain | A-01, A-02, A-03, A-04 | Document achievable editor support, acceptable latency, provider choice, toolchain, and unresolved blockers | IMPLEMENTED — VERIFY | Codex | [Conservative scope/toolchain freeze](../architecture/mvp-scope-and-toolchain.md); final provider/latency decisions depend on A-03; automatic checks gated |
+| A-05 | Freeze MVP scope and extension toolchain | A-01/A-04 for toolchain/editor boundaries; A-02/A-03 for final freeze | Document achievable editor support, acceptable latency, provider choice, toolchain, and unresolved blockers | IMPLEMENTED — VERIFY | Codex | [Staged scope/toolchain decision](../architecture/mvp-scope-and-toolchain.md); accepted slice recorded in decision log; final provider/latency/install gates remain; B-01 stays TODO |
 | B-01 | Scaffold an MV3 extension and settings | A-05 | Packaged extension loads with minimal permissions and explicit per-site controls | TODO | — | — |
 | B-02 | Integrate Seatline transport and lifecycle | A-02, B-01 | Validate sender/payloads; handle unavailable host, disconnect, cancellation, and recovery without duplicate work | TODO | — | — |
 | B-03 | Implement selection proofreading/rewriting | A-03, B-02 | Selected text yields a bounded preview; unchanged text is replaced only through a supported adapter | TODO | — | — |
@@ -91,3 +93,4 @@ Implementation toolchain, extension source, and release workflows will be establ
 | 2026-10-01 | Preserve authorship, intent, and control while permitting explicit tone changes | Product naming and preservation discussion |
 | 2026-10-01 | Freeze explicit requests on simple tested editors; keep automation gated | A-04 Chromium evidence; live provider metrics unavailable |
 | 2026-10-01 | Use native MV3 ES modules, Node 24/Python 3.12 development tools, and Playwright 1.62.1 | [A-05 decision](../architecture/mvp-scope-and-toolchain.md); no user Node runtime |
+| 2026-10-01 | Split A-05 acceptance: approve toolchain and simple editor boundaries using A-01/A-04; gate the final provider/latency/install freeze on A-02/A-03 | [A-01 audited contract](../investigations/seatline-api-audit.md) and [A-04 tested surfaces](../investigations/editor-compatibility.md). B-01 may rely on MV3/ES modules/plain CSS and development tools for planning only; implementation remains TODO until full A-05 acceptance. |

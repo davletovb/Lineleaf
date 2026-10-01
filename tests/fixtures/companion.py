@@ -1,16 +1,21 @@
 """Synthetic wire-v1 peer: only validates client behavior, never provider performance."""
 
+import argparse
 import json
 from pathlib import Path
 import sys
 import threading
-import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.seatline_wire import read_frame, write_frame
 
 lock = threading.Lock()
 active = {}
+parser = argparse.ArgumentParser()
+parser.add_argument("--fail-on", type=int)
+parser.add_argument("--failure", choices=["disconnect", "malformed", "rate_limit"], default="disconnect")
+args = parser.parse_args()
+sends = 0
 
 
 def emit(value):
@@ -53,6 +58,15 @@ while True:
             "capabilities": {"tool_isolation": True}, "models": []}})
         reply(request, {"type": "completed"})
     elif method == "send":
+        sends += 1
+        if sends == args.fail_on:
+            if args.failure == "disconnect":
+                break
+            if args.failure == "malformed":
+                reply(request, {"type": "delta", "text": 42})
+            else:
+                reply(request, {"type": "failed", "reason": "PROVIDER_RATE_LIMITED"})
+            continue
         stop = threading.Event()
         active[request["id"]] = stop
         threading.Thread(target=turn, args=(request, stop), daemon=True).start()

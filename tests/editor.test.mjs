@@ -61,7 +61,7 @@ for (const id of ["textarea", "input", "controlled", "editable"]) {
 test("keyboard undo restores the original content", async () => fixture(async page => {
   await page.evaluate(() => adapters.textarea.apply(adapters.textarea.snapshot(),
     {start: 3, end: 5, before: "go", after: "goes"}));
-  await page.keyboard.press("Control+z");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+z" : "Control+z");
   assert.equal(await page.locator("#textarea").inputValue(), "He go to work.");
 }));
 

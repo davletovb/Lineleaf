@@ -12,7 +12,7 @@
 
 Fifteen browser regressions passed locally using Playwright 1.62.1 and headless Chromium **153.0.8010.0**. A separately installed test browser used a single-process launch because of workspace IPC restrictions. CI runs the pinned Playwright browser with its normal process setup; neither browser package nor Playwright ships to extension users.
 
-[CI run 36831880759](https://github.com/davletovb/Lineleaf/actions/runs/36831880759) also passed all fifteen tests on Playwright's Chromium **151.0.7922.34**, using the normal process configuration, alongside sixteen Python harness regressions.
+[CI run 36832723008](https://github.com/davletovb/Lineleaf/actions/runs/36832723008), on original commit `4e34703`, also passed all fifteen Linux tests on Playwright's Chromium **151.0.7922.34**, using the normal process configuration, alongside sixteen Python harness regressions. Review follow-ups select `Meta+z` on macOS and `Control+z` elsewhere and run the suite on both Linux and macOS; those checks validate keyboard undo on each OS separately.
 
 The adapter owns opaque snapshots and checks source plus input/DOM revision immediately before editing and again after focus. It rejects another adapter's snapshot, stale/ABA input revisions, composition, disconnected/readonly/disabled fields, invalid source spans, and grapheme-splitting offsets. Span offsets are UTF-16 DOM offsets, with `Intl.Segmenter` guarding emoji and combining sequences. Positions must be derived in application code, never accepted from a model.
 

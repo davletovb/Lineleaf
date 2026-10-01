@@ -147,7 +147,10 @@ class NativeConnection:
                 self.process.kill()
                 self.process.wait(timeout=2)
         for stream in (self.process.stdin, self.process.stdout):
-            stream.close()
+            try:
+                stream.close()
+            except OSError:
+                pass  # A dead peer may break stdin's final flush; still close stdout and join the reader.
         self.reader.join(timeout=1)
 
     def __enter__(self):

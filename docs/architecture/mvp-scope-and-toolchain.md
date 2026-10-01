@@ -1,6 +1,6 @@
 # A-05 — MVP scope and toolchain decision
 
-Decision date: 2026-10-01. This freezes the implementation direction for the explicit-request slice using [A-01](../investigations/seatline-api-audit.md) and [A-04](../investigations/editor-compatibility.md), with [A-02](../investigations/extension-authorization.md) and [A-03](../investigations/provider-benchmark.md) acceptance gates still open. It does not approve a public beta or automatic checks.
+Decision date: 2026-10-01. This approves the toolchain and simple-editor boundaries using [A-01](../investigations/seatline-api-audit.md) and [A-04](../investigations/editor-compatibility.md). Final MVP provider/latency/install decisions remain gated by [A-02](../investigations/extension-authorization.md) and [A-03](../investigations/provider-benchmark.md). The [tracker decision log](../product/lineleaf-implementation-tracker.md#decision-log) records this split acceptance explicitly. B-01 may reuse the accepted toolchain for planning, but implementation stays TODO until A-05 is DONE. This decision does not approve a public beta or automatic checks.
 
 ## Product slice
 

@@ -4,32 +4,104 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 
-from tools.seatline_wire import NativeConnection
+from tools.benchmark_provider import safe_failure, writing_turn
+from tools.seatline_wire import NativeConnection, ProtocolError, TERMINAL
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def validate(binary):
+ERRORS = (OSError, RuntimeError, TimeoutError, subprocess.SubprocessError, ProtocolError, EOFError, ValueError)
+
+
+def connection_closed(connection, timeout=3):
+    try:
+        connection.next_frame(timeout)
+    except EOFError:
+        return True
+    except TimeoutError:
+        return False
+    return False
+
+
+def probe_turns(connection, directory, fake_provider, checks):
+    # The discovery override is an empty directory: no user provider executable/account can run.
+    turn = writing_turn("Synthetic schema probe.")
+    missing = connection.collect(connection.start("codex", "send", turn), timeout=5)[-1]
+    checks["send_schema_missing_executable"] = missing["type"] == "failed" and missing.get("reason") == "EXECUTABLE_NOT_FOUND"
+    if fake_provider is None:
+        return
+    shutil.copy2(fake_provider, directory / "codex")
+    (directory / "codex").chmod(0o700)
+    scenario = directory / "codex-scenario"
+    scenario.write_text("login=signed-in\nexec=answers\n")
+    events = connection.collect(connection.start("codex", "send", turn), timeout=5)
+    checks["send_schema_upstream_fixture"] = events[-1]["type"] == "completed" and any(
+        event["type"] == "delta" and "Synthetic schema probe." in event.get("text", "") for event in events)
+    scenario.write_text("login=signed-in\nexec=fails-429\n")
+    limited = connection.collect(connection.start("codex", "send", turn), timeout=5)[-1]
+    checks["rate_limit_reason_mapping"] = limited["type"] == "failed" and safe_failure(limited) == "PROVIDER_RATE_LIMITED"
+    scenario.write_text("login=signed-in\nexec=goes-quiet\n")
+    target = connection.start("codex", "send", turn)
+    deadline = time.monotonic() + 5
+    checks["top_level_cancel_stops_target"] = False
+    for _ in range(1024):
+        event = connection.event(target, deadline - time.monotonic())
+        if event["type"] == "started":
+            connection.cancel(target)
+            checks["top_level_cancel_stops_target"] = connection.collect(target, timeout=5)[-1]["type"] == "stopped"
+            break
+        if event["type"] in TERMINAL:
+            break
+    else:
+        raise ProtocolError("native probe event limit exceeded")
+
+
+def validate(binary, fake_provider=None):
     if sys.platform != "linux":
         return {"status": "blocked", "reason": "ISOLATED_REGISTRY_TEST_REQUIRES_LINUX"}
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
-    development = f"chrome-extension://{contract['development_extension_id']}/"
-    other_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
     checks = {}
     report = {"status": "failed", "kind": "native", "protocol": 1,
               "seatline_revision": contract["revision"], "platform": "linux",
               "development_extension_id": contract["development_extension_id"], "checks": checks,
-              "store_extension_id": None, "chrome_permission_ui_tested": False}
+              "store_extension_id": None, "chrome_permission_ui_tested": False,
+              "provider_probe": "upstream-fixture" if fake_provider else "missing-executable-only"}
+    try:
+        exercise(binary, fake_provider, contract, report)
+    except ERRORS as exc:
+        report["reason"] = type(exc).__name__
+        return report  # Keep every completed per-check result; never print private native output.
+    if report["status"] != "blocked":
+        report["status"] = "passed" if checks and all(checks.values()) else "failed"
+    return report
+
+
+def exercise(binary, fake_provider, contract, report):
+    checks = report["checks"]
+    development = f"chrome-extension://{contract['development_extension_id']}/"
+    other_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
     with tempfile.TemporaryDirectory(prefix="lineleaf-seatline-") as tmp:
         root = Path(tmp)
         data = root / "data"
         env = {**os.environ, "SEATLINE_DATA_DIR": str(data), "XDG_CONFIG_HOME": str(root / "config"),
-               "SEATLINE_BROKER_IDLE_SECS": "1"}
+               "XDG_CACHE_HOME": str(root / "cache"), "XDG_DATA_HOME": str(root / "provider-data"),
+               "SEATLINE_BROKER_IDLE_SECS": "0"}
+        providers = root / "providers"
+        providers.mkdir(mode=0o700)
+        empty = root / "empty"
+        empty.mkdir(mode=0o700)
+        # install/register requires the existing HOME, but XDG_CONFIG_HOME confines Linux registration.
+        # The broker receives no HOME, provider credentials, or user Codex configuration.
+        broker_env = {key: env[key] for key in ("SEATLINE_DATA_DIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+                                               "XDG_DATA_HOME", "SEATLINE_BROKER_IDLE_SECS")}
+        broker_env.update(PATH=os.defpath, LANG="C.UTF-8", LINELEAF_PROVIDER_PATH=str(providers),
+                          LINELEAF_OTHER_PROVIDER_PATH=str(empty))
         def run(*args, check=True):
             return subprocess.run([str(binary), *args], env=env, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL, timeout=10, check=check)
@@ -49,7 +121,7 @@ def validate(binary):
         checks["invalid_id_refused"] = malformed.returncode != 0 and not (data / "apps/invalid.json").exists()
         unknown = run("chrome-extension://pppppppppppppppppppppppppppppppp/", check=False)
         checks["unknown_origin_refused"] = unknown.returncode != 0
-        server = subprocess.Popen([str(installed), "serve"], env=env,
+        server = subprocess.Popen([str(installed), "serve"], env=broker_env,
                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         try:
             deadline = time.monotonic() + 5
@@ -57,29 +129,24 @@ def validate(binary):
                 if server.poll() is not None or time.monotonic() > deadline:
                     if server.poll() is not None and b"Operation not permitted (os error 1)" in server.stderr.read(4096):
                         report.update(status="blocked", reason="ENVIRONMENT_DENIES_LOCAL_IPC")
-                        return report
+                        return
                     raise RuntimeError("isolated broker failed to start")
                 time.sleep(0.02)
-            with NativeConnection([str(installed), development], env=env) as first, \
-                    NativeConnection([str(installed), other_origin], env=env) as second:
+            with NativeConnection([str(installed), development], env=broker_env) as first, \
+                    NativeConnection([str(installed), other_origin], env=broker_env) as second:
                 denied = first.collect(first.start("claude", "status"), timeout=5)[-1]
                 checks["provider_grant_enforced"] = denied.get("reason") == "APP_NOT_AUTHORIZED"
                 status = second.collect(second.start("codex", "status"), timeout=5)
                 checks["other_consumer_still_connected"] = status[-1]["type"] == "completed"
+                probe_turns(first, providers, fake_provider, checks)
                 run("authorize", "lineleaf", "codex", development)
-                try:
-                    first.next_frame(3)
-                    checks["reauthorization_closes_old_connection"] = False
-                except EOFError:
-                    checks["reauthorization_closes_old_connection"] = True
-                with NativeConnection([str(installed), development], env=env) as fresh:
-                    checks["reauthorized_origin_reconnects"] = True
+                checks["reauthorization_closes_old_connection"] = connection_closed(first)
+                checks["reauthorized_origin_reconnects"] = False
+                with NativeConnection([str(installed), development], env=broker_env) as fresh:
+                    events = fresh.collect(fresh.start("codex", "status"), timeout=5)
+                    checks["reauthorized_origin_reconnects"] = events[-1]["type"] == "completed"
                     run("revoke", "lineleaf")
-                    try:
-                        fresh.next_frame(3)
-                        checks["revocation_closes_connection"] = False
-                    except EOFError:
-                        checks["revocation_closes_connection"] = True
+                    checks["revocation_closes_connection"] = connection_closed(fresh)
                 run("authorize", "lineleaf_duplicate", "codex", other_origin)
                 duplicate = run(other_origin, check=False)
                 checks["ambiguous_origin_refused"] = duplicate.returncode != 0
@@ -94,17 +161,16 @@ def validate(binary):
                 server.kill()
                 server.wait(timeout=3)
             server.stderr.close()
-    report["status"] = "passed" if all(checks.values()) else "failed"
-    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--companion", required=True, type=Path)
+    parser.add_argument("--fake-provider", type=Path, help="Pinned upstream seatline-fake-provider test binary, never a real provider")
     args = parser.parse_args()
     try:
-        report = validate(args.companion.resolve())
-    except (OSError, RuntimeError, TimeoutError, subprocess.SubprocessError) as exc:
+        report = validate(args.companion.resolve(), args.fake_provider.resolve() if args.fake_provider else None)
+    except ERRORS as exc:
         report = {"status": "failed", "reason": type(exc).__name__}
     print(json.dumps(report, indent=2))
     return 0 if report["status"] == "passed" else 1

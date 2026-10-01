@@ -44,7 +44,7 @@ def validates_corrections(answer, source):
     try:
         data = json.loads(answer, object_pairs_hook=_unique_object,
                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite number")))
-    except (ValueError, TypeError, ProtocolError):
+    except (ValueError, TypeError, ProtocolError, RecursionError):
         return False
     if not isinstance(data, dict) or set(data) != {"corrections"} or not isinstance(data["corrections"], list):
         return False
@@ -85,100 +85,145 @@ def safe_failure(event):
     known = {"EXECUTABLE_NOT_FOUND", "LOGIN_REQUIRED", "AUTH_REJECTED", "APP_NOT_AUTHORIZED",
              "QUEUE_FULL", "PROVIDER_RATE_LIMITED", "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT",
              "TOOL_ISOLATION_UNAVAILABLE", "INVALID_REQUEST", "MODEL_NOT_SUPPORTED"}
-    return reason if reason in known else "PROVIDER_FAILED"
+    return reason if isinstance(reason, str) and reason in known else "PROVIDER_FAILED"
+
+
+WIRE_ERRORS = (OSError, EOFError, TimeoutError, ProtocolError, ValueError)
+
+
+def provider_ready(connection, provider, timeout, report):
+    events = connection.collect(connection.start(provider, "status"), timeout=min(timeout, 30))
+    state = next((x.get("status") for x in events if x["type"] == "status"), None)
+    if events[-1]["type"] != "completed" or not isinstance(state, dict):
+        return safe_failure(events[-1])
+    known = {"available", "unavailable", "missing", "unknown", "authenticated", "unauthenticated",
+             "subscription", "api_key", "cloud"}
+    report["provider_state"] = {key: state.get(key) if isinstance(state.get(key), str) and state.get(key) in known else "unknown"
+                                for key in ("availability", "authentication", "sign_in")}
+    if state.get("availability") != "available" or state.get("authentication") != "authenticated":
+        return "PROVIDER_NOT_READY"
+    if state.get("sign_in") != "subscription":
+        return "SUBSCRIPTION_SIGN_IN_REQUIRED"
+    if not isinstance(state.get("capabilities"), dict) or state["capabilities"].get("tool_isolation") is not True:
+        return "TOOL_ISOLATION_UNAVAILABLE"
+    return None
+
+
+def measure_turn(connection, provider, model, case, repetition, phase, timeout):
+    case_id, source = case
+    started = time.monotonic()
+    row = {"case": case_id, "sample": repetition + 1, "connection": repetition + 1,
+           "phase": phase, "first_delta_ms": None, "terminal": "interrupted", "structured_valid": False}
+    answer, request = "", None
+    try:
+        request = connection.start(provider, "send", writing_turn(source, model))
+        deadline = started + timeout
+        for _ in range(4096):
+            try:
+                event = connection.event(request, deadline - time.monotonic())
+            except TimeoutError:
+                row.update(terminal="failed", reason="PROVIDER_TIMEOUT")
+                try:
+                    connection.cancel(request)
+                    row["timeout_cleanup"] = connection.collect(request, timeout=3)[-1]["type"]
+                except WIRE_ERRORS as exc:
+                    row["cleanup_reason"] = type(exc).__name__
+                break
+            if event["type"] == "delta":
+                if not isinstance(event.get("text"), str):
+                    raise ProtocolError("invalid text delta")
+                if row["first_delta_ms"] is None:
+                    row["first_delta_ms"] = round((time.monotonic() - started) * 1000, 3)
+                answer += event["text"]
+                if len(answer.encode()) > 128 * 1024:
+                    raise ProtocolError("provider response exceeds benchmark limit")
+            if event["type"] in TERMINAL:
+                row["terminal"] = event["type"]
+                row["structured_valid"] = event["type"] == "completed" and validates_corrections(answer, source)
+                if event["type"] == "failed":
+                    row["reason"] = safe_failure(event)
+                break
+        else:
+            raise ProtocolError("too many benchmark events")
+    except WIRE_ERRORS as exc:
+        row["reason"] = type(exc).__name__
+        if request is not None:
+            try:
+                connection.cancel(request)
+            except WIRE_ERRORS:
+                pass  # Closing this connection ends the investigation; never retry the turn.
+    row["completion_ms"] = round((time.monotonic() - started) * 1000, 3)
+    return row
+
+
+def phase_summary(rows):
+    completed = [row for row in rows if row["terminal"] == "completed"]
+    durations = [row["completion_ms"] for row in completed]
+    deltas = [row["first_delta_ms"] for row in completed if row["first_delta_ms"] is not None]
+    return {"attempted": len(rows), "completed": len(completed),
+            "structured_valid": sum(row["structured_valid"] for row in rows),
+            "structured_valid_rate": sum(row["structured_valid"] for row in rows) / len(rows) if rows else None,
+            "completion_p50_ms": percentile(durations, .50), "completion_p95_ms": percentile(durations, .95),
+            "first_delta_p50_ms": percentile(deltas, .50), "first_delta_p95_ms": percentile(deltas, .95)}
+
+
+def finalize(report):
+    rows = report["measurements"]
+    report["summary"] = {"attempted": len(rows), "expected": len(CASES) * report["samples_per_case"],
+                         "structured_valid": sum(row["structured_valid"] for row in rows),
+                         "structured_valid_rate": sum(row["structured_valid"] for row in rows) / len(rows) if rows else None,
+                         "phases": {phase: phase_summary([row for row in rows if row["phase"] == phase])
+                                    for phase in ("first_request", "subsequent_request")}}
+    if report["status"] != "completed":
+        report["status"] = "incomplete" if rows else "blocked"
+    return report
 
 
 def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=30, cancel_after=0.1, fixture=False):
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
     report = {"status": "blocked", "kind": "fixture" if fixture else "live",
               "seatline_revision": contract["revision"], "provider": provider, "model": model,
-              "samples_per_case": samples, "measurements": [],
-              "warming": "First vs subsequent request on one connection; provider adapters still launch per turn.",
+              "samples_per_case": samples, "measurements": [], "connections_opened": 0,
+              "warming": "Fresh client connection/process per repetition; first vs subsequent is not model cold vs warm.",
+              "case_order": "Rotates each repetition to avoid always measuring the same first case.",
+              "cancellation": {"status": "skipped_after_failure"},
               "limits": {"broker": contract["limits"], "provider_quota": "unknown", "rate_limit_observed": False}}
-    with NativeConnection(command, timeout=min(timeout, 10)) as connection:
-        status_events = connection.collect(connection.start(provider, "status"), timeout=min(timeout, 30))
-        state = next((x.get("status") for x in status_events if x["type"] == "status"), None)
-        if status_events[-1]["type"] != "completed" or not isinstance(state, dict):
-            report["reason"] = safe_failure(status_events[-1])
-            return report
-        known_states = {"available", "unavailable", "missing", "unknown", "authenticated", "unauthenticated",
-                        "subscription", "api_key", "cloud"}
-        report["provider_state"] = {key: state.get(key) if isinstance(state.get(key), str) and state.get(key) in known_states else "unknown"
-                                    for key in ("availability", "authentication", "sign_in")}
-        if state.get("availability") != "available" or state.get("authentication") != "authenticated":
-            report["reason"] = "PROVIDER_NOT_READY"
-            return report
-        if state.get("sign_in") != "subscription":
-            report["reason"] = "SUBSCRIPTION_SIGN_IN_REQUIRED"
-            return report
-        if not isinstance(state.get("capabilities"), dict) or state["capabilities"].get("tool_isolation") is not True:
-            report["reason"] = "TOOL_ISOLATION_UNAVAILABLE"
-            return report
-        index = 0
+    try:
         for repetition in range(samples):
-            for case_id, source in CASES:
-                started = time.monotonic()
-                request = connection.start(provider, "send", writing_turn(source, model))
-                answer, first_delta, event_count = "", None, 0
-                deadline = started + timeout
-                while True:
-                    try:
-                        event = connection.event(request, deadline - time.monotonic())
-                    except TimeoutError:
-                        connection.cancel(request)
-                        # Drain the target before any next request; close if cancellation cannot complete.
-                        connection.collect(request, timeout=3)
-                        event = {"type": "failed", "reason": "PROVIDER_TIMEOUT"}
-                        break
-                    event_count += 1
-                    if event_count > 4096:
-                        raise ProtocolError("too many benchmark events")
-                    if event["type"] == "delta":
-                        if not isinstance(event.get("text"), str):
-                            raise ProtocolError("invalid text delta")
-                        first_delta = first_delta if first_delta is not None else round((time.monotonic() - started) * 1000, 3)
-                        answer += event["text"]
-                        if len(answer.encode()) > 128 * 1024:
-                            connection.cancel(request)
-                            raise ProtocolError("provider response exceeds benchmark limit")
-                    if event["type"] in TERMINAL:
-                        break
-                row = {"case": case_id, "sample": repetition + 1,
-                       "phase": "first_request" if index == 0 else "subsequent_request",
-                       "first_delta_ms": first_delta, "completion_ms": round((time.monotonic() - started) * 1000, 3),
-                       "terminal": event["type"], "structured_valid": event["type"] == "completed" and validates_corrections(answer, source)}
-                if event["type"] == "failed":
-                    row["reason"] = safe_failure(event)
-                    if row["reason"] == "PROVIDER_RATE_LIMITED":
+            with NativeConnection(command, timeout=min(timeout, 10)) as connection:
+                report["connections_opened"] += 1
+                reason = provider_ready(connection, provider, timeout, report)
+                if reason:
+                    report["reason"] = reason
+                    return finalize(report)
+                at = repetition % len(CASES)
+                for index, case in enumerate(CASES[at:] + CASES[:at]):
+                    row = measure_turn(connection, provider, model, case, repetition,
+                                       "first_request" if index == 0 else "subsequent_request", timeout)
+                    report["measurements"].append(row)
+                    if row.get("reason") == "PROVIDER_RATE_LIMITED":
                         report["limits"]["rate_limit_observed"] = True
-                report["measurements"].append(row)
-                index += 1
-                if event["type"] != "completed":
-                    # Do not retry limits/failures or spend more calls after a failed request.
-                    break
-            if report["measurements"][-1]["terminal"] != "completed":
-                break
-        # A separate request tests cancellation on the same connection, not a made-up ack.
-        if report["measurements"][-1]["terminal"] == "completed":
-            target = connection.start(provider, "send", writing_turn(CASES[0][1], model))
-            time.sleep(cancel_after)
-            cancel_sent = time.monotonic()
-            connection.cancel(target)
-            cancelled = connection.collect(target, timeout=min(timeout, 5))[-1]
-            report["cancellation"] = {"terminal": cancelled["type"],
-                                      "stopped": cancelled["type"] == "stopped",
-                                      "after_cancel_ms": round((time.monotonic() - cancel_sent) * 1000, 3)}
-        else:
-            report["cancellation"] = {"status": "skipped_after_failure"}
-    rows = report["measurements"]
-    completed = [row["completion_ms"] for row in rows if row["terminal"] == "completed"]
-    report["summary"] = {"attempted": len(rows), "expected": len(CASES) * samples,
-                         "structured_valid": sum(row["structured_valid"] for row in rows),
-                         "structured_valid_rate": sum(row["structured_valid"] for row in rows) / len(rows) if rows else None,
-                         "completion_p50_ms": percentile(completed, 0.50), "completion_p95_ms": percentile(completed, 0.95),
-                         "first_delta_p50_ms": percentile([row["first_delta_ms"] for row in rows if row["first_delta_ms"] is not None], 0.50)}
-    report["status"] = "completed" if len(rows) == len(CASES) * samples and len(completed) == len(rows) else "incomplete"
-    return report
+                    if row["terminal"] != "completed":
+                        report["reason"] = row.get("reason", "TURN_STOPPED")
+                        return finalize(report)
+                # One extra cancellation probe after all measurements, on the final connection.
+                if repetition == samples - 1:
+                    try:
+                        target = connection.start(provider, "send", writing_turn(CASES[0][1], model))
+                        time.sleep(cancel_after)
+                        cancel_sent = time.monotonic()
+                        connection.cancel(target)
+                        cancelled = connection.collect(target, timeout=min(timeout, 5))[-1]
+                        report["cancellation"] = {"status": "completed", "terminal": cancelled["type"],
+                            "stopped": cancelled["type"] == "stopped",
+                            "after_cancel_ms": round((time.monotonic() - cancel_sent) * 1000, 3)}
+                    except WIRE_ERRORS as exc:
+                        report["cancellation"] = {"status": "incomplete", "reason": type(exc).__name__}
+                        raise
+        report["status"] = "completed"
+    except WIRE_ERRORS as exc:
+        report["reason"] = type(exc).__name__
+    return finalize(report)
 
 
 def main():
@@ -201,11 +246,8 @@ def main():
             print(json.dumps({"status": "blocked", "kind": "live", "reason": "COMPANION_NOT_INSTALLED"}, indent=2))
             return 2
         command = [binary, "connect", "lineleaf"]
-    try:
-        report = run_benchmark(command, provider=args.provider, model=args.model, samples=args.samples,
-                               timeout=args.timeout, cancel_after=args.cancel_after, fixture=args.fixture)
-    except (OSError, EOFError, TimeoutError, ProtocolError, ValueError) as exc:
-        report = {"status": "blocked", "kind": "fixture" if args.fixture else "live", "reason": type(exc).__name__}
+    report = run_benchmark(command, provider=args.provider, model=args.model, samples=args.samples,
+                           timeout=args.timeout, cancel_after=args.cancel_after, fixture=args.fixture)
     print(json.dumps(report, indent=2))
     return 0 if report["status"] == "completed" else 2
 
