@@ -8,10 +8,15 @@ async function load() {
   settings = await command('get-settings');
   query('#site').textContent = origin || 'This page is unavailable.';
   query('#enabled').checked = settings.sites.includes(origin);
+  query('#paused').checked = settings.paused;
   query('#enabled').disabled = !origin || tab.incognito;
   query('#open').disabled = !origin || tab.incognito || settings.paused || !settings.sites.includes(origin);
   if (settings.paused) show(messageFor('PAUSED'));
 }
+query('#paused').addEventListener('change', async () => {
+  try { settings = await command('set-pause', {paused: query('#paused').checked}); await load(); show(settings.paused ? messageFor('PAUSED') : 'Lineleaf resumed on enabled sites.'); }
+  catch (error) { show(messageFor(errorCode(error))); }
+});
 query('#enabled').addEventListener('change', async () => {
   const enabled = query('#enabled').checked; query('#enabled').disabled = true;
   try {

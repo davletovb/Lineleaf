@@ -1,7 +1,7 @@
 # Lineleaf — Implementation Tracker
 
 Established: 2026-10-01  
-Status: A foundation merged; B-01 through B-05 selection prototype implemented and tested. B-01/B-04/B-05 meet scoped acceptance; live/device/provider gates remain open.
+Status: A/B slices merged; C-01 through C-05 inline development slice implemented in PR #3 with scoped CI acceptance. Live/device/provider and real-editor gates remain open.
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
@@ -11,14 +11,18 @@ Selection implementation: [PR #2](https://github.com/davletovb/Lineleaf/pull/2).
 
 PR #2 review follow-up at `0a9d01615a42e560445f3d2330f47c58776972a0` preserves drag selections, refuses ranges spanning excluded descendants, retains pause diagnostics, closes the panel shadow root, and aligns prompt explanation bounds. [CI run 36879235204](https://github.com/davletovb/Lineleaf/actions/runs/36879235204) passed 86 tests on each OS plus fifteen native checks; [current package provenance](../evidence/selection-prototype-ci.md) records the reproducible updated ZIP. Browser regression coverage includes the production worker-to-panel path through synthetic Chrome/native ports. The native permission-prompt lifecycle remains part of actual-device acceptance; the setup guide records popup-close recovery.
 
+Inline implementation baseline: [PR #3](https://github.com/davletovb/Lineleaf/pull/3). Code revision `b920e0d6baeafa2458108beacf096cc080ad0e1e` passed **115 tests on each Linux/macOS** plus fifteen native checks in [CI run 36889393901](https://github.com/davletovb/Lineleaf/actions/runs/36889393901). [Inline evidence](../evidence/inline-prototype-ci.md) records tested consent/pacing, paragraph privacy, keyboard/geometry/editing, dictionary/variant/pause/reset, missing-host behavior, the resolved stale-popup review finding, and byte-identical packages. Live automatic latency/device/IME and human screen-reader acceptance keep C-01/C-02 in verification.
+
+PR #3 review follow-up at `e18ebb67a8ea8daf337c3b8c1aae400172161636` passes **121 tests on each Linux/macOS** plus fifteen native checks in [CI run 36911704950](https://github.com/davletovb/Lineleaf/actions/runs/36911704950). [Updated evidence/package provenance](../evidence/inline-prototype-ci.md#review-follow-up) covers two stale options pages, partial compare-and-save preferences/dictionary deltas, focus handoff, deduplicated announcements, and expanded dictionary tokens. C-03 returns to verification for explanation accuracy; C-04 consistent preference acceptance is verified on the scoped tests.
+
 ## Progress
 
 - Planned implementation items: **21**
-- DONE: **5**
-- IMPLEMENTED — VERIFY: **5**
+- DONE: **7**
+- IMPLEMENTED — VERIFY: **8**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
-- TODO: **11**
+- TODO: **6**
 
 Repository setup is recorded separately below and is not counted as product implementation.
 
@@ -60,11 +64,11 @@ A staged decision can have separate dependency gates only when the decision log 
 | B-03 | Implement selection proofreading/rewriting | Accepted A-03 schema/fixture slice, B-02; live acceptance still gated | Selected text yields a bounded preview; unchanged text is replaced only through a supported adapter | IMPLEMENTED — VERIFY | Codex | [Selection prototype and CI](../evidence/selection-prototype-ci.md): explicit proofreading/four rewrite modes, bounded previews pass; real-account writing/quality remains |
 | B-04 | Validate candidates and derive edit positions | B-03 prototype slice | Malformed output, repeated phrases, overlapping edits, Unicode, and changed revisions are handled safely | DONE | Codex | [Linux/macOS CI](../evidence/selection-prototype-ci.md): bounded strict JSON, exact contextual matches, duplicate/ambiguous/overlap refusal, UTF-16/graphemes, stale/ABA checks pass |
 | B-05 | Implement accept, dismiss, and undo | A-04, B-04 validated editing slice | Accepting an edit preserves the tested editor's state; user can dismiss and undo without losing other typing | DONE | Codex | [Linux/macOS CI](../evidence/selection-prototype-ci.md): scoped editor/panel accept/dismiss/native undo, caret/formatting, failed-edit restoration and unrelated-field undo guards pass; real-site validation remains D-01 |
-| C-01 | Add automatic paragraph checking | B-04 | Pause-based checks respect composition, change detection, request caps, coalescing, and cancellation | TODO | — | — |
-| C-02 | Add inline underlines and cards | B-05, C-01 | Suggestions track text and scrolling; controls work by keyboard and screen reader | TODO | — | — |
-| C-03 | Add correctness/style categories and explanations | C-02 | Optional style changes are clearly labeled; explanations match their corrections | TODO | — | — |
-| C-04 | Add dictionary, language variant, and pause controls | C-02 | Preferences affect checks consistently and can be reset | TODO | — | — |
-| C-05 | Complete privacy and failure flows | B-02, C-01 | No processing on disabled sites/excluded fields; provider disclosure and useful error states are present | TODO | — | — |
+| C-01 | Add automatic paragraph checking | B-04 | Pause-based checks respect composition, change detection, request caps, coalescing, and cancellation | IMPLEMENTED — VERIFY | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies trusted-typing debounce, composition guard, coalescing/cancellation, manual priority, worker-restart-safe shared caps; live pacing/device/IME acceptance remains |
+| C-02 | Add inline underlines and cards | B-05, C-01 | Suggestions track text and scrolling; controls work by keyboard and screen reader | IMPLEMENTED — VERIFY | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies scoped overlay scrolling, closed cards, keyboard/AX semantics, exact apply/native undo/copy recovery; human screen readers and real-site geometry remain |
+| C-03 | Add correctness/style categories and explanations | C-02 | Optional style changes are clearly labeled; explanations match their corrections | IMPLEMENTED — VERIFY | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies correctness vs optional-style labels, literal bounded explanations associated with their validated candidates; explanation accuracy is not yet verified; requires live evaluation in E-01 |
+| C-04 | Add dictionary, language variant, and pause controls | C-02 | Preferences affect checks consistently and can be reset | DONE | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies opt-in/dictionary persistence, US/UK prompt, spelling-only filtering, scoped pause, serialized mutations, reset and revoked access; review follow-up CI verifies stale options, dictionary deltas, and conflict refusal |
+| C-05 | Complete privacy and failure flows | B-02, C-01 | No processing on disabled sites/excluded fields; provider disclosure and useful error states are present | DONE | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies disabled/excluded/synthetic-event refusal, remote-provider disclosure, fixed diagnostics, cancellation and retry bounds; authenticated setup remains B-02/B-03 |
 | D-01 | Validate priority real-world editors | C-05 | Publish a tested matrix for Gmail compose, GitHub comments, LinkedIn posts, and Slack web; unsupported surfaces use fallback | TODO | — | — |
 | D-02 | Handle dynamic fields and geometry | D-01 | SPA navigation, resizing, scrolling, permitted frames, and supported open shadow roots do not misapply edits | TODO | — | — |
 | D-03 | Investigate Google Docs and complex editors | D-01 | Produce a separate feasibility result; do not advertise support without a working tested adapter | TODO | — | — |
@@ -74,7 +78,7 @@ A staged decision can have separate dependency gates only when the decision log 
 
 ## First development slice
 
-The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C–E items stay TODO.
+The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C development follows the owner’s subsequent C-01–C-05 instruction; D/E items stay TODO.
 
 Inline automation follows safe replacement, validated provider behavior, and explicit selection actions.
 
@@ -99,3 +103,7 @@ The A/B slices now establish development tools, extension source, and CI packagi
 | 2026-10-01 | Use native MV3 ES modules, Node 24/Python 3.12 development tools, and Playwright 1.62.1 | [A-05 decision](../architecture/mvp-scope-and-toolchain.md); no user Node runtime |
 | 2026-10-01 | Initial split A-05 acceptance approved toolchain/editor boundaries; final provider/latency/install freeze remains A-02/A-03 gated | [A-01 audited contract](../investigations/seatline-api-audit.md) and [A-04 tested surfaces](../investigations/editor-compatibility.md). The initial planning-only B-01 restriction is superseded by the next decision. |
 | 2026-10-01 | Owner explicitly authorizes B-01–B-05 development now using accepted investigation slices | Use A-01/A-04 evidence, fifteen A-02 native/schema/cancel checks, A-03 fixture/source validation and A-05 toolchain for an explicit-request prototype. This permits implementation, not live-provider/device acceptance, automatic checking, or beta release. |
+| 2026-10-01 | Owner explicitly authorizes C-01–C-05 implementation as one development slice | Use merged B-04/B-05 validation and B-02 transport evidence. Automatic checks require a new explicit opt-in, remain off by default, use 1.5-second idle debounce and a persistent shared ten-second/six-per-minute cap. This authorizes implementation while live latency, real-account, device, and real-editor acceptance stay open. |
+| 2026-10-01 | Accept the tested C-01 scheduling/transport and C-02 scoped editing/keyboard/AX slices for C-03–C-05 | [CI run 36889393901](https://github.com/davletovb/Lineleaf/actions/runs/36889393901) and [package/evidence boundaries](../evidence/inline-prototype-ci.md) verify categories, preferences, and privacy/failure criteria on scoped fixtures and the installed MV3 missing-host path. C-01 live pacing/device/IME and C-02 human screen-reader/real-site acceptance remain verify; no beta or authenticated-writing claim follows. |
+| 2026-10-01 | Reopen C-03 explanation accuracy and C-04 consistent preference acceptance after review | Rendered association is not evidence that explanations match corrections. C-03 stays verify until linguistic evaluation. Stale-options saves and exact-token-only filtering are corrected with partial compare-and-save fields, dictionary deltas, expanded token filtering, and new installed/browser/controller regressions; C-04 acceptance awaits their CI evidence. |
+| 2026-10-01 | Verify C-04 scoped preference consistency after the review fixes | [CI run 36911704950](https://github.com/davletovb/Lineleaf/actions/runs/36911704950) passes two installed options-page conflict/merge regressions plus token/possessive dictionary and controller checks. C-03 explanation accuracy remains verify; human screen-reader and live quality gates remain open. |
