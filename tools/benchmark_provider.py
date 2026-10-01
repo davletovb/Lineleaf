@@ -161,13 +161,13 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
         # A separate request tests cancellation on the same connection, not a made-up ack.
         if report["measurements"][-1]["terminal"] == "completed":
             target = connection.start(provider, "send", writing_turn(CASES[0][1], model))
-            started = time.monotonic()
             time.sleep(cancel_after)
+            cancel_sent = time.monotonic()
             connection.cancel(target)
             cancelled = connection.collect(target, timeout=min(timeout, 5))[-1]
             report["cancellation"] = {"terminal": cancelled["type"],
                                       "stopped": cancelled["type"] == "stopped",
-                                      "after_cancel_ms": round((time.monotonic() - started - cancel_after) * 1000, 3)}
+                                      "after_cancel_ms": round((time.monotonic() - cancel_sent) * 1000, 3)}
         else:
             report["cancellation"] = {"status": "skipped_after_failure"}
     rows = report["measurements"]
