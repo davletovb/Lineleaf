@@ -50,4 +50,22 @@ Both extension artifact inner ZIPs equal the local 37,499-byte package above. Th
 
 Review finding `discussion_r4161341755` identified that the ancestry walker skipped assigned slots. The walk now follows `assignedSlot` before the light-DOM parent and continues through the open shadow root/host. Exclusion and clip ancestors therefore include the actual rendering tree, including a slotted iframe's embedding metadata check. Adapter listeners/observations track slot changes and `slot`/`name` reassignment and are disposed with the capture.
 
-Three added browser regressions verify slot and shadow-wrapper ignore/hidden flags (including reassignment before idle), wrapper clipping with native apply/undo, and slot-reassignment ABA refusal. The updated local suite passes **149 checks** (26 Python, 40 logic, 83 browser; 27 compatibility tests). Linux/macOS installed-extension CI acceptance for this follow-up is pending. Current package: **37,584 bytes**, SHA-256 **`705302794816113f652a027fee404066b6dbe51c5daa155fc61b6e93ef383437`**. Earlier package/CI tables above describe the draft-switch baseline, not this changed code.
+Three added browser regressions verify slot and shadow-wrapper ignore/hidden flags (including reassignment before idle), wrapper clipping with native apply/undo, and slot-reassignment ABA refusal. The updated local suite passes **149 checks** (26 Python, 40 logic, 83 browser; 27 compatibility tests). Linux/macOS installed-extension CI acceptance for this follow-up passes as recorded below. Current package: **37,584 bytes**, SHA-256 **`705302794816113f652a027fee404066b6dbe51c5daa155fc61b6e93ef383437`**. Earlier package/CI tables above describe the draft-switch baseline, not this changed code.
+
+## Verified slot follow-up
+
+Code **`c819b88d5dc854504e850f61b4bdd428829a2485`**, tree `376d6c22a7ff0cbc540cc26a0fa09d439a206dec`, passes **155 tests on each Linux/macOS plus fifteen native checks** in [run 36939222072](https://github.com/davletovb/Lineleaf/actions/runs/36939222072). The OS totals are 26 Python, 40 logic, 16 adapter, 20 selection, 20 inline, 27 compatibility and six installed-extension tests. All jobs passed; the assigned-slot review thread is resolved.
+
+| Job | ID | Result |
+| --- | --- | --- |
+| Linux | [110626559718](https://github.com/davletovb/Lineleaf/actions/runs/36939222072/job/110626559718) | All 155 pass |
+| macOS | [110626559806](https://github.com/davletovb/Lineleaf/actions/runs/36939222072/job/110626559806) | All 155 pass |
+| Shared companion | [110626559940](https://github.com/davletovb/Lineleaf/actions/runs/36939222072/job/110626559940) | Downloaded report verifies all fifteen checks |
+
+| Verified artifact | ID | Outer ZIP SHA-256 |
+| --- | --- | --- |
+| lineleaf-extension-Linux | `11199901095` | `6c3fa386430293c2c461e200dc185b63d2b32250e993e6d3ca75b6376dae6ff5` |
+| lineleaf-extension-macOS | `11199336539` | `38f653e6b3b2785675ea4f158b977576448ff4a0e29999e66585ccf6cd48772b` |
+| native-authorization | `11199357106` | `4ae0e71def7dc4f5a166076f0216b856127e9d9607fa81ddb3c7b3febe5346a5` |
+
+Both downloaded inner packages are byte-identical to the current **37,584-byte** local ZIP, SHA-256 **`705302794816113f652a027fee404066b6dbe51c5daa155fc61b6e93ef383437`**. D-02 is verified again for its declared boundaries, including assigned slots. D-01 authenticated priority-editor acceptance stays open. Final documentation records these results without changing the tested code.
