@@ -1,5 +1,30 @@
 # C-01–C-05 inline prototype evidence
 
+## Review follow-up
+
+Code revision: [`e18ebb67a8ea8daf337c3b8c1aae400172161636`](https://github.com/davletovb/Lineleaf/commit/e18ebb67a8ea8daf337c3b8c1aae400172161636). [CI run 36911704950](https://github.com/davletovb/Lineleaf/actions/runs/36911704950) passed all three jobs: **121 tests per OS** (26 Python, 34 extension logic, 16 editor, 20 manual panel, 20 inline, five installed-extension), plus fifteen native checks.
+
+| Job | ID | Result |
+| --- | --- | --- |
+| Linux | `110535667350` | Passed |
+| macOS | `110535667013` | Passed |
+| Shared companion | `110535667357` | Passed |
+
+The installed extension now exercises two real options pages: editing only the model in a stale tab preserves newer pause, automatic consent, and dictionary words; dictionary add/remove deltas preserve concurrent additions; conflicting same-field edits fail atomically. Pause is a separate immediate mutation and is absent from Save. Legacy whole-preference save payloads are refused. Controller regressions verify conflict atomicity and concurrent dictionary merging.
+
+Browser regressions verify that the manual panel retains the textarea selection while the closed inline card has focus, and that 15 typed characters produce one identical idle announcement while checking/result transitions still announce. Dictionary regressions cover protected words inside punctuation/phrases, normalized Unicode, and English possessives while retaining grammar and unrelated spelling edits. C-03 is **IMPLEMENTED — VERIFY**: rendering association does not establish explanation accuracy. C-04 scoped consistency acceptance passes the new tests; writing quality remains a separate live gate.
+
+The current reproducible ZIP is **34,254 bytes**, SHA-256 `72d4fde55653c5212071d69d954aade0b5b0da60cf0dcabdb3fbe2253845cfb2`. Both downloaded packages are byte-identical to the local build; both outer archive digests match GitHub metadata.
+
+| Artifact | ID | Outer archive SHA-256 |
+| --- | --- | --- |
+| `lineleaf-extension-Linux` | `11186872250` | `3268670cd4a1d569af67bd4c45cf8908de4562f90d32b4a65af3e96cdfd372fb` |
+| `lineleaf-extension-macOS` | `11186193757` | `1e3b8546248e7f52b1b9442c243687c6510de94aec22133ea5a97cb8037c3535` |
+
+These are synthetic writing and installed-extension settings/missing-host results; they do not establish live explanation accuracy, provider/device/IME, human screen-reader, or real-site acceptance.
+
+## Initial inline slice
+
 Code revision: [`b920e0d6baeafa2458108beacf096cc080ad0e1e`](https://github.com/davletovb/Lineleaf/commit/b920e0d6baeafa2458108beacf096cc080ad0e1e), in [PR #3](https://github.com/davletovb/Lineleaf/pull/3). [CI run 36889393901](https://github.com/davletovb/Lineleaf/actions/runs/36889393901) passed all three jobs on the named code. Later documentation-only commits archive the results.
 
 | Job | ID | Result |
@@ -21,7 +46,7 @@ The OS suites contain 26 Python harness, 31 extension logic, 16 editor adapter, 
 
 Successful writing output in UI/controller tests is synthetic. The native report downloaded from artifact `11175348535` passed all fifteen existing authorization/schema/cancellation checks against unmodified Seatline `dc1086582c8b98498aa48dae91c8d174bc3cfc3c` and its upstream fake provider. The downloaded outer archive matched GitHub's SHA-256 `a607888726569b991c3d3071018152469064c4ccfbb234dacc4c9af9cefad2f4`. This is separate from an authenticated Chrome-to-provider writing turn.
 
-## Package provenance
+## Initial package provenance
 
 The reproducible `lineleaf-0.1.0.zip` is **33,297 bytes**, SHA-256 `91a76d22e6b8acdfab15a5f60070ad5484026883508a626aa60e2b5b4a55a547`. Both downloaded Linux/macOS packages are byte-identical to the local build; each outer archive matches GitHub's published digest.
 
