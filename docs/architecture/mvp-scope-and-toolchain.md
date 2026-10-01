@@ -1,6 +1,6 @@
 # A-05 — MVP scope and toolchain decision
 
-Decision date: 2026-10-01. This approves the toolchain and simple-editor boundaries using [A-01](../investigations/seatline-api-audit.md) and [A-04](../investigations/editor-compatibility.md). Final MVP provider/latency/install decisions remain gated by [A-02](../investigations/extension-authorization.md) and [A-03](../investigations/provider-benchmark.md). The [tracker decision log](../product/lineleaf-implementation-tracker.md#decision-log) records this split acceptance explicitly. The owner's subsequent instruction to implement B-01–B-05 now authorizes a development prototype using these accepted slices, superseding the earlier planning-only B-01 restriction. It does not approve a public beta, live-provider/device claims, or automatic checks.
+Decision date: 2026-10-01. This approves the toolchain and simple-editor boundaries using [A-01](../investigations/seatline-api-audit.md) and [A-04](../investigations/editor-compatibility.md). Final MVP provider/latency/install decisions remain gated by [A-02](../investigations/extension-authorization.md) and [A-03](../investigations/provider-benchmark.md). The [tracker decision log](../product/lineleaf-implementation-tracker.md#decision-log) records this split acceptance explicitly. The owner's subsequent instruction to implement B-01–B-05 now authorizes a development prototype using these accepted slices, superseding the earlier planning-only B-01 restriction. It does not approve a public beta or live-provider/device claims. The subsequent C instruction authorizes the opt-in development behavior described below.
 
 ## Product slice
 
@@ -8,7 +8,7 @@ Chrome desktop MV3, initially developed/tested for macOS. English US/UK remains 
 
 Use the existing shared Seatline companion and `com.seatline.host`, pinned to the audited pre-release revision until a release/contract update is reviewed. Codex is the first **candidate** provider. Writing requests require authenticated subscription status and tool isolation, use no tools, and stay ephemeral with no continuation. No writing is sent by the A-02 probe. No consumer worker, second companion, inference server, or HTTP bridge is added.
 
-Automatic pause-based checking stays disabled until live provider evidence supports it. The product framework's 1.5–2 second idle pause / ten-second minimum interval remain hypotheses for C-01, not a validated background policy. Provider work must never block typing.
+The owner’s C-01–C-05 instruction authorizes opt-in automatic checking for development. It stays off by default, including for previously enabled sites. Users explicitly enable it after the remote-provider disclosure. A 1.5-second idle pause, global ten-second minimum interval, and six-attempts-per-minute cap are provisional guardrails; live latency/quality still need measurement before beta acceptance. Provider work must never block typing.
 
 ## Latency and release gates
 

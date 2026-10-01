@@ -18,11 +18,16 @@ after(async () => { await context?.close(); });
 test('built MV3 extension loads with the stable ID and settings persist across pages', async () => {
   assert.equal(new URL(worker.url()).host, id);
   assert.equal((await worker.evaluate(() => chrome.runtime.getManifest())).version, '0.1.0');
+  assert.equal(await options.locator('#automatic').isChecked(), false);
+  assert.equal(await options.locator('#dictionary').inputValue(), '');
   await options.locator('#variant').selectOption('UK'); await options.locator('#model').fill('test-model');
+  await options.locator('#automatic').check(); await options.locator('#dictionary').fill('Seatline\nLineleaf');
   await options.getByRole('button', {name: 'Save preferences'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
   await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'UK');
   assert.equal(await options.locator('#model').inputValue(), 'test-model');
+  assert.equal(await options.locator('#automatic').isChecked(), true);
+  assert.equal(await options.locator('#dictionary').inputValue(), 'seatline\nlineleaf');
   const permissions = await worker.evaluate(() => chrome.permissions.getAll()); assert.deepEqual(permissions.origins ?? [], []);
 });
 test('missing native host produces a fixed diagnostic in the actual extension', async () => {
@@ -62,4 +67,28 @@ test('explicit optional permission enables only the chosen site, panel opens, di
   assert.equal(await worker.evaluate(() => chrome.permissions.contains({origins: ['https://writing.test/*']})), false);
   await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
+});
+test('installed automatic flow stays idle on focus, reports missing host after typing, and pause clears it', async () => {
+  const management = await context.newPage(); await management.goto('chrome://extensions/');
+  await management.evaluate(async id => chrome.developerPrivate.addHostPermission(id, 'https://writing.test/*'), id); await management.close();
+  await options.evaluate(() => { window.granted = null; }); await options.getByRole('button', {name: 'Grant fixture site'}).click();
+  await options.waitForFunction(() => window.granted === true);
+  await options.locator('#automatic').check(); await options.getByRole('button', {name: 'Save preferences'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  assert.equal((await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: true}}))).ok, true);
+  await options.waitForFunction(async () => (await chrome.scripting.getRegisteredContentScripts()).some(x => x.id === 'lineleaf-sites'));
+  const writing = await context.newPage(); await writing.goto('https://writing.test/automatic'); await writing.locator('#draft').focus();
+  await writing.waitForSelector('[data-lineleaf-inline]');
+  const inline = panelFor(writing, {attribute: 'data-lineleaf-inline'});
+  await writing.waitForTimeout(1700);
+  assert.match(await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label')), /after you pause typing/);
+  await writing.keyboard.press('End'); await writing.keyboard.type(' Again.');
+  await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').includes('Seatline is unavailable.'));
+  assert.equal(await writing.locator('#draft').inputValue(), 'He go to work. Again.');
+  await writing.keyboard.press('Alt+Shift+l'); await inline.button('Pause Lineleaf').click();
+  await writing.waitForSelector('[data-lineleaf-inline]', {state: 'detached'});
+  assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences.paused), true);
+  await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
+  assert.equal(await options.locator('#automatic').isChecked(), false); assert.equal(await options.locator('#dictionary').inputValue(), '');
 });

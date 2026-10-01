@@ -52,3 +52,19 @@ export function captureSelection(focused) {
   if (!snapshot) { adapter.dispose(); return {text, adapter: null, snapshot: null, offset: 0, field: element}; }
   return {text, adapter, snapshot, offset: start, field: element};
 }
+export function captureParagraph(element, adapter) {
+  if (!element || excluded(element) || element.querySelector(EXCLUDED) || !element.isConnected
+      || element.disabled || element.readOnly || (element.value ?? element.textContent).length > 100000) throw new LineleafError('INVALID_REQUEST');
+  const snapshot = adapter.snapshot(); if (!snapshot) throw new LineleafError('INVALID_REQUEST');
+  let caret = element.selectionStart;
+  if (!Number.isInteger(caret)) {
+    const selection = document.getSelection();
+    if (!selection?.focusNode || !element.contains(selection.focusNode)) throw new LineleafError('INVALID_REQUEST');
+    const prefix = document.createRange(); prefix.selectNodeContents(element); prefix.setEnd(selection.focusNode, selection.focusOffset); caret = prefix.toString().length;
+  }
+  const source = snapshot.source, start = source.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const next = source.indexOf('\n', caret), end = next === -1 ? source.length : next;
+  const text = source.slice(start, end);
+  if (!validText(text) || !/\p{L}/u.test(text)) throw new LineleafError('INVALID_REQUEST');
+  return {text, offset: start, snapshot, adapter, field: element};
+}

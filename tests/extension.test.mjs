@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {candidates, strictJSON} from '../extension/lib/candidates.mjs';
-import {writingTurn, preferences, sitePattern, originOf} from '../extension/lib/policy.mjs';
+import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary} from '../extension/lib/policy.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
 import {fakeNative, fakeChrome, READY, waitFor} from './fixtures/extension-api.mjs';
@@ -48,7 +48,7 @@ test('settings permit only exact HTTP(S) origins and safe provider models', () =
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
   assert.equal(sitePattern('https://writing.test:8443'), 'https://writing.test/*');
   assert.deepEqual(preferences({provider: 'other', model: 'bad\nmodel', sites: ['https://writing.test', 'https://writing.test/path', 'file:///tmp']}),
-    {provider: 'codex', model: '', variant: 'US', paused: false, sites: ['https://writing.test']});
+    {provider: 'codex', model: '', variant: 'US', paused: false, automatic: false, dictionary: [], sites: ['https://writing.test']});
 });
 test('packaged manifest has optional site access, no automatic/all-site content script or exposed resources', async () => {
   const m = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url)));
@@ -148,4 +148,89 @@ test('only extension UI can change settings; reset removes concrete granted orig
   const denied = await f.rpc('save-settings', {model: '', variant: 'UK', paused: true}, f.sender);
   assert.equal(denied.ok, false); assert.equal(f.data.preferences.paused, false);
   assert.equal((await f.rpc('reset')).ok, true); assert.deepEqual(f.data, {}); assert.deepEqual((await f.api.permissions.getAll()).origins, []);
+});
+test('automatic checking requires a separate opt-in; old enabled sites keep it off', async () => {
+  assert.equal(preferences({sites: ['https://writing.test']}).automatic, false);
+  const f = fakeChrome(); installController(f.api); const port = f.connect();
+  port.onMessage.emit({type: 'start', kind: 'automatic', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+  await waitFor(() => port.received.some(x => x.code === 'AUTOMATIC_DISABLED'));
+  assert.equal(f.calls.some(x => x.method === 'status' || x.method === 'send'), false);
+});
+test('dictionary is bounded, normalized, spelling-only and included as untrusted data', () => {
+  const settings = preferences({dictionary: ['Café', 'CAFE\u0301', 'go', 'run shell', 'x'.repeat(65)], variant: 'UK'});
+  assert.deepEqual(settings.dictionary, ['café', 'go']); assert.equal(dictionaryWord('private\ncredential'), null);
+  assert.equal(dictionaryWord('\u0301'), null); assert.equal(dictionaryWord('İ'.repeat(40)), null);
+  const edits = [{...correction('Go'), category: 'spelling'}, correction('go'), {...correction('cafe\u0301'), category: 'spelling'}];
+  assert.deepEqual(filterDictionary(edits, settings), [edits[1]]);
+  const turn = writingTurn('He go to work.', 'proofread', settings);
+  assert.deepEqual(JSON.parse(turn.messages[0].text), {text: 'He go to work.', dictionary: ['café', 'go']}); assert.match(turn.system, /British/);
+});
+const autoStart = port => port.onMessage.emit({type: 'start', kind: 'automatic', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+test('automatic budget is shared across documents and survives a worker restart without drafts', async () => {
+  let clock = 100000;
+  const f = fakeChrome({automatic: true}); installController(f.api, {now: () => clock}); const first = f.connect(); autoStart(first);
+  await waitFor(() => first.received.some(x => x.type === 'result'));
+  const second = f.connect({documentId: 'document-two'}); autoStart(second);
+  await waitFor(() => second.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+  assert.equal(second.received.find(x => x.code === 'AUTO_WAIT').retryAfterMs, 10000);
+  const restarted = fakeChrome({automatic: true}); restarted.api.storage.session = f.api.storage.session;
+  installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third);
+  await waitFor(() => third.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(restarted.calls.some(x => x.method === 'send'), false);
+  assert.deepEqual(f.sessionData, {automaticBudget: [100000]});
+  clock += 10000; const later = restarted.connect(); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result'));
+});
+test('automatic rolling budget permits six starts per minute and expires old timestamps', async () => {
+  let clock = 100000; const f = fakeChrome({automatic: true}); installController(f.api, {now: () => clock});
+  for (let i = 0; i < 6; i++) { clock = 100000 + i * 10000; const p = f.connect(); autoStart(p); await waitFor(() => p.received.some(x => x.type === 'result')); }
+  clock = 155000; const limited = f.connect(); autoStart(limited); await waitFor(() => limited.received.some(x => x.code === 'AUTO_WAIT'));
+  assert.equal(f.calls.filter(x => x.method === 'send').length, 6);
+  clock = 160000; const next = f.connect(); autoStart(next); await waitFor(() => next.received.some(x => x.type === 'result'));
+  assert.equal(f.sessionData.automaticBudget.length, 6);
+});
+test('explicit writing preempts automatic work after confirmed cancellation, without duplicate sends', async () => {
+  const f = fakeChrome({automatic: true, hang: true}); installController(f.api);
+  const automatic = f.connect(); autoStart(automatic); await waitFor(() => f.calls.some(x => x.method === 'send'));
+  f.hold = false; const manual = f.connect({documentId: 'manual-document'}); start(manual);
+  await waitFor(() => manual.received.some(x => x.type === 'result'));
+  assert.equal(automatic.received.some(x => x.code === 'CANCELLED'), true);
+  assert.equal(f.calls.filter(x => x.method === 'send').length, 2); assert.equal(f.ports[0].closed, true);
+});
+test('automatic rewrites and unknown kinds are refused before provider access', async () => {
+  for (const change of [{kind: 'automatic', mode: 'formal'}, {kind: 'background'}]) {
+    const f = fakeChrome({automatic: true}); installController(f.api); const p = f.connect();
+    p.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', ...change});
+    await waitFor(() => p.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(f.calls.some(x => x.method === 'send'), false);
+  }
+});
+test('content controls are site-scoped; dictionary additions serialize and reset clears all preferences', async () => {
+  const f = fakeChrome({automatic: true}); installController(f.api);
+  const denied = await f.rpc('add-word', {word: 'Seatline'}, {...f.sender, frameId: 1}); assert.equal(denied.ok, false);
+  await Promise.all([f.rpc('add-word', {word: 'Seatline'}, f.sender), f.rpc('add-word', {word: 'Lineleaf'}, f.sender)]);
+  assert.deepEqual(f.data.preferences.dictionary, ['seatline', 'lineleaf']);
+  assert.equal((await f.rpc('pause', null, f.sender)).ok, true); assert.equal(f.data.preferences.paused, true);
+  assert.equal((await f.rpc('site-state', null, f.sender)).code, 'PAUSED');
+  assert.equal((await f.rpc('reset')).ok, true); assert.deepEqual(f.data, {}); assert.equal(preferences(f.data).automatic, false);
+});
+test('dictionary filters actual worker results without suppressing grammar corrections', async () => {
+  for (const category of ['spelling', 'grammar']) {
+    const f = fakeChrome({dictionary: ['go'], answer: output([{...correction('go', 'goes', 'He ', ' to'), category}])}); installController(f.api);
+    const p = f.connect(); start(p); await waitFor(() => p.received.some(x => x.type === 'result'));
+    assert.equal(p.received.find(x => x.type === 'result').edits.length, category === 'spelling' ? 0 : 1);
+  }
+});
+test('provider backoff survives worker restart and local refusals do not extend it', async () => {
+  let clock = 100000; const f = fakeChrome();
+  f.api.runtime.connectNative = () => fakeNative((m, p) => {
+    if (m.method === 'status') { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }
+    if (m.method === 'send') p.reply(m.id, {type: 'failed', reason: 'PROVIDER_RATE_LIMITED'});
+  });
+  installController(f.api, {now: () => clock}); const first = f.connect(); start(first);
+  await waitFor(() => first.received.some(x => x.code === 'PROVIDER_RATE_LIMITED'));
+  assert.equal(f.sessionData.providerBackoff, 160000);
+  clock = 120000; const restarted = fakeChrome(); restarted.api.storage.session = f.api.storage.session;
+  installController(restarted.api, {now: () => clock}); const second = restarted.connect(); start(second);
+  await waitFor(() => second.received.some(x => x.code === 'PROVIDER_RATE_LIMITED'));
+  assert.equal(second.received.find(x => x.code === 'PROVIDER_RATE_LIMITED').retryAfterMs, 40000);
+  assert.equal(f.sessionData.providerBackoff, 160000); assert.equal(restarted.calls.some(x => x.method === 'send'), false);
+  clock = 160000; const next = restarted.connect(); start(next); await waitFor(() => next.received.some(x => x.type === 'result'));
 });

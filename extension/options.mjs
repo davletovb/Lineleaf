@@ -1,10 +1,11 @@
 import {command} from './lib/ui-api.mjs';
-import {errorCode} from './lib/policy.mjs';
+import {errorCode, dictionaryWord} from './lib/policy.mjs';
 import {messageFor} from './lib/messages.mjs';
 const query = x => document.querySelector(x), show = text => { query('#status').textContent = text; };
 async function load() {
   const settings = await command('get-settings'); query('#variant').value = settings.variant;
   query('#model').value = settings.model; query('#paused').checked = settings.paused;
+  query('#automatic').checked = settings.automatic; query('#dictionary').value = settings.dictionary.join('\n');
   query('#authorize').textContent = `seatline-companion authorize lineleaf codex chrome-extension://${chrome.runtime.id}/`;
   query('#sites').replaceChildren();
   for (const origin of settings.sites) {
@@ -17,7 +18,9 @@ async function load() {
 }
 query('#preferences').addEventListener('submit', async event => {
   event.preventDefault();
-  try { await command('save-settings', {model: query('#model').value.trim(), variant: query('#variant').value, paused: query('#paused').checked}); show('Preferences saved.'); }
+  const dictionary = query('#dictionary').value.split(/\r?\n/u).map(x => x.trim()).filter(Boolean);
+  if (dictionary.length > 500 || dictionary.some(word => !dictionaryWord(word))) { show('Use one word per line, up to 500 words of at most 64 characters.'); return; }
+  try { await command('save-settings', {model: query('#model').value.trim(), variant: query('#variant').value, paused: query('#paused').checked, automatic: query('#automatic').checked, dictionary}); show('Preferences saved.'); }
   catch (error) { show(messageFor(errorCode(error))); }
 });
 query('#connection').addEventListener('click', async () => {

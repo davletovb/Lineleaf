@@ -1,7 +1,7 @@
 # Lineleaf — Implementation Tracker
 
 Established: 2026-10-01  
-Status: A foundation merged; B-01 through B-05 selection prototype implemented and tested. B-01/B-04/B-05 meet scoped acceptance; live/device/provider gates remain open.
+Status: A/B slices merged; C-01 through C-05 inline development slice implemented; validation in progress. Live/device/provider and real-editor gates remain open.
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
@@ -15,10 +15,10 @@ PR #2 review follow-up at `0a9d01615a42e560445f3d2330f47c58776972a0` preserves d
 
 - Planned implementation items: **21**
 - DONE: **5**
-- IMPLEMENTED — VERIFY: **5**
+- IMPLEMENTED — VERIFY: **10**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
-- TODO: **11**
+- TODO: **6**
 
 Repository setup is recorded separately below and is not counted as product implementation.
 
@@ -60,11 +60,11 @@ A staged decision can have separate dependency gates only when the decision log 
 | B-03 | Implement selection proofreading/rewriting | Accepted A-03 schema/fixture slice, B-02; live acceptance still gated | Selected text yields a bounded preview; unchanged text is replaced only through a supported adapter | IMPLEMENTED — VERIFY | Codex | [Selection prototype and CI](../evidence/selection-prototype-ci.md): explicit proofreading/four rewrite modes, bounded previews pass; real-account writing/quality remains |
 | B-04 | Validate candidates and derive edit positions | B-03 prototype slice | Malformed output, repeated phrases, overlapping edits, Unicode, and changed revisions are handled safely | DONE | Codex | [Linux/macOS CI](../evidence/selection-prototype-ci.md): bounded strict JSON, exact contextual matches, duplicate/ambiguous/overlap refusal, UTF-16/graphemes, stale/ABA checks pass |
 | B-05 | Implement accept, dismiss, and undo | A-04, B-04 validated editing slice | Accepting an edit preserves the tested editor's state; user can dismiss and undo without losing other typing | DONE | Codex | [Linux/macOS CI](../evidence/selection-prototype-ci.md): scoped editor/panel accept/dismiss/native undo, caret/formatting, failed-edit restoration and unrelated-field undo guards pass; real-site validation remains D-01 |
-| C-01 | Add automatic paragraph checking | B-04 | Pause-based checks respect composition, change detection, request caps, coalescing, and cancellation | TODO | — | — |
-| C-02 | Add inline underlines and cards | B-05, C-01 | Suggestions track text and scrolling; controls work by keyboard and screen reader | TODO | — | — |
-| C-03 | Add correctness/style categories and explanations | C-02 | Optional style changes are clearly labeled; explanations match their corrections | TODO | — | — |
-| C-04 | Add dictionary, language variant, and pause controls | C-02 | Preferences affect checks consistently and can be reset | TODO | — | — |
-| C-05 | Complete privacy and failure flows | B-02, C-01 | No processing on disabled sites/excluded fields; provider disclosure and useful error states are present | TODO | — | — |
+| C-01 | Add automatic paragraph checking | B-04 | Pause-based checks respect composition, change detection, request caps, coalescing, and cancellation | IMPLEMENTED — VERIFY | Codex | [Inline prototype](../implementation/inline-mvp.md); CI acceptance pending; live/device and human screen-reader gates remain open |
+| C-02 | Add inline underlines and cards | B-05, C-01 | Suggestions track text and scrolling; controls work by keyboard and screen reader | IMPLEMENTED — VERIFY | Codex | [Inline prototype](../implementation/inline-mvp.md); CI acceptance pending; live/device and human screen-reader gates remain open |
+| C-03 | Add correctness/style categories and explanations | C-02 | Optional style changes are clearly labeled; explanations match their corrections | IMPLEMENTED — VERIFY | Codex | [Inline prototype](../implementation/inline-mvp.md); CI acceptance pending; live/device and human screen-reader gates remain open |
+| C-04 | Add dictionary, language variant, and pause controls | C-02 | Preferences affect checks consistently and can be reset | IMPLEMENTED — VERIFY | Codex | [Inline prototype](../implementation/inline-mvp.md); CI acceptance pending; live/device and human screen-reader gates remain open |
+| C-05 | Complete privacy and failure flows | B-02, C-01 | No processing on disabled sites/excluded fields; provider disclosure and useful error states are present | IMPLEMENTED — VERIFY | Codex | [Inline prototype](../implementation/inline-mvp.md); CI acceptance pending; live/device and human screen-reader gates remain open |
 | D-01 | Validate priority real-world editors | C-05 | Publish a tested matrix for Gmail compose, GitHub comments, LinkedIn posts, and Slack web; unsupported surfaces use fallback | TODO | — | — |
 | D-02 | Handle dynamic fields and geometry | D-01 | SPA navigation, resizing, scrolling, permitted frames, and supported open shadow roots do not misapply edits | TODO | — | — |
 | D-03 | Investigate Google Docs and complex editors | D-01 | Produce a separate feasibility result; do not advertise support without a working tested adapter | TODO | — | — |
@@ -74,7 +74,7 @@ A staged decision can have separate dependency gates only when the decision log 
 
 ## First development slice
 
-The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C–E items stay TODO.
+The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C development follows the owner’s subsequent C-01–C-05 instruction; D/E items stay TODO.
 
 Inline automation follows safe replacement, validated provider behavior, and explicit selection actions.
 
@@ -99,3 +99,4 @@ The A/B slices now establish development tools, extension source, and CI packagi
 | 2026-10-01 | Use native MV3 ES modules, Node 24/Python 3.12 development tools, and Playwright 1.62.1 | [A-05 decision](../architecture/mvp-scope-and-toolchain.md); no user Node runtime |
 | 2026-10-01 | Initial split A-05 acceptance approved toolchain/editor boundaries; final provider/latency/install freeze remains A-02/A-03 gated | [A-01 audited contract](../investigations/seatline-api-audit.md) and [A-04 tested surfaces](../investigations/editor-compatibility.md). The initial planning-only B-01 restriction is superseded by the next decision. |
 | 2026-10-01 | Owner explicitly authorizes B-01–B-05 development now using accepted investigation slices | Use A-01/A-04 evidence, fifteen A-02 native/schema/cancel checks, A-03 fixture/source validation and A-05 toolchain for an explicit-request prototype. This permits implementation, not live-provider/device acceptance, automatic checking, or beta release. |
+| 2026-10-01 | Owner explicitly authorizes C-01–C-05 implementation as one development slice | Use merged B-04/B-05 validation and B-02 transport evidence. Automatic checks require a new explicit opt-in, remain off by default, use 1.5-second idle debounce and a persistent shared ten-second/six-per-minute cap. This authorizes implementation while live latency, real-account, device, and real-editor acceptance stay open. |

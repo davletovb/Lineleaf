@@ -11,6 +11,7 @@
 | [Editor compatibility](investigations/editor-compatibility.md) | A-04 verified mutation/undo surfaces and copy fallback boundaries |
 | [MVP scope and toolchain](architecture/mvp-scope-and-toolchain.md) | A-05 conservative scope, development commands, and unresolved decisions |
 | [Selection prototype](implementation/selection-mvp.md) | B-01–B-05 build/load instructions, explicit writing flow, validation, and acceptance limits |
+| [Inline prototype](implementation/inline-mvp.md) | C-01–C-05 opt-in automatic checking, accessible review controls, preferences, privacy, and verification boundaries |
 
 The product is named **Lineleaf**. The preservation principle is that the user's intent, authorship, and control remain theirs, including when they deliberately request a different tone.
 

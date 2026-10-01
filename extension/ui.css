@@ -11,3 +11,5 @@ input[type=text], select { width: 100%; padding: 10px; border: 1px solid #ccd9c5
 .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; } #status { min-height: 21px; overflow-wrap: anywhere; } a { color: #285c3f; }
 ul { padding-left: 20px; } li { overflow-wrap: anywhere; margin: 10px 0; } li button { margin-left: 10px; padding: 4px 8px; }
 code { overflow-wrap: anywhere; font-size: 12px; } .box { background: #eef4e8; border-radius: 12px; padding: 14px; margin-top: 18px; }
+
+textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid #cad7cc; border-radius: 9px; }

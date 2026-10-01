@@ -16,19 +16,19 @@ export async function waitFor(predicate) {
   const until = Date.now() + 3000;
   while (!predicate()) { if (Date.now() > until) throw new Error('Timed out waiting for fixture'); await new Promise(resolve => setTimeout(resolve, 5)); }
 }
-export function fakeChrome({sites = ['https://writing.test'], state = READY, hang = false} = {}) {
+export function fakeChrome({sites = ['https://writing.test'], state = READY, hang = false, automatic = false, dictionary = [], answer = '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'} = {}) {
   const calls = [], ports = [], grants = new Set(sites.map(s => `${new URL(s).protocol}//${new URL(s).hostname}/*`));
-  let data = {preferences: {model: '', variant: 'US', paused: false, sites}};
+  let data = {preferences: {model: '', variant: 'US', paused: false, automatic, dictionary, sites}}, sessionData = {};
   const api = {
-    runtime: {id: 'lnbkadelggojehiapgnhonicnfonobal', onConnect: new Event(), onMessage: new Event(), connectNative() {
+    runtime: {id: 'lnbkadelggojehiapgnhonicnfonobal', onConnect: new Event(), onMessage: new Event(), async openOptionsPage() { calls.push({openedSettings: true}); }, connectNative() {
       const port = fakeNative((m, p) => {
         calls.push(m);
         if (m.method === 'status') { p.reply(m.id, {type: 'status', status: state}); p.reply(m.id, {type: 'completed'}); }
-        else if (m.method === 'send' && !hang) { p.reply(m.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'}); p.reply(m.id, {type: 'completed'}); }
+        else if (m.method === 'send' && !hang) { p.reply(m.id, {type: 'delta', text: answer}); p.reply(m.id, {type: 'completed'}); }
         else if (m.method === 'cancel') { p.reply(m.target, {type: 'stopped'}); p.reply(m.id, {type: 'completed'}); }
       }); ports.push(port); return port;
     }},
-    storage: {onChanged: new Event(), local: {
+    storage: {onChanged: new Event(), session: {async get() { return structuredClone(sessionData); }, async set(next) { sessionData = {...sessionData, ...structuredClone(next)}; }}, local: {
       async get() { return structuredClone(data); }, async setAccessLevel(level) { calls.push({accessLevel: level}); },
       async set(next) { data = {...data, ...structuredClone(next)}; api.storage.onChanged.emit({}, 'local'); },
       async clear() { data = {}; api.storage.onChanged.emit({}, 'local'); }
@@ -46,5 +46,5 @@ export function fakeChrome({sites = ['https://writing.test'], state = READY, han
     api.runtime.onConnect.emit(port); return port;
   }
   const rpc = (type, payload = null, from = {id: api.runtime.id, url: `chrome-extension://${api.runtime.id}/options.html`}) => new Promise(resolve => api.runtime.onMessage.emit({type, payload}, from, resolve));
-  return {api, calls, ports, connect, rpc, sender, get data() { return data; }};
+  return {api, calls, ports, connect, rpc, sender, state, get data() { return data; }, get sessionData() { return sessionData; }, set answer(value) { answer = value; }, set hold(value) { hang = value; }};
 }

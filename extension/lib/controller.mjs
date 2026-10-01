@@ -1,8 +1,8 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES} from './policy.mjs';
+import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTO_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 
-export function installController(api) {
+export function installController(api, {now = Date.now} = {}) {
   let active = null, diagnostic = false, backoffUntil = 0;
   const peers = new Set();
   const read = async () => preferences((await api.storage.local.get('preferences')).preferences);
@@ -11,54 +11,74 @@ export function installController(api) {
     port.onDisconnect.addListener(() => { void api.runtime.lastError; });
     return port;
   });
-  const initialized = api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
+  const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get('providerBackoff')])
+    .then(([, saved]) => { if (Number.isFinite(saved.providerBackoff) && saved.providerBackoff > now()) backoffUntil = Math.min(saved.providerBackoff, now() + 60000); });
   const ui = sender => sender.id === api.runtime.id && !sender.incognito && !sender.tab?.incognito
     && [`chrome-extension://${api.runtime.id}/popup.html`, `chrome-extension://${api.runtime.id}/options.html`].includes(sender.url);
   const send = (port, message) => { try { port.postMessage(message); } catch { /* document closed */ } };
-  async function eligible(sender) {
+  async function eligible(sender, allowPaused = false) {
     if (sender.id !== api.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0
         || sender.tab.incognito || !sender.documentId) throw new LineleafError('SITE_DISABLED');
     const origin = originOf(sender.url), current = await api.tabs.get(sender.tab.id);
     if (!origin || originOf(current.url) !== origin) throw new LineleafError('SITE_DISABLED');
     const settings = await read();
-    if (settings.paused) throw new LineleafError('PAUSED');
-    if (!allowed(settings, origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
+    if (settings.paused && !allowPaused) throw new LineleafError('PAUSED');
+    if (!settings.sites.includes(origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
     return {settings, origin};
   }
   function cancelPeer(peer) { peer.abort?.abort(); }
+  const waiting = (code, retryAfterMs) => Object.assign(new LineleafError(code), {retryAfterMs, local: true});
+  async function automaticBudget() {
+    const stored = (await api.storage.session.get('automaticBudget')).automaticBudget;
+    const time = now(), attempts = Array.isArray(stored) ? stored.filter(x => Number.isFinite(x) && x > time - 60000 && x <= time + 60000).slice(-6) : [];
+    const delay = Math.max(0, attempts.length ? attempts.at(-1) + AUTO_INTERVAL - time : 0, attempts.length >= 6 ? attempts[0] + 60000 - time : 0);
+    if (delay > 0) throw waiting('AUTO_WAIT', Math.min(delay, 60000));
+    await api.storage.session.set({automaticBudget: [...attempts, time]});
+  }
   async function writing(peer, request) {
     if (peer.running) { send(peer.port, {type: 'error', id: request?.id, code: 'BUSY'}); return; }
-    if (!exactKeys(request, ['type', 'id', 'text', 'mode']) || request.type !== 'start'
+    const automatic = request?.kind === 'automatic';
+    if (!(exactKeys(request, ['type', 'id', 'text', 'mode']) || (exactKeys(request, ['type', 'id', 'text', 'mode', 'kind']) && ['automatic', 'manual'].includes(request.kind))) || request.type !== 'start'
         || typeof request.id !== 'string' || !/^[a-f0-9-]{36}$/.test(request.id) || !validText(request.text) || !MODES.includes(request.mode)) {
       send(peer.port, {type: 'error', id: request?.id, code: 'INVALID_REQUEST'}); return;
     }
-    peer.running = true; peer.abort = new AbortController(); const signal = peer.abort.signal;
+    if (automatic && request.mode !== 'proofread') { send(peer.port, {type: 'error', id: request.id, code: 'INVALID_REQUEST'}); return; }
+    peer.running = true; peer.automatic = automatic; peer.done = new Promise(resolve => { peer.finish = resolve; });
+    peer.abort = new AbortController(); const signal = peer.abort.signal;
     let connection;
     try {
       await initialized; const {settings} = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
+      if (automatic && !settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
+      if (!automatic && active?.automatic) { const previous = active; cancelPeer(previous); await previous.done; await eligible(peer.sender); }
       if (active || diagnostic) throw new LineleafError('BUSY');
-      if (Date.now() < backoffUntil) throw new LineleafError('PROVIDER_RATE_LIMITED');
-      active = peer; connection = native(); peer.connection = connection;
+      if (now() < backoffUntil) throw waiting('PROVIDER_RATE_LIMITED', backoffUntil - now());
+      active = peer;
+      if (automatic) await automaticBudget();
+      if (signal.aborted) throw new LineleafError('CANCELLED');
+      connection = native(); peer.connection = connection;
       send(peer.port, {type: 'progress', id: request.id, stage: 'connecting'});
       requireReady(await connection.request('status', null, {signal, timeout: 15000}));
       // Permissions/settings may have changed while status was being probed.
       const latest = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
+      if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
       send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
       const answer = await connection.request('send', writingTurn(request.text, request.mode, latest.settings), {signal});
-      await eligible(peer.sender);
+      const final = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
-      const edits = candidates(answer, request.text, request.mode);
+      const edits = filterDictionary(candidates(answer, request.text, request.mode), final.settings);
       send(peer.port, {type: 'result', id: request.id, edits});
     } catch (error) {
       const code = errorCode(error);
-      if (code === 'PROVIDER_RATE_LIMITED') backoffUntil = Date.now() + 60000;
-      else if (code === 'QUEUE_FULL') backoffUntil = Date.now() + 5000;
-      send(peer.port, {type: 'error', id: request.id, code});
+      if (code === 'PROVIDER_RATE_LIMITED' && !error.local) backoffUntil = now() + 60000;
+      else if (code === 'QUEUE_FULL') backoffUntil = now() + 5000;
+      if (backoffUntil > now()) await api.storage.session.set({providerBackoff: backoffUntil}).catch(() => {});
+      send(peer.port, {type: 'error', id: request.id, code, retryAfterMs: error.retryAfterMs ?? Math.max(0, backoffUntil - now())});
     } finally {
       connection?.close(); peer.connection = null; peer.running = false; peer.abort = null;
       if (active === peer) active = null;
+      peer.finish?.();
       request.text = ''; // Drafts/results exist only for this in-memory request.
     }
   }
@@ -95,9 +115,11 @@ export function installController(api) {
     await initialized; if (!ui(sender) || !exactKeys(message, ['type', 'payload'])) throw new LineleafError('INVALID_REQUEST');
     const settings = await read(), p = message.payload;
     if (message.type === 'get-settings' && p === null) return settings;
-    if (message.type === 'save-settings' && exactKeys(p, ['model', 'variant', 'paused'])) {
+    if (message.type === 'save-settings' && (exactKeys(p, ['model', 'variant', 'paused']) || exactKeys(p, ['model', 'variant', 'paused', 'automatic', 'dictionary']))) {
       const next = preferences({...settings, ...p});
-      if (next.model !== p.model || next.variant !== p.variant || typeof p.paused !== 'boolean') throw new LineleafError('INVALID_REQUEST');
+      if (next.model !== p.model || next.variant !== p.variant || typeof p.paused !== 'boolean'
+          || (Object.hasOwn(p, 'automatic') && (typeof p.automatic !== 'boolean' || !Array.isArray(p.dictionary) || p.dictionary.length > 500
+            || p.dictionary.some(word => !dictionaryWord(word))))) throw new LineleafError('INVALID_REQUEST');
       await api.storage.local.set({preferences: next}); return next;
     }
     if (message.type === 'set-site' && exactKeys(p, ['origin', 'enabled']) && originOf(p.origin) === p.origin && typeof p.enabled === 'boolean') {
@@ -129,9 +151,28 @@ export function installController(api) {
     }
     throw new LineleafError('INVALID_REQUEST');
   }
+  let mutations = Promise.resolve();
+  const changeFromContent = (message, sender) => {
+    const operation = mutations.catch(() => {}).then(async () => {
+      const {settings} = await eligible(sender, true), p = message.payload;
+      if (message.type === 'add-word' && exactKeys(p, ['word']) && dictionaryWord(p.word)) {
+        const dictionary = [...new Set([...settings.dictionary, dictionaryWord(p.word)])];
+        if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
+        await api.storage.local.set({preferences: {...settings, dictionary}}); return true;
+      }
+      if (message.type === 'pause' && p === null) {
+        await api.storage.local.set({preferences: {...settings, paused: true}}); return true;
+      }
+      if (message.type === 'open-settings' && p === null) { await api.runtime.openOptionsPage(); return true; }
+      throw new LineleafError('INVALID_REQUEST');
+    });
+    mutations = operation; return operation;
+  };
   api.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'site-state' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
-      eligible(sender).then(() => respond({ok: true, value: {enabled: true}}), error => respond({ok: false, code: errorCode(error)}));
+      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
+    } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {
+      changeFromContent(message, sender).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else handle(message, sender).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     return true;
   });

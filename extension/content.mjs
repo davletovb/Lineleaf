@@ -3,8 +3,11 @@ import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
 import {errorCode} from './lib/policy.mjs';
 import styles from './panel.css';
+import {mountInline} from './lib/inline.mjs';
+import {categoryLabel, dictionaryWord} from './lib/policy.mjs';
 
 export function mountContent(api) {
+  mountInline(api);
   let focused = document.activeElement, host, root, capture = null, port = null, requestId, edits = [], stale = false;
   let expiry, watchdog, poll, starting = false;
   const composing = new Set();
@@ -28,12 +31,13 @@ export function mountContent(api) {
     const results = query('#results'); results.replaceChildren();
     for (const edit of edits) {
       const card = document.createElement('section'); card.className = 'card';
-      const category = document.createElement('div'); category.className = 'category'; category.textContent = edit.category === 'style' ? 'Optional style' : edit.category;
+      const category = document.createElement('div'); category.className = 'category'; category.textContent = categoryLabel(edit.category);
       const change = document.createElement('div'); change.className = 'change';
       const before = document.createElement('span'); before.className = 'before'; before.textContent = edit.before;
       const after = document.createElement('span'); after.className = 'after'; after.textContent = edit.after || '(remove)';
       change.append(before, document.createTextNode(' → '), after);
-      const explanation = document.createElement('p'); explanation.className = 'explanation'; explanation.textContent = edit.explanation;
+      const explanation = document.createElement('details'), summary = document.createElement('summary'), reason = document.createElement('p');
+      summary.textContent = 'Why this suggestion?'; reason.className = 'explanation'; reason.textContent = edit.explanation; explanation.append(summary, reason);
       const controls = document.createElement('div'); controls.className = 'row';
       const fullEdit = {...edit, start: edit.start + (capture?.offset ?? 0), end: edit.end + (capture?.offset ?? 0)};
       const canApply = !stale && capture?.adapter?.current(capture.snapshot) && validSpan(capture.snapshot.source, fullEdit);
@@ -62,6 +66,14 @@ export function mountContent(api) {
         catch { manual.value = edit.after; manual.hidden = false; manual.focus(); manual.select(); status('Copy the selected suggestion with your keyboard.'); }
       });
       controls.append(accept, dismiss, copy); card.append(category, change, explanation, controls, manual);
+      if (edit.category === 'spelling' && dictionaryWord(edit.before)) {
+        const add = document.createElement('button'); add.textContent = 'Add to dictionary';
+        add.addEventListener('click', async event => {
+          if (!event.isTrusted) return;
+          try { const result = await api.runtime.sendMessage({type: 'add-word', payload: {word: edit.before}}); if (root) status(result.ok ? 'Word added. Reopen Lineleaf for a new check.' : messageFor(result.code)); }
+          catch { if (root) status(messageFor('UNAVAILABLE')); }
+        }); controls.append(add);
+      }
       if (!canApply) { const fallback = document.createElement('p'); fallback.className = 'muted'; fallback.textContent = 'Preview and copy only for this selection.'; card.append(fallback); }
       results.append(card);
     }
@@ -81,7 +93,7 @@ export function mountContent(api) {
       node('label', 'What would you like to do?', {for: 'mode'}),
       node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
         ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
-      node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''})]),
+      node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''}), node('button', 'Pause Lineleaf', {id: 'pause'})]),
       node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('div', '', {id: 'results'})
     ]));
     document.documentElement.append(host);
@@ -94,6 +106,11 @@ export function mountContent(api) {
         : 'Undo is unavailable after other edits. Use the editor’s own undo control.');
     });
     query('#check').addEventListener('click', event => { if (event.isTrusted) void run(); });
+    query('#pause').addEventListener('click', async event => {
+      if (!event.isTrusted) return;
+      try { const result = await api.runtime.sendMessage({type: 'pause', payload: null}); if (root) { clear(); query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status(messageFor(result.ok ? 'PAUSED' : result.code)); } }
+      catch { if (root) status(messageFor('UNAVAILABLE')); }
+    });
     root.addEventListener('keydown', event => { if (event.key === 'Escape' && event.isTrusted) close(); });
   }
   async function siteState() {

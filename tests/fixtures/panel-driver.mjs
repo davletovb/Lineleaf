@@ -4,18 +4,18 @@ async function session(page) {
   if (!sessions.has(page)) sessions.set(page, await page.context().newCDPSession(page));
   return sessions.get(page);
 }
-function findPanel(node) {
-  if (node.attributes?.includes('data-lineleaf-root')) return node.shadowRoots?.find(x => x.shadowRootType === 'closed');
+function findPanel(node, attribute) {
+  if (node.attributes?.includes(attribute)) return node.shadowRoots?.find(x => x.shadowRootType === 'closed');
   for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
-    const root = findPanel(child); if (root) return root;
+    const root = findPanel(child, attribute); if (root) return root;
   }
   return null;
 }
-export function panelFor(page) {
+export function panelFor(page, {attribute = 'data-lineleaf-root'} = {}) {
   function locator(selector, name = null) {
     async function evaluate(fn, arg) {
       const cdp = await session(page), {root: document} = await cdp.send('DOM.getDocument', {depth: -1, pierce: true});
-      const root = findPanel(document); if (!root) throw new Error('Panel is unavailable');
+      const root = findPanel(document, attribute); if (!root) throw new Error('Panel is unavailable');
       const {object} = await cdp.send('DOM.resolveNode', {nodeId: root.nodeId});
       try {
         const result = await cdp.send('Runtime.callFunctionOn', {objectId: object.objectId,
@@ -27,10 +27,10 @@ export function panelFor(page) {
         return result.result.value;
       } finally { await cdp.send('Runtime.releaseObject', {objectId: object.objectId}); }
     }
-    async function waitFor(predicate = element => element && !element.hidden) {
+    async function waitFor(predicate = element => element && !element.hidden, arg) {
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
-        try { if (await evaluate(predicate)) return; } catch { /* document/panel may not exist yet */ }
+        try { if (await evaluate(predicate, arg)) return; } catch { /* document/panel may not exist yet */ }
         await new Promise(resolve => setTimeout(resolve, 25));
       }
       throw new Error(`Panel control did not become ready: ${selector} ${name ?? ''}`);
