@@ -1,3 +1,4 @@
+import {contextFor, contextCurrent, replacementAllowed, excluded, selectionFor, rangeFor, deepActive} from '../../extension/lib/editor-context.mjs';
 // A-04 investigation: deliberately small Chromium adapter, not a site integration.
 const INLINE = new Set(["SPAN", "B", "STRONG", "I", "EM", "U", "S"]);
 const UNSAFE = new WeakSet();
@@ -19,7 +20,7 @@ export function validSpan(source, edit) {
 }
 
 function supported(element) {
-  if (UNSAFE.has(element) || !element.isConnected || element.disabled || element.readOnly) return false;
+  if (UNSAFE.has(element) || !replacementAllowed(element) || !element.isConnected || element.disabled || element.readOnly) return false;
   if (element instanceof HTMLTextAreaElement) return true;
   if (element instanceof HTMLInputElement) return ["text", "search"].includes(element.type);
   if (element.getAttribute("contenteditable") !== "true" || !element.isContentEditable) return false;
@@ -56,11 +57,14 @@ function selection(element) {
   if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
     return {start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection};
   }
-  const selected = document.getSelection();
-  if (!selected.rangeCount) return null;
+  const selected = selectionFor(element);
+  if (!selected?.rangeCount) return null;
   const start = offsetOf(element, selected.anchorNode, selected.anchorOffset);
   const end = offsetOf(element, selected.focusNode, selected.focusOffset);
-  return start === null || end === null ? null : {start, end};
+  if (start !== null && end !== null) return {start, end};
+  const range = rangeFor(element);
+  if (!range || !element.contains(range.startContainer) || !element.contains(range.endContainer)) return null;
+  return {start: offsetOf(element, range.startContainer, range.startOffset), end: offsetOf(element, range.endContainer, range.endOffset)};
 }
 
 function select(element, selected) {
@@ -115,23 +119,33 @@ export class EditorAdapter {
     document.addEventListener("input", this.documentChanged, true);
     this.observer = new MutationObserver(records => { if (records.length) this.revision++; });
     this.observer.observe(element, {subtree: true, characterData: true, childList: true, attributes: true});
+    const path = contextFor(element).path;
+    this.contextChanged = records => {
+      if (records.some(record => record.type === 'attributes' || [...record.addedNodes, ...record.removedNodes].some(node => path.includes(node)))) this.revision++;
+    };
+    this.contextObserver = new MutationObserver(this.contextChanged);
+    for (const parent of path.slice(1)) this.contextObserver.observe(parent, parent.nodeType === Node.ELEMENT_NODE ? {childList: true, attributes: true,
+      attributeFilter: ['data-lineleaf-ignore', 'aria-hidden', 'contenteditable', 'class', 'sandbox', 'data-slate-editor', 'data-lexical-editor']} : {childList: true});
   }
 
-  flush() { if (this.observer.takeRecords().length) this.revision++; }
+  flush() { if (this.observer.takeRecords().length) this.revision++; this.contextChanged(this.contextObserver.takeRecords()); }
 
-  snapshot() {
+  snapshot({copy = false} = {}) {
     this.flush();
-    if (!supported(this.element) || this.composing) return null;
-    const result = Object.freeze({source: text(this.element), revision: this.revision});
+    if (this.composing || excluded(this.element) || !this.element.isConnected || this.element.disabled || this.element.readOnly || (!copy && !supported(this.element))) return null;
+    const result = Object.freeze({source: text(this.element), revision: this.revision, context: contextFor(this.element)});
     this.snapshots.add(result);
     return result;
   }
 
-  current(snapshot) {
+  currentCapture(snapshot) {
     this.flush();
     return this.snapshots.has(snapshot) && snapshot.revision === this.revision
-      && snapshot.source === text(this.element) && supported(this.element) && !this.composing;
+      && snapshot.source === text(this.element) && contextCurrent(this.element, snapshot.context)
+      && !excluded(this.element) && !this.element.disabled && !this.element.readOnly && !this.composing;
   }
+
+  current(snapshot) { return this.currentCapture(snapshot) && supported(this.element); }
 
   apply(snapshot, edit) {
     if (!snapshot || !this.current(snapshot)) return copies("stale_or_unavailable");
@@ -163,7 +177,7 @@ export class EditorAdapter {
     }
     select(element, {...oldSelection, start: transformed(oldSelection.start, edit), end: transformed(oldSelection.end, edit)});
     this.lastEdit = {before: snapshot.source, after: expected, selection: oldSelection, beforeTree,
-      revision: this.revision, documentRevision: this.documentRevision};
+      revision: this.revision, documentRevision: this.documentRevision, context: contextFor(element)};
     return {status: "applied"};
   }
 
@@ -171,7 +185,7 @@ export class EditorAdapter {
     const element = this.element;
     let stateUncertain = false;
     // A synchronous site handler may edit another field. Never pop that field's global undo entry.
-    if (text(element) !== source && document.activeElement === element
+    if (text(element) !== source && deepActive() === element
         && this.documentRevision === beforeDocumentRevision + 1) {
       try { document.execCommand("undo"); } catch { /* field-local recovery below */ }
     }
@@ -185,7 +199,7 @@ export class EditorAdapter {
       };
       reset();
       // Notify controlled state using the restored value. A site that rejects even the original is copy-only.
-      element.dispatchEvent(new InputEvent("input", {bubbles: true, inputType: "historyUndo"}));
+      element.dispatchEvent(new InputEvent("input", {bubbles: true, composed: true, inputType: "historyUndo"}));
       if (text(element) !== source || (beforeTree && !sameTree(beforeTree))) { reset(); stateUncertain = true; }
     }
     this.flush();
@@ -197,11 +211,11 @@ export class EditorAdapter {
   undo() {
     this.flush();
     const edit = this.lastEdit;
-    if (!edit || this.revision !== edit.revision || this.documentRevision !== edit.documentRevision
+    if (!edit || !contextCurrent(this.element, edit.context) || this.revision !== edit.revision || this.documentRevision !== edit.documentRevision
         || text(this.element) !== edit.after || !supported(this.element) || this.composing) return copies("undo_unavailable");
     this.element.focus({preventScroll: true});
     this.flush();
-    if (this.revision !== edit.revision || text(this.element) !== edit.after) return copies("changed_on_focus");
+    if (!contextCurrent(this.element, edit.context) || this.revision !== edit.revision || text(this.element) !== edit.after) return copies("changed_on_focus");
     this.lastEdit = null;
     let succeeded = false;
     try { succeeded = document.execCommand("undo"); } catch { /* refuse below */ }
@@ -215,6 +229,7 @@ export class EditorAdapter {
 
   dispose() {
     this.observer.disconnect();
+    this.contextObserver.disconnect();
     this.element.removeEventListener("input", this.changed);
     this.element.removeEventListener("compositionstart", this.compositionStart);
     this.element.removeEventListener("compositionend", this.compositionEnd);

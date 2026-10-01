@@ -1,6 +1,7 @@
+import {deepActive, eventElement, navigationToken, observeNavigation, embeddingAllowed} from './editor-context.mjs';
 import {EditorAdapter, validSpan} from '../../prototypes/editor/editor-adapter.mjs';
 import {captureParagraph, editorOf, excluded} from './selection.mjs';
-import {suggestionRects} from './geometry.mjs';
+import {suggestionRects, visibleEditorRect} from './geometry.mjs';
 import {AUTO_IDLE, AUTO_INTERVAL, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import styles from '../inline.css';
@@ -71,7 +72,8 @@ class InlineView {
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
   hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); }
   draw() {
-    const field = this.field, r = field.getBoundingClientRect(); this.lines.replaceChildren();
+    const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
+    this.layer.hidden = !r; if (!r) { this.mirror.textContent = ''; return; }
     this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth))}px`;
     this.badge.style.top = `${Math.max(8, Math.min(innerHeight - 30, r.bottom + 3))}px`;
     if (!this.card.hidden) {
@@ -96,7 +98,7 @@ export function mountInline(api) {
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
   const compositions = new WeakSet();
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
-  const active = () => document.activeElement === field;
+  const active = () => deepActive() === field;
   const stop = () => {
     generation++; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
@@ -110,11 +112,11 @@ export function mountInline(api) {
     const ticket = ++epoch, result = await rpc('site-state'); if (ticket !== epoch) return;
     policy = result.ok ? result.value : null;
     if (!permitted()) { drop(); return; }
-    choose(document.activeElement);
+    choose(deepActive());
   }
   function eligibleDOM() {
-    return field?.isConnected && !excluded(field) && !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code')
-      && !field.disabled && !field.readOnly && field.getClientRects().length > 0 && getComputedStyle(field).visibility === 'visible';
+    return field?.isConnected && embeddingAllowed() && !excluded(field) && !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code')
+      && !field.disabled && !field.readOnly && visibleEditorRect(field) !== null;
   }
   function choose(target) {
     if (applying || target === view?.host) return;
@@ -198,25 +200,30 @@ export function mountInline(api) {
     update(result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
   }
   const changed = event => {
-    if (applying || !field || !(event.target === field || field.contains(event.target))) return;
+    const target = eventElement(event);
+    if (applying || !field || !(target === field || field.contains(target))) return;
     stop(); capture = null; edits = []; undo = false; copyOnly = false; dirty = event.isTrusted === true;
     try { pendingKey = dirty ? keyFor(captureParagraph(field, adapter)) : null; } catch { pendingKey = null; }
     update('Text changed. Checking after a pause.'); queue();
   };
-  document.addEventListener('focusin', event => { if (event.target !== view?.host) choose(event.target); }, true);
-  document.addEventListener('input', event => { if (!field) choose(event.target); changed(event); }, true);
-  document.addEventListener('compositionstart', event => { compositions.add(editorOf(event.target) ?? event.target); if (field && (event.target === field || field.contains(event.target))) { composing = true; changed(event); } }, true);
-  document.addEventListener('compositionend', event => { compositions.delete(editorOf(event.target) ?? event.target); if (field && (event.target === field || field.contains(event.target))) { composing = false; changed(event); } }, true);
+  document.addEventListener('focusin', event => { const target = eventElement(event); if (target !== view?.host) choose(target); }, true);
+  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); changed(event); }, true);
+  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; changed(event); } }, true);
+  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; changed(event); } }, true);
   document.addEventListener('keydown', trusted(event => {
     if (event.altKey && event.shiftKey && event.code === 'KeyL' && view) { event.preventDefault(); view.open(); }
   }), true);
   const paint = () => { if (!frame) frame = requestAnimationFrame(() => { frame = null; view?.draw(); }); };
   document.addEventListener('scroll', paint, {capture: true, passive: true}); window.addEventListener('resize', paint);
+  let route = navigationToken();
+  const navigated = () => { const next = navigationToken(); if (next !== route) { route = next; epoch++; drop(); void refresh(); } };
+  observeNavigation(navigated);
+  window.visualViewport?.addEventListener('resize', paint); window.visualViewport?.addEventListener('scroll', paint);
   const poll = setInterval(() => {
-    if (!field || applying) return;
+    navigated(); if (!field || applying) return;
     if (!permitted() || !eligibleDOM() || !view?.host.isConnected) { drop(); return; }
     if (capture && !adapter.current(capture.snapshot)) { changed({target: field}); }
-    const r = field.getBoundingClientRect(), position = [r.x, r.y, r.width, r.height, field.scrollTop, field.scrollLeft].join(':');
+    const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft].join(':');
     if (position !== geometry) { geometry = position; paint(); }
   }, 250);
   api.runtime.onMessage.addListener((message, sender) => {

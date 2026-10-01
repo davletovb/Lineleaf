@@ -1,7 +1,7 @@
 # Lineleaf — Implementation Tracker
 
 Established: 2026-10-01  
-Status: A/B slices merged; C-01 through C-05 inline development slice implemented in PR #3 with scoped CI acceptance. Live/device/provider and real-editor gates remain open.
+Status: A/B/C slices merged; D-01 through D-03 editor boundaries and feasibility implemented in PR #4. Live/device/provider and real-site acceptance gates remain open.
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
@@ -18,11 +18,11 @@ PR #3 review follow-up at `e18ebb67a8ea8daf337c3b8c1aae400172161636` passes **12
 ## Progress
 
 - Planned implementation items: **21**
-- DONE: **7**
-- IMPLEMENTED — VERIFY: **8**
+- DONE: **8**
+- IMPLEMENTED — VERIFY: **10**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
-- TODO: **6**
+- TODO: **3**
 
 Repository setup is recorded separately below and is not counted as product implementation.
 
@@ -69,16 +69,16 @@ A staged decision can have separate dependency gates only when the decision log 
 | C-03 | Add correctness/style categories and explanations | C-02 | Optional style changes are clearly labeled; explanations match their corrections | IMPLEMENTED — VERIFY | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies correctness vs optional-style labels, literal bounded explanations associated with their validated candidates; explanation accuracy is not yet verified; requires live evaluation in E-01 |
 | C-04 | Add dictionary, language variant, and pause controls | C-02 | Preferences affect checks consistently and can be reset | DONE | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies opt-in/dictionary persistence, US/UK prompt, spelling-only filtering, scoped pause, serialized mutations, reset and revoked access; review follow-up CI verifies stale options, dictionary deltas, and conflict refusal |
 | C-05 | Complete privacy and failure flows | B-02, C-01 | No processing on disabled sites/excluded fields; provider disclosure and useful error states are present | DONE | Codex | [CI/evidence](../evidence/inline-prototype-ci.md) verifies disabled/excluded/synthetic-event refusal, remote-provider disclosure, fixed diagnostics, cancellation and retry bounds; authenticated setup remains B-02/B-03 |
-| D-01 | Validate priority real-world editors | C-05 | Publish a tested matrix for Gmail compose, GitHub comments, LinkedIn posts, and Slack web; unsupported surfaces use fallback | TODO | — | — |
-| D-02 | Handle dynamic fields and geometry | D-01 | SPA navigation, resizing, scrolling, permitted frames, and supported open shadow roots do not misapply edits | TODO | — | — |
-| D-03 | Investigate Google Docs and complex editors | D-01 | Produce a separate feasibility result; do not advertise support without a working tested adapter | TODO | — | — |
+| D-01 | Validate priority real-world editors | C-05 | Publish a tested matrix for Gmail compose, GitHub comments, LinkedIn posts, and Slack web; unsupported surfaces use fallback | IMPLEMENTED — VERIFY | Codex | [Priority matrix](../investigations/priority-editor-matrix.md) and [regressions/evidence](../evidence/editor-compatibility-ci.md): priority-host fallback and GitHub textarea boundaries tested on intercepted synthetic HTML; authenticated draft-only Gmail/GitHub/LinkedIn/Slack checks remain |
+| D-02 | Handle dynamic fields and geometry | D-01 | SPA navigation, resizing, scrolling, permitted frames, and supported open shadow roots do not misapply edits | IMPLEMENTED — VERIFY | Codex | [Context/geometry/frame/open-shadow evidence](../evidence/editor-compatibility-ci.md): local synthetic browser/logic regressions pass; installed matching-frame and Linux/macOS CI acceptance pending |
+| D-03 | Investigate Google Docs and complex editors | D-01 | Produce a separate feasibility result; do not advertise support without a working tested adapter | DONE | Codex | [Separate feasibility decision](../investigations/complex-editor-feasibility.md): no generic Google Docs/complex replacement claim; guarded frameworks/Docs input proxy and explicit pasted-text copy fallback verified on synthetic browser tests |
 | E-01 | Run writing-quality and regression evaluation | C-03, D-01 | Meet the product framework's beta quality gates across the validated provider configurations | TODO | — | — |
 | E-02 | Validate shared-companion coexistence | B-02, C-01 | Concurrent use with another consumer neither mixes sessions nor creates uncontrolled background traffic | TODO | — | — |
 | E-03 | Package a reviewable beta | E-01, E-02 | Install/update/uninstall and permission behavior verified on each advertised browser/OS; beta package and support matrix ready | TODO | — | — |
 
 ## First development slice
 
-The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C development follows the owner’s subsequent C-01–C-05 instruction; D/E items stay TODO.
+The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C development follows the owner’s subsequent C-01–C-05 instruction. The owner now requests D-01–D-03 as one slice; E stays TODO.
 
 Inline automation follows safe replacement, validated provider behavior, and explicit selection actions.
 
@@ -107,3 +107,4 @@ The A/B slices now establish development tools, extension source, and CI packagi
 | 2026-10-01 | Accept the tested C-01 scheduling/transport and C-02 scoped editing/keyboard/AX slices for C-03–C-05 | [CI run 36889393901](https://github.com/davletovb/Lineleaf/actions/runs/36889393901) and [package/evidence boundaries](../evidence/inline-prototype-ci.md) verify categories, preferences, and privacy/failure criteria on scoped fixtures and the installed MV3 missing-host path. C-01 live pacing/device/IME and C-02 human screen-reader/real-site acceptance remain verify; no beta or authenticated-writing claim follows. |
 | 2026-10-01 | Reopen C-03 explanation accuracy and C-04 consistent preference acceptance after review | Rendered association is not evidence that explanations match corrections. C-03 stays verify until linguistic evaluation. Stale-options saves and exact-token-only filtering are corrected with partial compare-and-save fields, dictionary deltas, expanded token filtering, and new installed/browser/controller regressions; C-04 acceptance awaits their CI evidence. |
 | 2026-10-01 | Verify C-04 scoped preference consistency after the review fixes | [CI run 36911704950](https://github.com/davletovb/Lineleaf/actions/runs/36911704950) passes two installed options-page conflict/merge regressions plus token/possessive dictionary and controller checks. C-03 explanation accuracy remains verify; human screen-reader and live quality gates remain open. |
+| 2026-10-02 | Owner explicitly authorizes D-01–D-03 as one development slice | Accept the priority-editor synthetic policy/fixture boundary for dynamic safety and feasibility work; D-01 remains verify for actual authenticated drafts. This does not promote real-site support or unblock E-01 beta quality acceptance. D-02 may be verified on its declared same-origin/open-shadow development boundaries after installed Linux/macOS CI passes. |

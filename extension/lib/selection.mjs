@@ -2,14 +2,9 @@ import {EditorAdapter} from '../../prototypes/editor/editor-adapter.mjs';
 import {boundaries} from './candidates.mjs';
 import {validText, LineleafError} from './policy.mjs';
 
-const EXCLUDED = '[data-lineleaf-ignore], [aria-hidden="true"], pre, code';
-export function excluded(element) {
-  if (!(element instanceof Element)) return true;
-  if (element.closest(EXCLUDED)) return true;
-  if (element instanceof HTMLInputElement && !['text', 'search'].includes(element.type)) return true;
-  return /(?:password|one-time-code|cc-|credit.?card|security.?code|cvc|cvv)/i.test(
-    [element.getAttribute('autocomplete'), element.getAttribute('name'), element.id].filter(Boolean).join(' '));
-}
+import {EXCLUDED, excluded, rangeFor, selectionFor, contextFor, contextCurrent, embeddingAllowed} from './editor-context.mjs';
+export {excluded};
+
 export function editorOf(element) {
   if (!(element instanceof Element)) return null;
   if (element.matches('textarea, input')) return element;
@@ -20,15 +15,16 @@ export function editorOf(element) {
   return parent ? [...parent.children].find(child => child.contains(editable) || child === editable) ?? editable : editable;
 }
 export function captureSelection(focused) {
-  const selection = document.getSelection(), active = editorOf(focused);
+  if (!embeddingAllowed()) throw new LineleafError('INVALID_REQUEST');
+  const active = editorOf(focused), range = rangeFor(focused);
   if (active && excluded(active)) throw new LineleafError('INVALID_REQUEST');
   const isInput = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
   let element = active, start, end, source;
   if (isInput) {
     if (active.disabled || active.readOnly || active.value.length > 100000) throw new LineleafError('INVALID_REQUEST');
     start = active.selectionStart; end = active.selectionEnd; source = active.value;
-  } else if (selection?.rangeCount && !selection.isCollapsed) {
-    const range = selection.getRangeAt(0), anchor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+  } else if (range) {
+    const anchor = range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
     if (!validText(range.toString())) throw new LineleafError('INVALID_REQUEST');
     element = editorOf(anchor);
     if (excluded(anchor) || (element && excluded(element)) || range.cloneContents().querySelector(EXCLUDED)) {
@@ -43,22 +39,26 @@ export function captureSelection(focused) {
     } else element = null;
     if (!element) {
       const text = range.toString(); if (!validText(text)) throw new LineleafError('INVALID_REQUEST');
-      return {text, adapter: null, snapshot: null, offset: 0, field: null};
+      const context = contextFor(anchor);
+      return {text, adapter: null, snapshot: null, offset: 0, field: null,
+        valid: () => contextCurrent(anchor, context) && !excluded(anchor) && !excluded(range.endContainer.parentElement)
+          && range.toString() === text && !range.cloneContents().querySelector(EXCLUDED)};
     }
   } else throw new LineleafError('INVALID_REQUEST');
   const text = source.slice(start, end), points = boundaries(source);
   if (!validText(text) || !points.has(start) || !points.has(end)) throw new LineleafError('INVALID_REQUEST');
-  const adapter = new EditorAdapter(element), snapshot = adapter.snapshot();
-  if (!snapshot) { adapter.dispose(); return {text, adapter: null, snapshot: null, offset: 0, field: element}; }
-  return {text, adapter, snapshot, offset: start, field: element};
+  const guard = new EditorAdapter(element), snapshot = guard.snapshot({copy: true});
+  if (!snapshot) { guard.dispose(); throw new LineleafError('INVALID_REQUEST'); }
+  return {text, adapter: guard.current(snapshot) ? guard : null, guard, snapshot, offset: start, field: element,
+    valid: () => guard.currentCapture(snapshot)};
 }
 export function captureParagraph(element, adapter) {
-  if (!element || excluded(element) || element.querySelector(EXCLUDED) || !element.isConnected
+  if (!element || !embeddingAllowed() || excluded(element) || element.querySelector(EXCLUDED) || !element.isConnected
       || element.disabled || element.readOnly || (element.value ?? element.textContent).length > 100000) throw new LineleafError('INVALID_REQUEST');
   const snapshot = adapter.snapshot(); if (!snapshot) throw new LineleafError('INVALID_REQUEST');
   let caret = element.selectionStart;
   if (!Number.isInteger(caret)) {
-    const selection = document.getSelection();
+    const selection = selectionFor(element);
     if (!selection?.focusNode || !element.contains(selection.focusNode)) throw new LineleafError('INVALID_REQUEST');
     const prefix = document.createRange(); prefix.selectNodeContents(element); prefix.setEnd(selection.focusNode, selection.focusOffset); caret = prefix.toString().length;
   }

@@ -36,7 +36,7 @@ export function fakeChrome({sites = ['https://writing.test'], state = READY, han
     permissions: {onRemoved: new Event(), async contains({origins}) { return origins.every(x => grants.has(x)); },
       async getAll() { return {origins: [...grants]}; }, async remove({origins}) { for (const o of origins) grants.delete(o); api.permissions.onRemoved.emit({origins}); return true; }},
     tabs: {onUpdated: new Event(), onRemoved: new Event(), async get(id) { return {id, url: 'https://writing.test/compose'}; }, async query() { return []; }, async sendMessage() {}},
-    scripting: {async unregisterContentScripts() {}, async registerContentScripts() {}, async executeScript() {}},
+    scripting: {async unregisterContentScripts() {}, async registerContentScripts() {}, async executeScript({target}) { return target.documentIds ? target.documentIds.map(documentId => ({documentId, frameId: 0, result: {url: 'https://writing.test/compose', topOrigin: 'https://writing.test'}})) : [{documentId: 'document-one', frameId: 0, result: true}]; }},
   };
   const sender = {id: api.runtime.id, tab: {id: 7, incognito: false}, frameId: 0, documentId: 'document-one', url: 'https://writing.test/compose'};
   function connect(overrides = {}) {

@@ -92,6 +92,42 @@ test('installed automatic flow stays idle on focus, reports missing host after t
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
   assert.equal(await options.locator('#automatic').isChecked(), false); assert.equal(await options.locator('#dictionary').inputValue(), '');
 });
+test('installed matching frames target the focused document; opaque and cross-origin frames are refused', async () => {
+  const management = await context.newPage(); await management.goto('chrome://extensions/');
+  await management.evaluate(async id => chrome.developerPrivate.addHostPermission(id, 'https://writing.test/*'), id); await management.close();
+  await options.evaluate(() => { window.granted = null; }); await options.getByRole('button', {name: 'Grant fixture site'}).click();
+  await options.waitForFunction(() => window.granted === true);
+  assert.equal((await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: true}}))).ok, true);
+  await options.waitForFunction(async () => (await chrome.scripting.getRegisteredContentScripts()).some(x => x.id === 'lineleaf-sites' && x.allFrames));
+  await context.route('https://writing.test/frames', route => route.fulfill({contentType: 'text/html', body: '<!doctype html><title>Synthetic frames</title><textarea id="top">Unrelated top draft.</textarea><iframe id="child" name="child" src="/frame-draft"></iframe><iframe id="opaque" sandbox="allow-scripts" src="/frame-draft"></iframe><iframe id="blank" srcdoc="<textarea>Unrelated opaque draft.</textarea>"></iframe><iframe id="cross" src="https://other.test/frame"></iframe>'}));
+  await context.route('https://writing.test/frame-draft', route => route.fulfill({contentType: 'text/html', body: '<!doctype html><title>Synthetic frame draft</title><textarea id="draft">He go to work.</textarea>'}));
+  await context.route('https://other.test/frame', route => route.fulfill({contentType: 'text/html', body: '<!doctype html><title>Unrelated origin</title><textarea id="draft">Unrelated private draft.</textarea>'}));
+  const writing = await context.newPage(); await writing.goto('https://writing.test/frames');
+  const child = writing.frame({name: 'child'});
+  await writing.frameLocator('#child').locator('#draft').evaluate(el => { el.focus(); el.setSelectionRange(0, el.value.length); });
+  const open = () => options.evaluate(async () => {
+    const [tab] = await chrome.tabs.query({url: 'https://writing.test/frames'});
+    return chrome.runtime.sendMessage({type: 'open-panel', payload: {tabId: tab.id}});
+  });
+  assert.equal((await open()).ok, true);
+  await child.waitForSelector('[data-lineleaf-root]', {state: 'attached'});
+  assert.equal(await writing.locator('[data-lineleaf-root]').count(), 0);
+  const framePanel = panelFor(writing); assert.equal(await framePanel.locator('#selected').textContent(), 'He go to work.');
+  assert.equal(await writing.frameLocator('#child').locator('#draft').inputValue(), 'He go to work.');
+  // A sandboxed document may receive a URL-matching script but eligibility refuses its opaque top access.
+  await writing.frameLocator('#opaque').locator('#draft').evaluate(el => { el.focus(); el.setSelectionRange(0, el.value.length); });
+  assert.equal((await open()).ok, false);
+  await writing.frameLocator('#blank').locator('textarea').focus(); assert.equal((await open()).ok, false);
+  await writing.frameLocator('#cross').locator('#draft').focus(); assert.equal((await open()).ok, false);
+  // Revocation broadcasts to the already-open child document; any retained preview loses eligibility.
+  await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: false}}));
+  await framePanel.locator('#check').waitFor(el => el.disabled);
+  assert.equal(await framePanel.locator('#selected').textContent(), '');
+  const state = await worker.evaluate(async () => chrome.permissions.contains({origins: ['https://writing.test/*']})); assert.equal(state, false);
+  await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
+  await writing.close();
+});
 test('two options pages preserve newer pause/consent/dictionary and reject same-field conflicts', async () => {
   await options.reload(); await options.waitForFunction(() => document.querySelector('#authorize').textContent.includes('seatline-companion'));
   const other = await context.newPage(); await other.goto(`chrome-extension://${id}/options.html`);
