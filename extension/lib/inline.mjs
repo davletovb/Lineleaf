@@ -183,21 +183,24 @@ export function mountInline(api) {
   function accept(edit) {
     if (!capture || !eligibleDOM()) return;
     stop(); applying = true;
+    const selected = capture, selectedView = view;
     let result;
     try { result = capture.adapter.apply(capture.snapshot, {...edit, start: capture.offset + edit.start, end: capture.offset + edit.end}); }
     finally { applying = false; }
+    if (capture !== selected || view !== selectedView) return;
     undo = result?.status === 'applied'; edits = undo ? [] : [edit]; copyOnly = !undo;
-    update(undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
+    update(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
     if (!undo) { blocked = true; view.open(); return; }
     capture = null; view.capture = null;
     try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; }
     queue(); view.open();
   }
   function undoEdit() {
-    applying = true; let result;
+    applying = true; let result; const selectedView = view;
     try { result = adapter?.undo(); } finally { applying = false; }
+    if (view !== selectedView) return;
     undo = false; edits = []; capture = null; lastKey = null;
-    update(result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
+    update(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
   }
   const changed = event => {
     const target = eventElement(event);

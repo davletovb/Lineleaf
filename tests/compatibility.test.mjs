@@ -119,6 +119,31 @@ test('reparent/remove-and-reinsert ABA refuses acceptance before the polling tim
   await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
   assert.match(await panel.locator('#status').textContent(), /replacement|changed/);
 });
+test('a site switching drafts during insertion, undo or failed-edit recovery never receives restored old text', async () => {
+  for (const operation of ['insert', 'undo', 'recovery']) {
+    await load(); await open(); await check();
+    if (operation === 'undo') await panel.button('Accept').click();
+    await page.locator('#textarea').evaluate((el, operation) => {
+      el.addEventListener('input', event => {
+        if (operation === 'recovery' && event.inputType === 'insertText') { el.value = 'Rejected insertion.'; return; }
+        if (event.inputType === (operation === 'insert' ? 'insertText' : 'historyUndo')) {
+          history.pushState({}, '', '/new-draft?automatic'); el.value = 'Another draft. Do not restore old text here.';
+        }
+      });
+    }, operation);
+    await panel.button(operation === 'undo' ? 'Undo last edit' : 'Accept').click();
+    assert.equal(await page.locator('#textarea').inputValue(), 'Another draft. Do not restore old text here.');
+    assert.equal(await page.locator('[data-lineleaf-root]').count(), 0);
+  }
+});
+test('inline acceptance survives a site navigation handler without restoring or mutating the next draft', async () => {
+  await load(); await automatic(); await page.keyboard.press('Alt+Shift+l');
+  await page.locator('#textarea').evaluate(el => el.addEventListener('input', event => {
+    if (event.inputType === 'insertText') { history.pushState({}, '', '/new-draft?automatic'); el.value = 'Another draft. Keep this text.'; }
+  }));
+  await inline.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'Another draft. Keep this text.');
+  assert.equal((await sends()).length, 1);
+});
 test('ancestor exclusion changed after capture prevents direct edits and automatic work', async () => {
   await load(); await page.locator('#textarea').evaluate(el => { const wrapper = document.createElement('section'); el.before(wrapper); wrapper.append(el); });
   await open(); await check(); await page.locator('#textarea').evaluate(el => el.parentElement.setAttribute('data-lineleaf-ignore', ''));

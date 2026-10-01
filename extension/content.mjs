@@ -45,14 +45,16 @@ export function mountContent(api) {
       const accept = document.createElement('button'); accept.textContent = 'Accept'; accept.className = 'primary'; accept.disabled = !canApply;
       accept.addEventListener('click', event => {
         if (!event.isTrusted || !capture) return;
+        const selected = capture, openedRoot = root;
         const result = capture.adapter?.apply(capture.snapshot, fullEdit);
+        if (root !== openedRoot || capture !== selected) return;
         if (result?.status === 'applied') {
           stop(); edits = []; stale = true; query('#results').replaceChildren();
           query('#selected').textContent = ''; query('#check').disabled = true;
           query('#undo').hidden = false; status('Applied. You can undo this edit. Select text and reopen Lineleaf for another check.');
         } else {
           stale = true;
-          status(result?.restored ? `Original text restored. This editor rejected the change; use Copy.${result.stateUncertain ? ' Its internal state could not be verified.' : ''}`
+          status(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : result?.restored ? `Original text restored. This editor rejected the change; use Copy.${result.stateUncertain ? ' Its internal state could not be verified.' : ''}`
             : 'Safe replacement is unavailable. Copy the suggestion below.');
           render();
         }
@@ -104,8 +106,10 @@ export function mountContent(api) {
     query('#close').addEventListener('click', event => { if (event.isTrusted) close(); });
     query('#cancel').addEventListener('click', event => { if (event.isTrusted) { stop(); status(messageFor('CANCELLED')); } });
     query('#undo').addEventListener('click', event => {
-      if (!event.isTrusted) return; const result = capture?.adapter?.undo(); query('#undo').hidden = true;
-      status(result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored
+      if (!event.isTrusted) return; const selected = capture, openedRoot = root, result = capture?.adapter?.undo();
+      if (root !== openedRoot || capture !== selected) return;
+      query('#undo').hidden = true;
+      status(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored
         ? 'Original text restored. This editor could not confirm native undo; further edits use copy only.'
         : 'Undo is unavailable after other edits. Use the editor’s own undo control.');
     });

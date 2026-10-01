@@ -3,6 +3,10 @@ import {contextFor, contextCurrent, replacementAllowed, excluded, selectionFor, 
 const INLINE = new Set(["SPAN", "B", "STRONG", "I", "EM", "U", "S"]);
 const UNSAFE = new WeakSet();
 const copies = reason => ({status: "copy", reason});
+const contextFailure = element => {
+  UNSAFE.add(element);
+  return {...copies('context_changed_during_edit'), restored: false, stateUncertain: true, contextChanged: true};
+};
 const text = element => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
   ? element.value : element.textContent;
 
@@ -170,9 +174,10 @@ export class EditorAdapter {
     let succeeded = false;
     try { succeeded = document.execCommand("insertText", false, edit.after); } catch { /* refuse below */ }
     this.flush();
+    if (!contextCurrent(element, snapshot.context)) { this.lastEdit = null; return contextFailure(element); }
     if (!succeeded || text(element) !== expected || !supported(element) || (!input && !sameTree(beforeTree, element, true, replacement))) {
       this.lastEdit = null;
-      const recovered = this.restore(snapshot.source, oldSelection, beforeTree, beforeDocumentRevision);
+      const recovered = this.restore(snapshot.source, oldSelection, beforeTree, beforeDocumentRevision, snapshot.context);
       return {...copies("native_edit_not_confirmed"), ...recovered};
     }
     select(element, {...oldSelection, start: transformed(oldSelection.start, edit), end: transformed(oldSelection.end, edit)});
@@ -181,14 +186,16 @@ export class EditorAdapter {
     return {status: "applied"};
   }
 
-  restore(source, oldSelection, beforeTree, beforeDocumentRevision) {
+  restore(source, oldSelection, beforeTree, beforeDocumentRevision, context) {
     const element = this.element;
+    if (!contextCurrent(element, context)) return contextFailure(element);
     let stateUncertain = false;
     // A synchronous site handler may edit another field. Never pop that field's global undo entry.
     if (text(element) !== source && deepActive() === element
         && this.documentRevision === beforeDocumentRevision + 1) {
       try { document.execCommand("undo"); } catch { /* field-local recovery below */ }
     }
+    if (!contextCurrent(element, context)) return contextFailure(element);
     if (text(element) !== source || (beforeTree && !sameTree(beforeTree))) {
       const input = element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
       const reset = () => {
@@ -200,6 +207,7 @@ export class EditorAdapter {
       reset();
       // Notify controlled state using the restored value. A site that rejects even the original is copy-only.
       element.dispatchEvent(new InputEvent("input", {bubbles: true, composed: true, inputType: "historyUndo"}));
+      if (!contextCurrent(element, context)) return contextFailure(element);
       if (text(element) !== source || (beforeTree && !sameTree(beforeTree))) { reset(); stateUncertain = true; }
     }
     this.flush();
@@ -220,8 +228,9 @@ export class EditorAdapter {
     let succeeded = false;
     try { succeeded = document.execCommand("undo"); } catch { /* refuse below */ }
     this.flush();
+    if (!contextCurrent(this.element, edit.context)) return contextFailure(this.element);
     if (!succeeded || text(this.element) !== edit.before || (edit.beforeTree && !sameTree(edit.beforeTree))) {
-      return {...copies("native_undo_not_confirmed"), ...this.restore(edit.before, edit.selection, edit.beforeTree, edit.documentRevision)};
+      return {...copies("native_undo_not_confirmed"), ...this.restore(edit.before, edit.selection, edit.beforeTree, edit.documentRevision, edit.context)};
     }
     select(this.element, edit.selection);
     return {status: "undone"};
