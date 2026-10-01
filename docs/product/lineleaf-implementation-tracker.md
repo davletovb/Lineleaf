@@ -5,6 +5,8 @@ Status: A-01 through A-05 implemented in one foundation slice; native/device/pro
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
+Foundation implementation: [PR #1](https://github.com/davletovb/Lineleaf/pull/1). [CI run 36831880759](https://github.com/davletovb/Lineleaf/actions/runs/36831880759) passed 16 Python regressions, 15 Chromium editor regressions, and native authorization against the pinned shared Seatline binary.
+
 ## Progress
 
 - Planned implementation items: **21**
@@ -43,7 +45,7 @@ Keep IDs stable. Record ownership before starting and update progress counts whe
 | ID | Item | Depends on | Acceptance criterion | Status | Owner | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | A-01 | Inspect the current shared Seatline consumer API/release | — | Record supported transport, methods/events, versions, authentication/capabilities, and exact missing dependencies | DONE | Codex | [Pinned source/binary audit](../investigations/seatline-api-audit.md); protocol 1, no tagged release |
-| A-02 | Validate extension authorization and IDs | A-01 | One installed companion accepts the approved development/store consumer; no per-product installation | IMPLEMENTED — VERIFY | Codex | [Stable ID, probe, validator](../investigations/extension-authorization.md); local registry checks pass; broker CI, actual Chrome/macOS, and issued store ID remain |
+| A-02 | Validate extension authorization and IDs | A-01 | One installed companion accepts the approved development/store consumer; no per-product installation | IMPLEMENTED — VERIFY | Codex | [Stable ID, probe, validator](../investigations/extension-authorization.md); native CI passes one installation/two consumers, rotation, revocation, and origin isolation; actual Chrome/macOS and issued store ID remain |
 | A-03 | Benchmark one supported provider | A-01 | Measure cold/warm latency, structured-output reliability, cancellation, and limits for representative writing requests | IMPLEMENTED — VERIFY | Codex | [Benchmark harness and procedure](../investigations/provider-benchmark.md); fixture verified; live authenticated provider unavailable |
 | A-04 | Prototype safe editor mutation | — | Textarea, text input, basic contenteditable, and a controlled-input fixture preserve content, caret, formatting where applicable, and undo | DONE | Codex | [Compatibility report](../investigations/editor-compatibility.md); 15 actual Chromium regression tests pass |
 | A-05 | Freeze MVP scope and extension toolchain | A-01, A-02, A-03, A-04 | Document achievable editor support, acceptable latency, provider choice, toolchain, and unresolved blockers | IMPLEMENTED — VERIFY | Codex | [Conservative scope/toolchain freeze](../architecture/mvp-scope-and-toolchain.md); final provider/latency decisions depend on A-03; automatic checks gated |

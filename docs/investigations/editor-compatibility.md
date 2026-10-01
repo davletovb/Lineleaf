@@ -12,6 +12,8 @@
 
 Fifteen browser regressions passed locally using Playwright 1.62.1 and headless Chromium **153.0.8010.0**. A separately installed test browser used a single-process launch because of workspace IPC restrictions. CI runs the pinned Playwright browser with its normal process setup; neither browser package nor Playwright ships to extension users.
 
+[CI run 36831880759](https://github.com/davletovb/Lineleaf/actions/runs/36831880759) also passed all fifteen tests on Playwright's Chromium **151.0.7922.34**, using the normal process configuration, alongside sixteen Python harness regressions.
+
 The adapter owns opaque snapshots and checks source plus input/DOM revision immediately before editing and again after focus. It rejects another adapter's snapshot, stale/ABA input revisions, composition, disconnected/readonly/disabled fields, invalid source spans, and grapheme-splitting offsets. Span offsets are UTF-16 DOM offsets, with `Intl.Segmenter` guarding emoji and combining sequences. Positions must be derived in application code, never accepted from a model.
 
 Supported replacement uses Chromium `document.execCommand('insertText')`, followed by an exact resulting-text check and caret transformation. It performs no whole-value assignment or HTML rewrite. Undo uses native history and refuses if text/revision changed or another field emitted input. A site rewrite during the native input event is reported as unconfirmed and is not overwritten. “Copy” is an adapter result for the future UI to display; the prototype does not write to the clipboard itself.

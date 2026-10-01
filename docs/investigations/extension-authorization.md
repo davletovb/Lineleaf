@@ -28,4 +28,6 @@ This Linux-only validator uses temporary `SEATLINE_DATA_DIR` and `XDG_CONFIG_HOM
 
 Local [native evidence](../evidence/native-authorization-local.json) verifies four registry/origin checks but reports `ENVIRONMENT_DENIES_LOCAL_IPC`, because this workspace forbids socket listeners. That is partial evidence, not a successful broker test.
 
-Still required for acceptance: review the native CI report, test actual Chrome permission/connection behavior on macOS, and repeat with the issued store ID when available. The two synthetic consumers validate grant isolation, not simultaneous writing workloads (E-02).
+[CI run 36831880759](https://github.com/davletovb/Lineleaf/actions/runs/36831880759) passed the complete native test against the pinned shared companion. The archived [native report](../evidence/native-authorization-ci.json) verifies all eleven checks: one installation/two consumers, registered manifest, malformed/unknown origins, provider grant, reauthorization disconnect/reconnect, revocation disconnect, ambiguous origin refusal, and app-scoped revocation.
+
+Still required for acceptance: test actual Chrome permission/connection behavior on macOS and repeat with the issued store ID when available. The two synthetic consumers validate grant isolation, not simultaneous writing workloads (E-02).

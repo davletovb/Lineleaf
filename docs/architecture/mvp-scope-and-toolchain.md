@@ -34,7 +34,7 @@ If results are too slow for inline checking, keep explicit requests usable and s
 
 | Gate | Evidence needed | Effect |
 | --- | --- | --- |
-| Native broker validation | CI native authorization report | A-02 remains verify until reviewed |
+| Native broker validation | [CI report passed](../evidence/native-authorization-ci.json) on the pinned shared binary | Broker/grant behavior verified; Chrome/device/store gates remain |
 | Actual Chrome/macOS setup | One existing shared installation, unpacked ID, permission UI and connection | No advertised macOS installation acceptance yet |
 | Store ID | Issued ID and exact-origin authorization check | Store distribution remains unavailable |
 | Live provider | Authenticated subscription, measured results and runtime metadata | A-03 and final A-05 latency/provider decisions remain verify |
