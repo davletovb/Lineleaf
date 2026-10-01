@@ -78,7 +78,7 @@ test('installed automatic flow stays idle on focus, reports missing host after t
   assert.equal((await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: true}}))).ok, true);
   await options.waitForFunction(async () => (await chrome.scripting.getRegisteredContentScripts()).some(x => x.id === 'lineleaf-sites'));
   const writing = await context.newPage(); await writing.goto('https://writing.test/automatic'); await writing.locator('#draft').focus();
-  await writing.waitForSelector('[data-lineleaf-inline]');
+  await writing.waitForSelector('[data-lineleaf-inline]', {state: 'attached'});
   const inline = panelFor(writing, {attribute: 'data-lineleaf-inline'});
   await writing.waitForTimeout(1700);
   assert.match(await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label')), /after you pause typing/);

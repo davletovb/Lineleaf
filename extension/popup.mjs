@@ -14,7 +14,7 @@ async function load() {
   if (settings.paused) show(messageFor('PAUSED'));
 }
 query('#paused').addEventListener('change', async () => {
-  try { settings = await command('save-settings', {model: settings.model, variant: settings.variant, paused: query('#paused').checked, automatic: settings.automatic, dictionary: settings.dictionary}); await load(); show(settings.paused ? messageFor('PAUSED') : 'Lineleaf resumed on enabled sites.'); }
+  try { settings = await command('set-pause', {paused: query('#paused').checked}); await load(); show(settings.paused ? messageFor('PAUSED') : 'Lineleaf resumed on enabled sites.'); }
   catch (error) { show(messageFor(errorCode(error))); }
 });
 query('#enabled').addEventListener('change', async () => {

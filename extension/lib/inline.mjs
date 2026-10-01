@@ -151,6 +151,7 @@ export function mountInline(api) {
     if (ticket !== generation || selectedField !== field || !eligibleDOM() || !next.adapter.current(next.snapshot)) return;
     if (!state.ok || (automatic && !state.value.automatic)) { blocked = true; update(messageFor(state.code ?? 'AUTOMATIC_DISABLED')); return; }
     policy = state.value; capture = next; edits = []; undo = false; copyOnly = false; lastKey = keyFor(next);
+    clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
     update('Checking with Codex… You can keep typing.');
     const id = crypto.randomUUID();

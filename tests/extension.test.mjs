@@ -234,3 +234,12 @@ test('provider backoff survives worker restart and local refusals do not extend 
   assert.equal(f.sessionData.providerBackoff, 160000); assert.equal(restarted.calls.some(x => x.method === 'send'), false);
   clock = 160000; const next = restarted.connect(); start(next); await waitFor(() => next.received.some(x => x.type === 'result'));
 });
+test('pause changes only pause and concurrent site/dictionary mutations preserve opt-in consent', async () => {
+  const f = fakeChrome({automatic: true}); installController(f.api);
+  await f.rpc('save-settings', {model: 'latest-model', variant: 'UK', paused: false, automatic: false, dictionary: ['newword']});
+  await Promise.all([f.rpc('add-word', {word: 'Lineleaf'}, f.sender), f.rpc('set-pause', {paused: true}), f.rpc('set-site', {origin: 'https://writing.test', enabled: false})]);
+  assert.equal(f.data.preferences.automatic, false); assert.equal(f.data.preferences.paused, true);
+  assert.equal(f.data.preferences.model, 'latest-model'); assert.equal(f.data.preferences.variant, 'UK');
+  assert.deepEqual(f.data.preferences.dictionary, ['newword', 'lineleaf']); assert.deepEqual(f.data.preferences.sites, []);
+  assert.equal((await f.rpc('set-pause', {paused: false}, f.sender)).ok, false);
+});

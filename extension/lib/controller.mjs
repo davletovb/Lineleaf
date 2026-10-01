@@ -115,6 +115,9 @@ export function installController(api, {now = Date.now} = {}) {
     await initialized; if (!ui(sender) || !exactKeys(message, ['type', 'payload'])) throw new LineleafError('INVALID_REQUEST');
     const settings = await read(), p = message.payload;
     if (message.type === 'get-settings' && p === null) return settings;
+    if (message.type === 'set-pause' && exactKeys(p, ['paused']) && typeof p.paused === 'boolean') {
+      const next = {...settings, paused: p.paused}; await api.storage.local.set({preferences: next}); return next;
+    }
     if (message.type === 'save-settings' && (exactKeys(p, ['model', 'variant', 'paused']) || exactKeys(p, ['model', 'variant', 'paused', 'automatic', 'dictionary']))) {
       const next = preferences({...settings, ...p});
       if (next.model !== p.model || next.variant !== p.variant || typeof p.paused !== 'boolean'
@@ -173,7 +176,12 @@ export function installController(api, {now = Date.now} = {}) {
       eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
     } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {
       changeFromContent(message, sender).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
-    } else handle(message, sender).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
+    } else {
+      const mutating = ['save-settings', 'set-pause', 'set-site', 'reset'].includes(message?.type);
+      const operation = mutating ? mutations.catch(() => {}).then(() => handle(message, sender)) : handle(message, sender);
+      if (mutating) mutations = operation;
+      operation.then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
+    }
     return true;
   });
   schedule();
