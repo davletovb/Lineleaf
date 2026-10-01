@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose an improvement to the writing experience.
+title: "[Feature] "
+labels: []
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: User need
+      description: Explain the situation and the result the user needs.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: Describe how the feature would work.
+    validations:
+      required: true
+  - type: input
+    id: related
+    attributes:
+      label: Related tracker item or issue

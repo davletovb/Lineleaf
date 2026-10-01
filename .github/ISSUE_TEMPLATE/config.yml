@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Product plan and implementation tracker
+    url: https://github.com/davletovb/Lineleaf/tree/main/docs
+    about: Review the current scope and planned work before opening an issue.

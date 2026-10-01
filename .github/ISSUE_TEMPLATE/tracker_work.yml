@@ -1,0 +1,30 @@
+name: Tracker work item
+description: Claim or discuss a planned implementation item.
+title: "[A-XX] "
+labels: []
+body:
+  - type: input
+    id: tracker_id
+    attributes:
+      label: Tracker ID
+      description: Use an existing stable ID from the implementation tracker.
+      placeholder: A-01
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and acceptance
+      description: Link the tracker item and describe the concrete result to deliver.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and existing work
+      description: Record prerequisite evidence, existing code, and any related open work.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation plan
+      description: Explain how the acceptance criterion will be checked.

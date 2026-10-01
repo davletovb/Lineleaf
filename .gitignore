@@ -1,0 +1,19 @@
+# Local dependencies and generated output
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+artifacts/
+
+# Local configuration and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

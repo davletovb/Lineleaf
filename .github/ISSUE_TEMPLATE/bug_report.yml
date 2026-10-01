@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible problem with Lineleaf or its documentation.
+title: "[Bug] "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe what happened and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic or redacted text examples.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser/OS, Lineleaf version or commit, and Seatline/provider version if relevant.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Include relevant screenshots or logs with draft content and credentials removed.

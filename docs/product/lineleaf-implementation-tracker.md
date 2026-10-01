@@ -1,0 +1,89 @@
+# Lineleaf — Implementation Tracker
+
+Established: 2026-10-01  
+Status: Repository setup complete; implementation work has not started.
+
+This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
+
+## Progress
+
+- Planned implementation items: **21**
+- DONE: **0**
+- IMPLEMENTED — VERIFY: **0**
+- IN PROGRESS: **0**
+- BLOCKED: **0**
+- TODO: **21**
+
+Repository setup is recorded separately below and is not counted as product implementation.
+
+## Status and ownership
+
+| Status | Meaning |
+| --- | --- |
+| TODO | Work has not started |
+| IN PROGRESS | An owner is actively working on the item |
+| BLOCKED | A named dependency prevents progress; explain it in Evidence |
+| IMPLEMENTED — VERIFY | The change exists, but required acceptance validation is outstanding |
+| DONE | Acceptance criterion is met with linked evidence |
+
+Keep IDs stable. Record ownership before starting and update progress counts when statuses change. Link the issue/pull request and validation evidence. Check currently merged code and open work before implementing anything. Dependencies must be DONE or have documented acceptance evidence for the dependent slice; unfinished dependencies keep the dependent item unstarted.
+
+## Milestones
+
+| Milestone | Outcome | Items |
+| --- | --- | --- |
+| A | Verify the integration, provider behavior, and safe editing foundation | A-01 through A-05 |
+| B | Deliver explicit selection proofreading and rewriting | B-01 through B-05 |
+| C | Add controlled, accessible inline proofreading | C-01 through C-05 |
+| D | Validate real editors and investigate complex surfaces | D-01 through D-03 |
+| E | Evaluate quality, coexistence, and beta packaging | E-01 through E-03 |
+
+## Work items
+
+| ID | Item | Depends on | Acceptance criterion | Status | Owner | Evidence |
+| --- | --- | --- | --- | --- | --- | --- |
+| A-01 | Inspect the current shared Seatline consumer API/release | — | Record supported transport, methods/events, versions, authentication/capabilities, and exact missing dependencies | TODO | — | — |
+| A-02 | Validate extension authorization and IDs | A-01 | One installed companion accepts the approved development/store consumer; no per-product installation | TODO | — | — |
+| A-03 | Benchmark one supported provider | A-01 | Measure cold/warm latency, structured-output reliability, cancellation, and limits for representative writing requests | TODO | — | — |
+| A-04 | Prototype safe editor mutation | — | Textarea, text input, basic contenteditable, and a controlled-input fixture preserve content, caret, formatting where applicable, and undo | TODO | — | — |
+| A-05 | Freeze MVP scope and extension toolchain | A-01, A-02, A-03, A-04 | Document achievable editor support, acceptable latency, provider choice, toolchain, and unresolved blockers | TODO | — | — |
+| B-01 | Scaffold an MV3 extension and settings | A-05 | Packaged extension loads with minimal permissions and explicit per-site controls | TODO | — | — |
+| B-02 | Integrate Seatline transport and lifecycle | A-02, B-01 | Validate sender/payloads; handle unavailable host, disconnect, cancellation, and recovery without duplicate work | TODO | — | — |
+| B-03 | Implement selection proofreading/rewriting | A-03, B-02 | Selected text yields a bounded preview; unchanged text is replaced only through a supported adapter | TODO | — | — |
+| B-04 | Validate candidates and derive edit positions | B-03 | Malformed output, repeated phrases, overlapping edits, Unicode, and changed revisions are handled safely | TODO | — | — |
+| B-05 | Implement accept, dismiss, and undo | A-04, B-04 | Accepting an edit preserves the tested editor's state; user can dismiss and undo without losing other typing | TODO | — | — |
+| C-01 | Add automatic paragraph checking | B-04 | Pause-based checks respect composition, change detection, request caps, coalescing, and cancellation | TODO | — | — |
+| C-02 | Add inline underlines and cards | B-05, C-01 | Suggestions track text and scrolling; controls work by keyboard and screen reader | TODO | — | — |
+| C-03 | Add correctness/style categories and explanations | C-02 | Optional style changes are clearly labeled; explanations match their corrections | TODO | — | — |
+| C-04 | Add dictionary, language variant, and pause controls | C-02 | Preferences affect checks consistently and can be reset | TODO | — | — |
+| C-05 | Complete privacy and failure flows | B-02, C-01 | No processing on disabled sites/excluded fields; provider disclosure and useful error states are present | TODO | — | — |
+| D-01 | Validate priority real-world editors | C-05 | Publish a tested matrix for Gmail compose, GitHub comments, LinkedIn posts, and Slack web; unsupported surfaces use fallback | TODO | — | — |
+| D-02 | Handle dynamic fields and geometry | D-01 | SPA navigation, resizing, scrolling, permitted frames, and supported open shadow roots do not misapply edits | TODO | — | — |
+| D-03 | Investigate Google Docs and complex editors | D-01 | Produce a separate feasibility result; do not advertise support without a working tested adapter | TODO | — | — |
+| E-01 | Run writing-quality and regression evaluation | C-03, D-01 | Meet the product framework's beta quality gates across the validated provider configurations | TODO | — | — |
+| E-02 | Validate shared-companion coexistence | B-02, C-01 | Concurrent use with another consumer neither mixes sessions nor creates uncontrolled background traffic | TODO | — | — |
+| E-03 | Package a reviewable beta | E-01, E-02 | Install/update/uninstall and permission behavior verified on each advertised browser/OS; beta package and support matrix ready | TODO | — | — |
+
+## First development slice
+
+Start with **A-01** (current Seatline interface) and **A-04** (safe editor mutation). A-02 and A-03 follow the interface investigation. Use their results to establish A-05 before scaffolding the extension.
+
+Inline automation follows safe replacement, validated provider behavior, and explicit selection actions.
+
+## Repository setup record
+
+Completed 2026-10-01:
+
+- Introduced Lineleaf with its product promise and documentation entry points.
+- Established the product framework, stable 21-item tracker, and Seatline boundary.
+- Added contributor/agent guidance, formatting defaults, and GitHub issue/pull-request templates.
+
+Implementation toolchain, extension source, and release workflows will be established by their corresponding tracker items.
+
+## Decision log
+
+| Date | Decision | Basis |
+| --- | --- | --- |
+| 2026-10-01 | Use Lineleaf as the repository/product name | Repository setup requested for davletovb/Lineleaf |
+| 2026-10-01 | Use the existing shared Seatline companion | Established one-companion/multiple-consumer direction |
+| 2026-10-01 | Preserve authorship, intent, and control while permitting explicit tone changes | Product naming and preservation discussion |
