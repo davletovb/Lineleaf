@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Lineleaf A-04 synthetic editor fixtures</title>
+<label>Textarea <textarea id="textarea">He go to work.</textarea></label>
+<label>Text input <input id="input" value="He go to work."></label>
+<label>Controlled input <input id="controlled" value="He go to work."></label>
+<div id="editable" contenteditable="true">He <strong>go</strong> to work.</div>
+<div id="complex" contenteditable="true"><p>He go to work.</p></div>
+<input id="other" value="Another field">
+<script type="module">
+import {EditorAdapter, validSpan} from "/prototypes/editor/editor-adapter.mjs";
+window.adapters = Object.fromEntries(["textarea", "input", "controlled", "editable", "complex"]
+  .map(id => [id, new EditorAdapter(document.getElementById(id))]));
+window.validSpan = validSpan;
+window.controlledState = controlled.value;
+controlled.addEventListener("input", () => {
+  window.controlledState = controlled.value;
+  queueMicrotask(() => { controlled.value = window.controlledState; });
+});
+window.ready = true;
+</script>
+</html>

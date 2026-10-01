@@ -1,0 +1,17 @@
+{
+  "status": "blocked",
+  "kind": "native",
+  "protocol": 1,
+  "seatline_revision": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
+  "platform": "linux",
+  "development_extension_id": "lnbkadelggojehiapgnhonicnfonobal",
+  "checks": {
+    "one_installation_two_consumers": true,
+    "registered_manifest": true,
+    "invalid_id_refused": true,
+    "unknown_origin_refused": true
+  },
+  "store_extension_id": null,
+  "chrome_permission_ui_tested": false,
+  "reason": "ENVIRONMENT_DENIES_LOCAL_IPC"
+}

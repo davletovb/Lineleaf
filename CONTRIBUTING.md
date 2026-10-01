@@ -20,6 +20,8 @@ Run checks appropriate to the change. Editing behavior needs meaningful coverage
 
 For documentation-only changes, review the wording and local links. Establish and document build, test, and packaging commands when the extension toolchain is selected in A-05/B-01.
 
+The A-05 development toolchain is Node 24 and Python 3.12+. Run `npm ci --ignore-scripts`, `npx playwright install chromium`, and `npm test`. See the [scope/toolchain decision](docs/architecture/mvp-scope-and-toolchain.md) for native validation and live benchmark gates. Fixture results must never be described as live provider evidence. Product packaging remains B-01.
+
 Move an item to IMPLEMENTED — VERIFY when the change exists but required validation is outstanding. Mark it DONE only with linked evidence that its acceptance criterion is met.
 
 ## Respect ownership and user data

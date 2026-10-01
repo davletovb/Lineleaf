@@ -1,10 +1,10 @@
 # Lineleaf and Seatline Integration
 
-Status: Integration requirements. Exact companion API and capabilities await A-01 verification. See the [implementation tracker](../product/lineleaf-implementation-tracker.md).
+Status: A-01 contract audited at Seatline `dc1086582c8b98498aa48dae91c8d174bc3cfc3c`, protocol 1. [API audit](../investigations/seatline-api-audit.md), [authorization evidence](../investigations/extension-authorization.md), and [A-05 decision](mvp-scope-and-toolchain.md) distinguish verified code from open live/device gates. See the [implementation tracker](../product/lineleaf-implementation-tracker.md).
 
 ## Architecture and ownership
 
-The established direction is one shared Seatline companion for multiple apps/extensions, with no writing-specific logic added to Seatline. The current merged companion code, API, and release readiness must be inspected in A-01 before implementation.
+The established direction is one shared Seatline companion for multiple apps/extensions, with no writing-specific logic added to Seatline. A-01 inspected the merged pre-release code; future contract updates need the same source/release review.
 
 | Component | Responsibilities |
 | --- | --- |
@@ -12,7 +12,7 @@ The established direction is one shared Seatline companion for multiple apps/ext
 | Extension suggestion engine | Writing prompts, response validation, exact edit matching, stale-result rejection, dictionary, request pacing, and rewrite previews |
 | Extension UI | Inline cards/underlines, selection actions, popup/settings, accessibility, consent, and connection status |
 | Extension service worker | Validate content-script senders/payloads; route requests; manage the Native Messaging connection and recovery |
-| Shared Seatline companion | Generic provider execution and connections; inspect availability of client/session isolation, cancellation, and shared scheduling in A-01 |
+| Shared Seatline companion | Generic provider execution; app-scoped grants/sessions, target cancellation, and bounded shared scheduling verified in A-01 source |
 | Supported provider runtime | Model execution and provider-owned authentication/session behavior |
 
 Chrome Native Messaging is the intended extension-to-companion transport. Content scripts communicate through the extension service worker; they cannot invoke Native Messaging directly. The native host must allow the extension's actual ID, and Chrome's `allowed_origins` list cannot use wildcards. [Source: Chrome Native Messaging documentation](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging).

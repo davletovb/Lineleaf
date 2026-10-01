@@ -5,6 +5,11 @@ build/
 coverage/
 .cache/
 artifacts/
+__pycache__/
+*.pyc
+test-results/
+playwright-report/
+.seatline-audit/
 
 # Local configuration and logs
 .env
