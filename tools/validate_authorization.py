@@ -29,10 +29,11 @@ def connection_closed(connection, timeout=3):
     return False
 
 
-def probe_turns(connection, directory, fake_provider, checks):
+def probe_turns(connection, directory, fake_provider, checks, diagnostics):
     # The discovery override is an empty directory: no user provider executable/account can run.
     turn = writing_turn("Synthetic schema probe.")
     missing = connection.collect(connection.start("codex", "send", turn), timeout=5)[-1]
+    record_terminal(diagnostics, "missing_executable", missing)
     checks["send_schema_missing_executable"] = missing["type"] == "failed" and missing.get("reason") == "EXECUTABLE_NOT_FOUND"
     if fake_provider is None:
         return
@@ -41,10 +42,12 @@ def probe_turns(connection, directory, fake_provider, checks):
     scenario = directory / "codex-scenario"
     scenario.write_text("login=signed-in\nexec=answers\n")
     events = connection.collect(connection.start("codex", "send", turn), timeout=5)
+    record_terminal(diagnostics, "upstream_fixture", events[-1])
     checks["send_schema_upstream_fixture"] = events[-1]["type"] == "completed" and any(
         event["type"] == "delta" and "Synthetic schema probe." in event.get("text", "") for event in events)
     scenario.write_text("login=signed-in\nexec=fails-429\n")
     limited = connection.collect(connection.start("codex", "send", turn), timeout=5)[-1]
+    record_terminal(diagnostics, "rate_limit", limited)
     checks["rate_limit_reason_mapping"] = limited["type"] == "failed" and safe_failure(limited) == "PROVIDER_RATE_LIMITED"
     scenario.write_text("login=signed-in\nexec=goes-quiet\n")
     target = connection.start("codex", "send", turn)
@@ -54,12 +57,22 @@ def probe_turns(connection, directory, fake_provider, checks):
         event = connection.event(target, deadline - time.monotonic())
         if event["type"] == "started":
             connection.cancel(target)
-            checks["top_level_cancel_stops_target"] = connection.collect(target, timeout=5)[-1]["type"] == "stopped"
+            terminal = connection.collect(target, timeout=5)[-1]
+            record_terminal(diagnostics, "cancel", terminal)
+            checks["top_level_cancel_stops_target"] = terminal["type"] == "stopped"
             break
         if event["type"] in TERMINAL:
+            record_terminal(diagnostics, "cancel", event)
             break
     else:
         raise ProtocolError("native probe event limit exceeded")
+
+
+def record_terminal(diagnostics, name, event):
+    # Keep only protocol enums; never copy provider text, paths, account details, or raw reasons.
+    diagnostics[name] = {"terminal": event["type"] if event["type"] in TERMINAL else "unknown"}
+    if event["type"] == "failed":
+        diagnostics[name]["reason"] = safe_failure(event)
 
 
 def validate(binary, fake_provider=None):
@@ -71,6 +84,7 @@ def validate(binary, fake_provider=None):
               "seatline_revision": contract["revision"], "platform": "linux",
               "development_extension_id": contract["development_extension_id"], "checks": checks,
               "store_extension_id": None, "chrome_permission_ui_tested": False,
+              "provider_diagnostics": {},
               "provider_probe": "upstream-fixture" if fake_provider else "missing-executable-only"}
     try:
         exercise(binary, fake_provider, contract, report)
@@ -86,7 +100,9 @@ def exercise(binary, fake_provider, contract, report):
     checks = report["checks"]
     development = f"chrome-extension://{contract['development_extension_id']}/"
     other_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
-    with tempfile.TemporaryDirectory(prefix="lineleaf-seatline-") as tmp:
+    # Seatline verifies every workspace ancestor: a private child of shared /tmp is insufficient.
+    # Use the actual private home without changing HOME or inheriting provider credentials.
+    with tempfile.TemporaryDirectory(prefix="lineleaf-seatline-", dir=Path.home()) as tmp:
         root = Path(tmp)
         data = root / "data"
         env = {**os.environ, "SEATLINE_DATA_DIR": str(data), "XDG_CONFIG_HOME": str(root / "config"),
@@ -138,7 +154,7 @@ def exercise(binary, fake_provider, contract, report):
                 checks["provider_grant_enforced"] = denied.get("reason") == "APP_NOT_AUTHORIZED"
                 status = second.collect(second.start("codex", "status"), timeout=5)
                 checks["other_consumer_still_connected"] = status[-1]["type"] == "completed"
-                probe_turns(first, providers, fake_provider, checks)
+                probe_turns(first, providers, fake_provider, checks, report["provider_diagnostics"])
                 run("authorize", "lineleaf", "codex", development)
                 checks["reauthorization_closes_old_connection"] = connection_closed(first)
                 checks["reauthorized_origin_reconnects"] = False

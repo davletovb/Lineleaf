@@ -294,6 +294,14 @@ class BenchmarkRegressionTests(unittest.TestCase):
 
 
 class AuthorizationRegressionTests(unittest.TestCase):
+    def test_native_probe_diagnostics_keep_only_protocol_enums(self):
+        diagnostics = {}
+        validate_authorization.record_terminal(diagnostics, "fixture", {
+            "type": "failed", "reason": "private provider output", "text": "private draft"})
+        validate_authorization.record_terminal(diagnostics, "cancel", {"type": "stopped", "text": "private draft"})
+        self.assertEqual(diagnostics, {"fixture": {"terminal": "failed", "reason": "PROVIDER_FAILED"},
+                                       "cancel": {"terminal": "stopped"}})
+
     def test_disconnect_check_records_timeout_as_failure(self):
         peer = Mock()
         peer.next_frame.side_effect = TimeoutError
