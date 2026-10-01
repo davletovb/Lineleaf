@@ -30,6 +30,11 @@ test('missing native host produces a fixed diagnostic in the actual extension', 
   assert.equal(await options.locator('#connection').isEnabled(), true);
 });
 test('explicit optional permission enables only the chosen site, panel opens, disabling unregisters access', async () => {
+  // Preapprove only the synthetic host through Chromium's extension-management API.
+  // Runtime permissions.request still activates the real optional grant; no native UI prompt is automated.
+  const management = await context.newPage(); await management.goto('chrome://extensions/');
+  await management.evaluate(async id => { await chrome.developerPrivate.addHostPermission(id, 'https://writing.test/*'); }, id);
+  await management.close();
   await options.evaluate(() => {
     const button = document.createElement('button'); button.textContent = 'Grant fixture site';
     button.onclick = async () => { window.granted = await chrome.permissions.request({origins: ['https://writing.test/*']}); };
