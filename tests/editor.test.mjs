@@ -141,13 +141,15 @@ test("mutation on focus prevents replacement", async () => fixture(async page =>
   assert.equal(await page.locator("#input").inputValue(), "Site changed the field.");
 }));
 
-test("a site rewrite during native input is never reported as applied", async () => fixture(async page => {
+test("a site rewrite during native input restores the source and blocks further replacement", async () => fixture(async page => {
   const result = await page.evaluate(() => {
     input.addEventListener("input", () => { input.value = "Site owns this value."; });
     return adapters.input.apply(adapters.input.snapshot(), {start: 3, end: 5, before: "go", after: "goes"});
   });
   assert.equal(result.reason, "native_edit_not_confirmed");
-  assert.equal(await page.locator("#input").inputValue(), "Site owns this value.");
+  assert.equal(await page.locator("#input").inputValue(), "He go to work.");
+  assert.equal(result.restored, true);
+  assert.equal(await page.evaluate(() => new (adapters.input.constructor)(input).snapshot()), null);
 }));
 
 test("later typing in another field prevents global undo from touching it", async () => fixture(async page => {
@@ -158,6 +160,24 @@ test("later typing in another field prevents global undo from touching it", asyn
   assert.equal(result.status, "copy");
   assert.equal(await page.locator("#other").inputValue(), "Other user edit");
   assert.equal(await page.locator("#input").inputValue(), "He goes to work.");
+}));
+
+test("failed-edit recovery never invokes global undo after a site handler edits another field", async () => fixture(async page => {
+  const result = await page.evaluate(() => {
+    const native = document.execCommand.bind(document); let undos = 0;
+    document.execCommand = (...args) => { if (args[0] === "undo") undos++; return native(...args); };
+    input.addEventListener("input", () => {
+      if (!input.value.includes("goes")) return;
+      input.value = input.value.toUpperCase();
+      other.value = "Other site edit"; other.dispatchEvent(new InputEvent("input", {bubbles: true}));
+    });
+    const applied = adapters.input.apply(adapters.input.snapshot(), {start: 3, end: 5, before: "go", after: "goes"});
+    return {applied, undos, source: input.value, other: other.value};
+  });
+  assert.equal(result.applied.restored, true);
+  assert.equal(result.undos, 0);
+  assert.equal(result.source, "He go to work.");
+  assert.equal(result.other, "Other site edit");
 }));
 
 test("snapshot ownership prevents applying another adapter's revision", async () => fixture(async page => {

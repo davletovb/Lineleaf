@@ -1,5 +1,7 @@
 # Foundation evidence provenance
 
+For the B-01–B-05 extension, see [selection prototype CI and package provenance](selection-prototype-ci.md).
+
 Accepted code revision: [`9d1ccaed15f3efcb0540db5d183fb5eab2718a2d`](https://github.com/davletovb/Lineleaf/commit/9d1ccaed15f3efcb0540db5d183fb5eab2718a2d). [Foundation validation run 36856262500](https://github.com/davletovb/Lineleaf/actions/runs/36856262500) passed all three jobs on that revision. Later documentation commits archive these results; this run is evidence for the named code revision.
 
 | Evidence | Result | Provenance |

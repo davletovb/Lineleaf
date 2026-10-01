@@ -1,0 +1,13 @@
+:root { font: 14px/1.5 system-ui, sans-serif; color: #233b33; background: #fbfcf8; color-scheme: light; }
+* { box-sizing: border-box; } body { margin: 0; } main { padding: 24px; max-width: 620px; margin: auto; } body.popup { width: 350px; }
+h1 { font-size: 28px; letter-spacing: -1px; margin: 0; } h2 { font-size: 17px; margin-top: 25px; }
+.tagline { margin: 2px 0 22px; color: #658065; } .small { color: #60735f; font-size: 12px; }
+.site { display: block; overflow-wrap: anywhere; font-weight: 600; margin: 12px 0; }
+button, input, select { font: inherit; } button { border: 1px solid #bcd0b9; border-radius: 9px; padding: 10px 14px; background: #fff; color: #285c3f; cursor: pointer; }
+button.primary { background: #285c3f; color: white; border-color: #285c3f; } button:hover { filter: brightness(.96); } button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #84ad77; outline-offset: 3px; }
+label { display: block; margin: 18px 0 6px; } label.check { display: flex; align-items: center; gap: 8px; }
+input[type=text], select { width: 100%; padding: 10px; border: 1px solid #ccd9c5; border-radius: 8px; background: white; color: #233b33; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; } #status { min-height: 21px; overflow-wrap: anywhere; } a { color: #285c3f; }
+ul { padding-left: 20px; } li { overflow-wrap: anywhere; margin: 10px 0; } li button { margin-left: 10px; padding: 4px 8px; }
+code { overflow-wrap: anywhere; font-size: 12px; } .box { background: #eef4e8; border-radius: 12px; padding: 14px; margin-top: 18px; }

@@ -1,6 +1,6 @@
 # A-05 — MVP scope and toolchain decision
 
-Decision date: 2026-10-01. This approves the toolchain and simple-editor boundaries using [A-01](../investigations/seatline-api-audit.md) and [A-04](../investigations/editor-compatibility.md). Final MVP provider/latency/install decisions remain gated by [A-02](../investigations/extension-authorization.md) and [A-03](../investigations/provider-benchmark.md). The [tracker decision log](../product/lineleaf-implementation-tracker.md#decision-log) records this split acceptance explicitly. B-01 may reuse the accepted toolchain for planning, but implementation stays TODO until A-05 is DONE. This decision does not approve a public beta or automatic checks.
+Decision date: 2026-10-01. This approves the toolchain and simple-editor boundaries using [A-01](../investigations/seatline-api-audit.md) and [A-04](../investigations/editor-compatibility.md). Final MVP provider/latency/install decisions remain gated by [A-02](../investigations/extension-authorization.md) and [A-03](../investigations/provider-benchmark.md). The [tracker decision log](../product/lineleaf-implementation-tracker.md#decision-log) records this split acceptance explicitly. The owner's subsequent instruction to implement B-01–B-05 now authorizes a development prototype using these accepted slices, superseding the earlier planning-only B-01 restriction. It does not approve a public beta, live-provider/device claims, or automatic checks.
 
 ## Product slice
 
@@ -20,15 +20,15 @@ If results are too slow for inline checking, keep explicit requests usable and s
 
 | Area | Choice | Reason |
 | --- | --- | --- |
-| Extension | MV3, native ES modules, plain JavaScript/CSS | Small investigation and browser-owned APIs; no bundler/framework required yet |
+| Extension | MV3, native ES modules, plain JavaScript/CSS | Browser-owned APIs; esbuild bundles the content script for Chrome's isolated world |
 | Local development | Node 24 and npm lockfile | Runs tests only; no Node dependency for the user or Seatline |
 | Provider/native investigation | Python 3.12+, standard library | Bounded framing/subprocess harness, no extra runtime added to Seatline |
 | Browser regressions | Playwright 1.62.1, `node:test` | Actual Chromium editing, caret, formatting, and native undo |
 | Harness regressions | Python `unittest` | Fragmented/malformed framing, exact origins, sign-in gates, output validation, cancellation |
 | CI | Linux/macOS browser tests and pinned upstream companion build | Synthetic tests need no account; native authorization exercises the actual shared binary |
-| Distribution | Unpacked diagnostic only in milestone A | Product packaging/settings remain B-01; store signing/ID remain release work |
+| Distribution | Unpacked development prototype and ZIP in milestone B | Stable development ID; store signing/ID remain release work |
 
-`npm ci --ignore-scripts`, `npx playwright install chromium`, and `npm test` are the verified development path. CI also installs browser OS dependencies. There is no product build/package command before B-01.
+`npm ci --ignore-scripts`, `npx playwright install chromium`, and `npm test` are the development path. CI also installs browser OS dependencies. B-01 adds `npm run build`, `npm run package`, and `npm run test:extension`; [prototype instructions](../implementation/selection-mvp.md) document their outputs and acceptance limits.
 
 ## Open gates and ownership
 

@@ -10,6 +10,7 @@
 | [Provider benchmark](investigations/provider-benchmark.md) | A-03 live/fixture harness, measurement procedure, and acceptance gates |
 | [Editor compatibility](investigations/editor-compatibility.md) | A-04 verified mutation/undo surfaces and copy fallback boundaries |
 | [MVP scope and toolchain](architecture/mvp-scope-and-toolchain.md) | A-05 conservative scope, development commands, and unresolved decisions |
+| [Selection prototype](implementation/selection-mvp.md) | B-01–B-05 build/load instructions, explicit writing flow, validation, and acceptance limits |
 
 The product is named **Lineleaf**. The preservation principle is that the user's intent, authorship, and control remain theirs, including when they deliberately request a different tone.
 

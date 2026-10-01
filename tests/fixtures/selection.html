@@ -1,0 +1,26 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Synthetic Lineleaf selections</title><style>body{font:16px system-ui;padding:30px}textarea,input,[contenteditable]{display:block;margin:12px 0;width:300px;min-height:28px}</style>
+<textarea id="textarea">He go to work.</textarea><input id="input" value="He go to work."><input id="controlled" value="He go to work.">
+<div id="editable" contenteditable="true">He <strong>go</strong> to work.</div><div id="complex" contenteditable="true"><p>He go to work.</p></div>
+<input id="password" type="password" value="private password"><input id="card" autocomplete="cc-number" value="private card"><p id="plain">He go to work.</p>
+<script>
+window.controlledState = controlled.value;
+controlled.addEventListener('input', () => { window.controlledState = controlled.value; queueMicrotask(() => { controlled.value = window.controlledState; }); });
+const event = () => ({listeners: [], addListener(listener) { this.listeners.push(listener); }, emit(...args) { for (const fn of this.listeners) fn(...args); }});
+window.fixture = {enabled: true, code: null, hold: false, checks: [], ports: [], runtimeMessages: event(), after: 'goes'};
+const runtime = {id: 'lnbkadelggojehiapgnhonicnfonobal', onMessage: fixture.runtimeMessages,
+  async sendMessage() { return fixture.code ? {ok: false, code: fixture.code} : {ok: fixture.enabled, value: {enabled: fixture.enabled}}; },
+  connect() {
+    const port = {onMessage: event(), onDisconnect: event(), sent: [], closed: false}; fixture.ports.push(port);
+    port.disconnect = () => { if (!port.closed) { port.closed = true; port.onDisconnect.emit(); } };
+    port.result = () => {
+      const request = port.sent.find(x => x.type === 'start');
+      const start = request.text.indexOf('go'), edits = request.mode === 'proofread'
+        ? [{before: 'go', after: fixture.after, start, end: start + 2, category: 'grammar', explanation: 'Subject agreement'}]
+        : [{before: request.text, after: 'He goes to work.', start: 0, end: request.text.length, category: 'style', explanation: 'Optional rewrite. Review meaning.'}];
+      port.onMessage.emit({type: 'result', id: request.id, edits});
+    };
+    port.postMessage = request => { port.sent.push(request); if (request.type === 'start') { fixture.checks.push(request); if (!fixture.hold) setTimeout(port.result, 10); } };
+    return port;
+  }};
+window.chrome = {runtime};
+</script><script src="/content.js"></script></html>
