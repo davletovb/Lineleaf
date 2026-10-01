@@ -12,6 +12,10 @@
     "unknown_origin_refused": true,
     "provider_grant_enforced": true,
     "other_consumer_still_connected": true,
+    "send_schema_missing_executable": true,
+    "send_schema_upstream_fixture": true,
+    "rate_limit_reason_mapping": true,
+    "top_level_cancel_stops_target": true,
     "reauthorization_closes_old_connection": true,
     "reauthorized_origin_reconnects": true,
     "revocation_closes_connection": true,
@@ -19,5 +23,22 @@
     "revocation_is_app_scoped": true
   },
   "store_extension_id": null,
-  "chrome_permission_ui_tested": false
+  "chrome_permission_ui_tested": false,
+  "provider_diagnostics": {
+    "missing_executable": {
+      "terminal": "failed",
+      "reason": "EXECUTABLE_NOT_FOUND"
+    },
+    "upstream_fixture": {
+      "terminal": "completed"
+    },
+    "rate_limit": {
+      "terminal": "failed",
+      "reason": "PROVIDER_RATE_LIMITED"
+    },
+    "cancel": {
+      "terminal": "stopped"
+    }
+  },
+  "provider_probe": "upstream-fixture"
 }

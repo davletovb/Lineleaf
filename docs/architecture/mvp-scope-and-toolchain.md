@@ -25,7 +25,7 @@ If results are too slow for inline checking, keep explicit requests usable and s
 | Provider/native investigation | Python 3.12+, standard library | Bounded framing/subprocess harness, no extra runtime added to Seatline |
 | Browser regressions | Playwright 1.62.1, `node:test` | Actual Chromium editing, caret, formatting, and native undo |
 | Harness regressions | Python `unittest` | Fragmented/malformed framing, exact origins, sign-in gates, output validation, cancellation |
-| CI | Linux browser tests and pinned upstream companion build | Synthetic tests need no account; native authorization exercises the actual shared binary |
+| CI | Linux/macOS browser tests and pinned upstream companion build | Synthetic tests need no account; native authorization exercises the actual shared binary |
 | Distribution | Unpacked diagnostic only in milestone A | Product packaging/settings remain B-01; store signing/ID remain release work |
 
 `npm ci --ignore-scripts`, `npx playwright install chromium`, and `npm test` are the verified development path. CI also installs browser OS dependencies. There is no product build/package command before B-01.

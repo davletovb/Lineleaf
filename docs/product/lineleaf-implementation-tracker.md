@@ -5,7 +5,7 @@ Status: A-01 through A-05 implemented in one foundation slice; native/device/pro
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
-Foundation implementation: [PR #1](https://github.com/davletovb/Lineleaf/pull/1). The original implementation at commit `4e34703` passed 16 Python regressions, 15 Linux Chromium editor regressions, and eleven native checks in [CI run 36832723008](https://github.com/davletovb/Lineleaf/actions/runs/36832723008). Review follow-ups extend this coverage; provenance and current evidence are recorded in the investigation reports.
+Foundation implementation: [PR #1](https://github.com/davletovb/Lineleaf/pull/1). Code commit `9d1ccaed15f3efcb0540db5d183fb5eab2718a2d` passed 26 Python regressions and 15 Chromium editor regressions on both Linux and macOS, plus fifteen native checks in [CI run 36856262500](https://github.com/davletovb/Lineleaf/actions/runs/36856262500). [Evidence provenance](../evidence/README.md) ties the archived native report to that run and commit. Historical [run 36832723008](https://github.com/davletovb/Lineleaf/actions/runs/36832723008) covered the original implementation at `4e34703` (16 Python, 15 Linux editor, eleven native checks).
 
 ## Progress
 
