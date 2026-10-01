@@ -1,5 +1,28 @@
 # B-01–B-05 selection prototype evidence
 
+## Review follow-up
+
+Current code revision: [`0a9d01615a42e560445f3d2330f47c58776972a0`](https://github.com/davletovb/Lineleaf/commit/0a9d01615a42e560445f3d2330f47c58776972a0). [CI run 36879235204](https://github.com/davletovb/Lineleaf/actions/runs/36879235204) passed all jobs: **86 tests per OS** (26 Python, 21 extension logic, 16 editor, 20 panel/integration, 3 installed-extension), plus the existing fifteen shared-companion native checks.
+
+| Job | ID | Result |
+| --- | --- | --- |
+| Linux editor/harness/installed extension | `110426458333` | Passed |
+| macOS editor/harness/installed extension | `110426458254` | Passed |
+| Shared companion | `110426458049` | Passed |
+
+The additional regressions cover real drag selection released outside textarea/input controls, ranges spanning ignored/hidden/code descendants (without blocking unselected code), correct pause diagnostics at open and check, closed-shadow-root isolation, and a complete bundled-panel/production-controller/production-transport round trip. The latter uses synthetic Chrome/native ports, not a real account. Debugger access inspects the production closed shadow root in panel and installed-extension tests; no test hook ships. Explanation limits are now stated in the prompt and tested at the validator's 280 UTF-16 boundary. Local logic and browser checks also passed.
+
+The current `lineleaf-0.1.0.zip` is **25,138 bytes**, SHA-256 `44df1d1b5108648a6dcf5fa8a7cdeb06dcf5d7889cffc4fedb708e3727d0cfe1`. Both downloaded CI packages are byte-identical to the local build, and the outer archives match GitHub's published digest:
+
+| Artifact | ID | Outer archive SHA-256 |
+| --- | --- | --- |
+| `lineleaf-extension-Linux` | `11170346650` | `d1ab4b43a47b7cd7eb5a7a73b9a001b687f3bc3384d3e817b8285ae83266b0ee` |
+| `lineleaf-extension-macOS` | `11171030681` | `4074fa1ccb8345173eea6261ad0ca6cc50d465830968ec1ddd1ecdced1cfa64e` |
+
+Actual native permission-prompt behavior, popup closure during permission approval, Chrome-to-Seatline setup, and live writing remain device/provider acceptance gates. The setup guide records recovery if Chrome grants permission but closes the popup before Lineleaf saves site enablement. B-02/B-03 retain their verification states.
+
+## Initial selection baseline
+
 Code revision: [`ac3ec6e36ee093fadeaa2e328c9fe8daad96e52a`](https://github.com/davletovb/Lineleaf/commit/ac3ec6e36ee093fadeaa2e328c9fe8daad96e52a), in [PR #2](https://github.com/davletovb/Lineleaf/pull/2). [CI run 36874657265](https://github.com/davletovb/Lineleaf/actions/runs/36874657265) passed all three jobs. Later documentation commits record this evidence; the named revision identifies the tested code.
 
 | Validation | Result | Job |
