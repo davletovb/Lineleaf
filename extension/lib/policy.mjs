@@ -30,8 +30,22 @@ export function dictionaryWord(word) {
   const normalized = word.normalize('NFC').toLocaleLowerCase('en');
   return normalized.length <= 64 && /^\p{L}[\p{L}\p{M}]*(?:['’-]\p{L}[\p{L}\p{M}]*)*$/u.test(normalized) ? normalized : null;
 }
-export const filterDictionary = (edits, settings) => edits.filter(edit => edit.category !== 'spelling'
-  || !settings.dictionary.includes(dictionaryWord(edit.before)));
+export function filterDictionary(edits, settings) {
+  const words = new Set(settings.dictionary);
+  return edits.filter(edit => {
+    if (edit.category !== 'spelling' || !words.size) return true;
+    let start = 0, end = edit.before.length, afterEnd = edit.after.length;
+    while (start < end && start < afterEnd && edit.before[start] === edit.after[start]) start++;
+    while (end > start && afterEnd > start && edit.before[end - 1] === edit.after[afterEnd - 1]) { end--; afterEnd--; }
+    for (const token of edit.before.matchAll(/\p{L}[\p{L}\p{M}]*(?:['’-]\p{L}[\p{L}\p{M}]*)*'?/gu)) {
+      const word = dictionaryWord(token[0]), base = dictionaryWord(token[0].replace(/(?:['’]s|['’])$/iu, ''));
+      const overlaps = start === end ? start >= token.index && start <= token.index + token[0].length
+        : start < token.index + token[0].length && end > token.index;
+      if (overlaps && (words.has(word) || words.has(base))) return false;
+    }
+    return true;
+  });
+}
 export const categoryLabel = category => ({grammar: 'Grammar', spelling: 'Spelling', punctuation: 'Punctuation', style: 'Optional style'})[category] ?? 'Suggestion';
 export function allowed(settings, origin) { return !settings.paused && settings.sites.includes(origin); }
 export function safeReason(reason) {

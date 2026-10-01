@@ -11,7 +11,7 @@ export function mountContent(api) {
   let focused = document.activeElement, host, root, capture = null, port = null, requestId, edits = [], stale = false;
   let expiry, watchdog, poll, starting = false;
   const composing = new Set();
-  const focus = event => { if (event.target !== host) focused = event.target; };
+  const focus = event => { if (event.target !== host && !event.target?.hasAttribute?.('data-lineleaf-inline')) focused = event.target; };
   document.addEventListener('focusin', focus, true);
   const query = selector => root.querySelector(selector);
   const status = text => { query('#status').textContent = text; };

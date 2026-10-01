@@ -137,7 +137,7 @@ test('pausing, permission removal and navigation cancel active work', async () =
   for (const change of ['pause', 'permission', 'navigate']) {
     const f = fakeChrome({hang: true}); installController(f.api); const port = f.connect(); start(port);
     await waitFor(() => f.calls.some(m => m.method === 'send'));
-    if (change === 'pause') await f.rpc('save-settings', {model: '', variant: 'US', paused: true});
+    if (change === 'pause') await f.rpc('set-pause', {paused: true});
     else if (change === 'permission') await f.api.permissions.remove({origins: ['https://writing.test/*']});
     else f.api.tabs.onUpdated.emit(7, {status: 'loading'});
     await waitFor(() => f.calls.some(m => m.method === 'cancel')); await waitFor(() => port.received.some(m => m.code === 'CANCELLED'));
@@ -236,10 +236,47 @@ test('provider backoff survives worker restart and local refusals do not extend 
 });
 test('pause changes only pause and concurrent site/dictionary mutations preserve opt-in consent', async () => {
   const f = fakeChrome({automatic: true}); installController(f.api);
-  await f.rpc('save-settings', {model: 'latest-model', variant: 'UK', paused: false, automatic: false, dictionary: ['newword']});
+  await f.rpc('save-settings', {changes: {model: 'latest-model', variant: 'UK', automatic: false}, expected: {model: '', variant: 'US', automatic: true}, dictionary: {add: ['newword'], remove: []}});
   await Promise.all([f.rpc('add-word', {word: 'Lineleaf'}, f.sender), f.rpc('set-pause', {paused: true}), f.rpc('set-site', {origin: 'https://writing.test', enabled: false})]);
   assert.equal(f.data.preferences.automatic, false); assert.equal(f.data.preferences.paused, true);
   assert.equal(f.data.preferences.model, 'latest-model'); assert.equal(f.data.preferences.variant, 'UK');
   assert.deepEqual(f.data.preferences.dictionary, ['newword', 'lineleaf']); assert.deepEqual(f.data.preferences.sites, []);
   assert.equal((await f.rpc('set-pause', {paused: false}, f.sender)).ok, false);
+});
+test('partial settings saves preserve current pause/consent and merge dictionary edits', async () => {
+  const f = fakeChrome(); installController(f.api);
+  await f.rpc('set-pause', {paused: true});
+  await f.rpc('save-settings', {changes: {automatic: true}, expected: {automatic: false}, dictionary: {add: ['Seatline'], remove: []}});
+  const result = await f.rpc('save-settings', {changes: {model: 'new-model'}, expected: {model: ''}, dictionary: {add: [], remove: []}});
+  assert.equal(result.ok, true); assert.equal(f.data.preferences.paused, true); assert.equal(f.data.preferences.automatic, true);
+  assert.deepEqual(f.data.preferences.dictionary, ['seatline']);
+  await Promise.all([
+    f.rpc('add-word', {word: 'Companion'}, f.sender),
+    f.rpc('save-settings', {changes: {}, expected: {}, dictionary: {add: ['Lineleaf'], remove: ['Seatline']}})
+  ]);
+  assert.deepEqual(f.data.preferences.dictionary, ['companion', 'lineleaf']);
+});
+test('stale same-field saves fail atomically and save-settings cannot change pause', async () => {
+  const f = fakeChrome(); installController(f.api);
+  const save = (changes, expected, dictionary = {add: [], remove: []}) => f.rpc('save-settings', {changes, expected, dictionary});
+  await save({model: 'new-model'}, {model: ''});
+  const before = structuredClone(f.data);
+  assert.equal((await save({model: 'stale-model', automatic: true}, {model: '', automatic: false}, {add: ['Lineleaf'], remove: []})).code, 'SETTINGS_CHANGED');
+  assert.deepEqual(f.data, before);
+  for (const payload of [
+    {model: '', variant: 'US', paused: false},
+    {changes: {paused: false}, expected: {paused: true}, dictionary: {add: [], remove: []}},
+    {changes: {automatic: 'true'}, expected: {automatic: false}, dictionary: {add: [], remove: []}},
+    {changes: {}, expected: {}, dictionary: {add: ['two words'], remove: []}}
+  ]) assert.equal((await f.rpc('save-settings', payload)).code, 'INVALID_REQUEST');
+  assert.deepEqual(f.data, before);
+});
+test('dictionary protects changed words inside phrases/punctuation and English possessives', () => {
+  const settings = preferences({dictionary: ['Lineleaf', 'Seatline', 'café']});
+  const spelling = (before, after) => ({before, after, category: 'spelling'});
+  for (const edit of [spelling('Lineleaf', 'Line leaf'), spelling("Lineleaf's", "Line leaf's"), spelling('Lineleaf’s', 'Line leaf’s'), spelling('Seatline,', 'Seat line,'), spelling('Lineleaf is', 'Line leaf is'), spelling('A CAFE\u0301 name', 'A coffee name')]) {
+    assert.deepEqual(filterDictionary([edit], settings), []);
+    assert.deepEqual(filterDictionary([{...edit, category: 'grammar'}], settings), [{...edit, category: 'grammar'}]);
+  }
+  for (const edit of [spelling('Lineleaf is mispelt', 'Lineleaf is misspelt'), spelling('Seatlinearity', 'Seatline'), spelling('Lineleaf.', 'Lineleaf!')]) assert.deepEqual(filterDictionary([edit], settings), [edit]);
 });

@@ -92,3 +92,35 @@ test('installed automatic flow stays idle on focus, reports missing host after t
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
   assert.equal(await options.locator('#automatic').isChecked(), false); assert.equal(await options.locator('#dictionary').inputValue(), '');
 });
+test('two options pages preserve newer pause/consent/dictionary and reject same-field conflicts', async () => {
+  await options.reload(); await options.waitForFunction(() => document.querySelector('#authorize').textContent.includes('seatline-companion'));
+  const other = await context.newPage(); await other.goto(`chrome-extension://${id}/options.html`);
+  await other.waitForFunction(() => document.querySelector('#authorize').textContent.includes('seatline-companion'));
+  await other.locator('#paused').check();
+  await other.waitForFunction(() => document.querySelector('#status').textContent.includes('Lineleaf is paused'));
+  await other.locator('#automatic').check(); await other.locator('#dictionary').fill('Seatline');
+  await other.getByRole('button', {name: 'Save preferences'}).click();
+  await other.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  // The original tab still shows the old defaults; changing just the model must preserve other edits.
+  assert.equal(await options.locator('#paused').isChecked(), false);
+  await options.locator('#model').fill('new-model'); await options.getByRole('button', {name: 'Save preferences'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  let preferences = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+  assert.equal(preferences.paused, true); assert.equal(preferences.automatic, true); assert.deepEqual(preferences.dictionary, ['seatline']);
+  assert.equal(await options.locator('#paused').isChecked(), true);
+  await other.locator('#dictionary').fill('Seatline\nCompanion'); await other.getByRole('button', {name: 'Save preferences'}).click();
+  await other.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#dictionary').value.includes('companion'));
+  await options.locator('#dictionary').fill('Lineleaf'); await options.getByRole('button', {name: 'Save preferences'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#dictionary').value.includes('companion'));
+  preferences = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+  assert.deepEqual(preferences.dictionary, ['companion', 'lineleaf']);
+  await options.locator('#model').fill('latest-model'); await options.getByRole('button', {name: 'Save preferences'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#model').value === 'latest-model');
+  await other.locator('#model').fill('stale-model'); await other.getByRole('button', {name: 'Save preferences'}).click();
+  await other.waitForFunction(() => document.querySelector('#status').textContent.includes('Preferences changed elsewhere'));
+  preferences = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+  assert.equal(preferences.model, 'latest-model'); assert.equal(preferences.paused, true); assert.equal(preferences.automatic, true);
+  assert.deepEqual(preferences.dictionary, ['companion', 'lineleaf']);
+  await other.close(); await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
+});

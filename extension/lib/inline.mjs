@@ -27,9 +27,10 @@ class InlineView {
     this.root.addEventListener('keydown', trusted(event => { if (event.key === 'Escape') { event.preventDefault(); this.hide(); } }));
   }
   focused() { return document.activeElement === this.host; }
+  announce(message) { if (this.announcer.textContent !== message) this.announcer.textContent = message; }
   update(capture, edits, message, undo = false, copyOnly = false) {
     this.capture = capture; this.edits = edits; this.message = message; this.undo = undo; this.copyOnly = copyOnly; this.index = Math.min(this.index, Math.max(0, edits.length - 1));
-    this.announcer.textContent = message;
+    this.announce(message);
     this.badge.textContent = edits.length ? `Lineleaf · ${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : message.startsWith('Checking') ? 'Lineleaf · checking…' : 'Lineleaf · review';
     this.badge.setAttribute('aria-label', `${message} Alt Shift L opens Lineleaf.`);
     this.card.hidden = true; this.card.replaceChildren(); this.draw();
@@ -67,7 +68,7 @@ class InlineView {
     footer.append(this.button('Check now', () => this.actions.check()), this.button('Cancel check', () => this.actions.cancel()), this.button('Pause Lineleaf', () => this.actions.pause()), this.button('Settings', () => this.actions.settings()));
     this.card.append(footer); this.draw(); title.focus({preventScroll: true});
   }
-  status(message) { this.message = message; this.announcer.textContent = message; const status = this.card.querySelector('#status'); if (status) status.textContent = message; }
+  status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
   hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); }
   draw() {
     const field = this.field, r = field.getBoundingClientRect(); this.lines.replaceChildren();

@@ -118,12 +118,23 @@ export function installController(api, {now = Date.now} = {}) {
     if (message.type === 'set-pause' && exactKeys(p, ['paused']) && typeof p.paused === 'boolean') {
       const next = {...settings, paused: p.paused}; await api.storage.local.set({preferences: next}); return next;
     }
-    if (message.type === 'save-settings' && (exactKeys(p, ['model', 'variant', 'paused']) || exactKeys(p, ['model', 'variant', 'paused', 'automatic', 'dictionary']))) {
-      const next = preferences({...settings, ...p});
-      if (next.model !== p.model || next.variant !== p.variant || typeof p.paused !== 'boolean'
-          || (Object.hasOwn(p, 'automatic') && (typeof p.automatic !== 'boolean' || !Array.isArray(p.dictionary) || p.dictionary.length > 500
-            || p.dictionary.some(word => !dictionaryWord(word))))) throw new LineleafError('INVALID_REQUEST');
-      await api.storage.local.set({preferences: next}); return next;
+    if (message.type === 'save-settings' && exactKeys(p, ['changes', 'expected', 'dictionary'])) {
+      const fields = ['model', 'variant', 'automatic'];
+      if (!p.changes || !exactKeys(p.expected, Object.keys(p.changes)) || !exactKeys(p.changes, Object.keys(p.expected))
+          || !Object.keys(p.changes).every(key => fields.includes(key)) || !exactKeys(p.dictionary, ['add', 'remove'])
+          || !['add', 'remove'].every(key => Array.isArray(p.dictionary[key]) && p.dictionary[key].length <= 500 && Array.from(p.dictionary[key]).every(word => dictionaryWord(word)))) throw new LineleafError('INVALID_REQUEST');
+      for (const values of [p.changes, p.expected]) {
+        const validated = preferences({...settings, ...values});
+        if (!Object.keys(values).every(key => validated[key] === values[key])) throw new LineleafError('INVALID_REQUEST');
+      }
+      // Compare only deliberately edited fields; dictionary deltas merge with current words.
+      if (!Object.keys(p.changes).every(key => settings[key] === p.expected[key])) throw new LineleafError('SETTINGS_CHANGED');
+      const remove = new Set(p.dictionary.remove.map(dictionaryWord));
+      const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(dictionaryWord)])];
+      if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
+      const next = {...settings, ...p.changes, dictionary};
+      if (JSON.stringify(next) !== JSON.stringify(settings)) await api.storage.local.set({preferences: next});
+      return next;
     }
     if (message.type === 'set-site' && exactKeys(p, ['origin', 'enabled']) && originOf(p.origin) === p.origin && typeof p.enabled === 'boolean') {
       if (p.enabled && !await api.permissions.contains({origins: [sitePattern(p.origin)]})) throw new LineleafError('SITE_DISABLED');

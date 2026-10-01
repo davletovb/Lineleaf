@@ -23,7 +23,8 @@ beforeEach(async () => { await page.context().setOffline(false); await page.goto
 const sends = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
 const settings = patch => page.evaluate(async patch => {
   const p = fixture.worker.data.preferences;
-  return fixture.worker.rpc('save-settings', {model: p.model, variant: p.variant, paused: p.paused, automatic: p.automatic, dictionary: p.dictionary, ...patch});
+  const expected = Object.fromEntries(Object.keys(patch).map(key => [key, p[key]]));
+  return fixture.worker.rpc('save-settings', {changes: patch, expected, dictionary: {add: [], remove: []}});
 }, patch);
 async function type(id = 'textarea', value = 'He go to work.') { await page.locator(`#${id}`).fill(value); }
 async function result() { await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send')); await inline.locator('.underline').waitFor(); }
@@ -133,6 +134,27 @@ test('keyboard Tab/Escape controls and accessibility tree expose the suggestion 
   await page.keyboard.press('Enter'); assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work.');
   await page.keyboard.press('Escape'); assert.equal(await page.locator('#textarea').evaluate(el => document.activeElement === el), true);
   await cdp.detach();
+});
+test('the manual panel keeps the selected field when an inline card holds focus', async () => {
+  await type(); await result(); await open();
+  await page.locator('#textarea').evaluate(el => el.setSelectionRange(0, el.value.length));
+  assert.equal(await page.locator('[data-lineleaf-inline]').evaluate(el => document.activeElement === el), true);
+  await page.evaluate(() => fixture.runtimeMessages.emit({type: 'lineleaf-open'}, {id: chrome.runtime.id}));
+  const panel = panelFor(page); await panel.button('Check selection').waitFor();
+  assert.equal(await panel.locator('#selected').textContent(), 'He go to work.');
+  await panel.button('Check selection').click(); await panel.button('Accept').waitFor();
+  assert.equal((await sends()).length, 2);
+});
+test('typing announces a repeated idle message once and still announces state transitions', async () => {
+  await page.locator('#textarea').focus(); await inline.locator('.badge').waitFor();
+  await inline.locator('.sr').evaluate(el => {
+    globalThis.__announcements = [];
+    new MutationObserver(() => globalThis.__announcements.push(el.textContent)).observe(el, {childList: true, characterData: true, subtree: true});
+  });
+  await page.keyboard.press('End'); await page.keyboard.type(' Fifteen letters');
+  assert.deepEqual(await page.evaluate(() => globalThis.__announcements), ['Text changed. Checking after a pause.']);
+  await result();
+  assert.deepEqual(await page.evaluate(() => globalThis.__announcements), ['Text changed. Checking after a pause.', 'Checking with Codex… You can keep typing.', '1 suggestion. Review before accepting.']);
 });
 test('disabled site, revoked permission and removed field cancel work and remove all previews', async () => {
   for (const change of ['disable', 'revoke', 'remove']) {
