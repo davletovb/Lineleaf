@@ -221,6 +221,7 @@ export function mountInline(api) {
   const RICH_FAILURES = {
     stale_or_unavailable: 'The text changed before this could be applied. Choose Check now to review the current text.',
     changed_on_focus: 'The text changed before this could be applied. Choose Check now to review the current text.',
+    focus_moved: 'Nothing was changed because you moved elsewhere. Choose Accept again when you are back in the editor.',
     selection_unavailable: 'The editor would not select that text, so nothing was changed. Use Copy.',
     crosses_format_boundary: 'This change spans formatting or a mention, so Lineleaf can only copy it.',
     invalid_span: 'This suggestion no longer matches the text. Choose Check now to review the current text.',
@@ -239,17 +240,22 @@ export function mountInline(api) {
     catch { result = {status: 'copy', reason: 'native_edit_not_confirmed', changed: true}; }
     finally { applying = false; }
     if (capture !== selected || view !== selectedView) return;
+    // The user went to another field while the edit settled: hand off to it and never pull focus back to this editor.
+    const active = deepActive(), here = active === field || field.contains(active) || active === view.host;
+    if (!here && active && active !== document.body && active !== document.documentElement) { drop(); choose(active); return; }
     if (result.status === 'applied') {
       // Keep the other suggestions that still point at the same words, moved by the length change.
       const next = result.capture, delta = edit.after.length - (edit.end - edit.start);
       edits = edits.filter(x => x !== edit).map(x => x.start >= edit.end ? {...x, start: x.start + delta, end: x.end + delta} : x)
         .filter(x => (x.end <= edit.start || x.start >= edit.end + delta) && next.text.slice(x.start, x.end) === x.before);
-      capture = next; undo = false; copyOnly = false; lastKey = keyFor(next); pendingKey = null; dirty = false;
+      // Typing during the edit was not seen as typing (it happened while applying): check the paragraph again after a pause.
+      capture = next; undo = false; copyOnly = false; lastKey = result.typed ? null : keyFor(next); pendingKey = result.typed ? keyFor(next) : null; dirty = result.typed === true;
       update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
-      view.hide(); return;
+      if (here) view.hide();
+      queue(); return;
     }
-    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable'].includes(result.reason);
-    update(RICH_FAILURES[result.reason] ?? 'Safe replacement is unavailable. Use Copy.'); view.open();
+    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable', 'focus_moved'].includes(result.reason);
+    update(RICH_FAILURES[result.reason] ?? 'Safe replacement is unavailable. Use Copy.'); if (here) view.open();
   }
   function accept(edit) {
     if (!capture || !eligibleDOM()) return;

@@ -167,11 +167,37 @@ test('an editor that cancels the edit stays unchanged and becomes copy-only, wit
 test('an editor that re-renders the old text after the edit is detected and becomes copy-only', async () => {
   await load(); await checked('#reverting', 'work.');
   await accept();
-  await inline.locator('#status').waitFor(el => /reverted the change/.test(el.textContent));
+  // Reverting just before or just after the first check differs only in the message; either way nothing changed and it is copy-only.
+  await inline.locator('#status').waitFor(el => /reverted the change|did not apply the change/.test(el.textContent));
   assert.equal((await checkedLine('#reverting')).trim(), 'He go to work.');
   // The reset detached the checked paragraph, so the old suggestions go; the next check on this editor is copy-only.
   await caretAfter('#reverting', 'work.'); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
   await openCard(); assert.equal(await inline.button('Accept').count(), 0); assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
+});
+
+test('typing while the edit settles is the user\u2019s typing, not an editor revert, and keeps Accept available', async () => {
+  await load(); await checked('#prose', 'work.');
+  await accept();
+  await page.waitForFunction(() => document.querySelector('#prose').textContent.includes('goes')); // the edit is in; the recheck is still pending
+  await page.keyboard.type('Z');
+  await applied();
+  const line = await checkedLine('#prose');
+  assert.ok(line.includes('goes') && line.includes('Z'), line); // both the correction and the typing survive
+  // The editor was not disabled: the next check still offers Accept.
+  await answer([{before: 'work', after: 'job', left: 'to ', right: '.'}]);
+  await caretAfter('#prose', 'work.'); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
+  await openCard(); assert.equal(await inline.button('Accept').count(), 1);
+});
+
+test('moving to another field while the edit settles hands off to it instead of pulling focus back', async () => {
+  await load(); await checked('#prose', 'work.');
+  await accept();
+  await page.waitForFunction(() => document.querySelector('#prose').textContent.includes('goes'));
+  await page.evaluate(() => document.querySelector('#textarea').focus());
+  await page.waitForTimeout(900); // longer than the settle window
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'textarea');
+  assert.equal(await checkedLine('#prose'), 'He goes to work. ');
+  assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
 });
 
 test('priority composers and unlisted editors stay copy-only even when they carry a family marker', async () => {
