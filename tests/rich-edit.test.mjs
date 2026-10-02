@@ -167,8 +167,11 @@ test('an editor that cancels the edit stays unchanged and becomes copy-only, wit
 test('an editor that re-renders the old text after the edit is detected and becomes copy-only', async () => {
   await load(); await checked('#reverting', 'work.');
   await accept();
-  // Reverting just before or just after the first check differs only in the message; either way nothing changed and it is copy-only.
-  await inline.locator('#status').waitFor(el => /reverted the change|did not apply the change/.test(el.textContent));
+  // Whether the editor reverts before the first check, between the checks or after them changes only the message (reverted, did not
+  // apply, or not what Lineleaf expected), and the poll replaces it within a fraction of a second. The guarantees are the residual
+  // state and the copy-only fallback, so wait for the apply to finish (the badge stops announcing suggestions) and assert those.
+  await page.waitForFunction(() => window.reverted >= 1);
+  await inline.locator('.badge').waitFor(el => !/suggestion/.test(el.getAttribute('aria-label')));
   assert.equal((await checkedLine('#reverting')).trim(), 'He go to work.');
   // The reset detached the checked paragraph, so the old suggestions go; the next check on this editor is copy-only.
   await caretAfter('#reverting', 'work.'); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();

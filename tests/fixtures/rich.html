@@ -132,7 +132,7 @@ window.modelDraft = modelEditor(document.getElementById('model-draft'), 'draft',
 document.getElementById('rejecting').addEventListener('beforeinput', event => { if (event.inputType === 'insertText' && event.data !== ' ') event.preventDefault(); });
 {
   const reverting = document.getElementById('reverting'), original = reverting.innerHTML;
-  reverting.addEventListener('input', () => { if (reverting.textContent.includes('goes')) setTimeout(() => { reverting.innerHTML = original; }, 100); });
+  reverting.addEventListener('input', () => { if (reverting.textContent.includes('goes')) setTimeout(() => { reverting.innerHTML = original; window.reverted = (window.reverted ?? 0) + 1; }, 100); });
 }
 
 const event = () => ({listeners: [], addListener(listener) { this.listeners.push(listener); }, emit(...args) { for (const fn of this.listeners) fn(...args); }});
