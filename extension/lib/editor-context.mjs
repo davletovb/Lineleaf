@@ -72,14 +72,27 @@ export function excluded(element) {
   return /(?:password|one-time-code|cc-|credit.?card|security.?code|cvc|cvv)/i.test(
     [element.getAttribute('autocomplete'), element.getAttribute('name'), element.id].filter(Boolean).join(' '));
 }
+// Priority composers whose rich editors have no live-verified adapter yet: copy-only regardless of the framework markers.
+const unverifiedHost = host => host === 'mail.google.com' || /(^|\.)linkedin\.com$/.test(host)
+  || /(^|\.)slack\.com$/.test(host) || /(^|\.)notion\.(?:so|site)$/.test(host);
 export function replacementAllowed(element) {
   if (excluded(element)) return false;
   const host = location.hostname;
   if (host === 'docs.google.com') return false; // Never treat Docs' input proxy as its document.
   const rich = !(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement);
-  if (rich && (host === 'mail.google.com' || /(^|\.)linkedin\.com$/.test(host)
-      || /(^|\.)slack\.com$/.test(host) || /(^|\.)notion\.(?:so|site)$/.test(host))) return false;
+  if (rich && unverifiedHost(host)) return false;
   return !ancestry(element).some(node => node instanceof Element && node.matches(COMPLEX)) && !element.querySelector(COMPLEX);
+}
+// Editor families whose own input pipeline replaces a range correctly. Each was exercised with the real library (Draft.js
+// 0.11.7, Slate 0.126/slate-react 0.127, Quill 2.0.3, ProseMirror view 1.42, Lexical 0.52): the editor's model and DOM agree
+// after the edit and its own undo restores the text. An editor outside this list, or one that ever misbehaves, stays copy-only.
+const REPLACEABLE = '.public-DraftEditor-content, [data-lexical-editor], [data-slate-editor], .ProseMirror, .ql-editor';
+const unsafe = new WeakSet();
+export const markRichUnsafe = element => { unsafe.add(element); };
+export function richReplacementAllowed(element) {
+  if (!previewAllowed(element) || unsafe.has(element) || unverifiedHost(location.hostname)) return false;
+  // Selection and commands are page-level; an open shadow root has its own selection and is not covered by the tests.
+  return !(element.getRootNode() instanceof ShadowRoot) && element.matches(REPLACEABLE);
 }
 // Copy-only inline preview: Lineleaf may read the caret's paragraph and draw an overlay, but never writes.
 // Covers rich contenteditable editors (Draft.js, Lexical, Slate, ProseMirror, Quill, Gmail-style composers).
