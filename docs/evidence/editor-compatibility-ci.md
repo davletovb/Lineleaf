@@ -78,6 +78,22 @@ The adapter compares exclusion/replacement/embedding/native-support eligibility,
 
 The worker passes the [shared exclusion selector](../../extension/lib/editor-policy.mjs) into its serialized frame probe, including Monaco/CodeMirror containers. Ineligible frames report `RESTRICTED_PAGE`; changed/missing documents report `STALE_DOCUMENT`; site permission/enablement failures alone report `SITE_DISABLED`.
 
-Seven browser regressions cover transform alignment with native apply/undo, translated clipping and unsafe transforms, retained inline/manual/pending suggestions after harmless classes, exclusion/framework ABA, non-typing announcements/request counts, and execution of the real frame probe inside excluded embeddings. One new controller regression verifies shared probe arguments and distinct diagnostic paths; existing document/route tests now assert their precise failure codes. CI acceptance for this changed code is pending; D-02 is IMPLEMENTED — VERIFY until its Linux/macOS installed-extension checks pass.
+Seven browser regressions cover transform alignment with native apply/undo, translated clipping and unsafe transforms, retained inline/manual/pending suggestions after harmless classes, exclusion/framework ABA, non-typing announcements/request counts, and execution of the real frame probe inside excluded embeddings. One new controller regression verifies shared probe arguments and distinct diagnostic paths; existing document/route tests now assert their precise failure codes. The exact changed code passes Linux/macOS installed-extension CI as recorded below; D-02 is DONE for its declared development boundaries.
 
-Local `npm test` passes **157 checks**: 26 Python, 41 logic, 16 adapter, 20 selection, 20 inline and 34 compatibility tests. Packaging, local documentation links, tracker counts and `git diff --check` pass. The updated ZIP is **38,606 bytes**, SHA-256 **`02b9b307f1e40d04c61aae36000c5f637f89ecfe33db695b909a4ffc6e3eb2db`**. Installed MV3 and shared-native CI acceptance remains to be recorded against the exact remote code commit.
+Local `npm test` passes **157 checks**: 26 Python, 41 logic, 16 adapter, 20 selection, 20 inline and 34 compatibility tests. Packaging, local documentation links, tracker counts and `git diff --check` pass. The updated ZIP is **38,606 bytes**, SHA-256 **`02b9b307f1e40d04c61aae36000c5f637f89ecfe33db695b909a4ffc6e3eb2db`**.
+
+Code **`fc946419bb7b0990315ab9aef30eed02a3d05e6f`**, tree **`68a58e371407ee07efe43a6bbd97b43589f1548d`**, passes [run 36948449397](https://github.com/davletovb/Lineleaf/actions/runs/36948449397): **163 checks per Linux/macOS** (the 157 above plus six actual installed-extension tests) and **fifteen shared-native checks**. All three jobs pass with the pinned full Playwright browser and normal process configuration.
+
+| Job | ID | Result |
+| --- | --- | --- |
+| Linux editor/harness/installed extension | [110655761109](https://github.com/davletovb/Lineleaf/actions/runs/36948449397/job/110655761109) | All 163 pass |
+| macOS editor/harness/installed extension | [110655761288](https://github.com/davletovb/Lineleaf/actions/runs/36948449397/job/110655761288) | All 163 pass |
+| Unmodified shared Seatline fixture | [110655761274](https://github.com/davletovb/Lineleaf/actions/runs/36948449397/job/110655761274) | All fifteen report checks true |
+
+| Downloaded artifact | ID | Verified outer ZIP SHA-256 |
+| --- | --- | --- |
+| Extension Linux | 11203336062 | `89e7d99803a06c1cf99b26f4f83dd4c2ad5a715391c82fcf951c5438310e2c0d` |
+| Extension macOS | 11202548357 | `5a020dd01d19ba7e2342c15c7bb95e22e9935a2b94f0bfec447a257f05336eb4` |
+| Native authorization | 11202854209 | `f4ccee1f2d9a8333bbd29de2135d9df7a66d5db59fcb6a0b1f82a372a4ba4bbd` |
+
+Both downloaded inner packages equal the local 38,606-byte ZIP above byte-for-byte. The downloaded native report confirms all fifteen checks and the unchanged audited companion/protocol/development ID; it remains an upstream synthetic-provider fixture. D-01 authenticated drafts, human screen-reader/device acceptance, live provider and E beta gates stay open. The follow-up documentation commit records evidence/status without changing this tested code or package.
