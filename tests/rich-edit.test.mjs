@@ -173,7 +173,9 @@ test('an editor that re-renders the old text after the edit is detected and beco
   await page.waitForFunction(() => window.reverted >= 1);
   await inline.locator('.badge').waitFor(el => !/suggestion/.test(el.getAttribute('aria-label')));
   assert.equal((await checkedLine('#reverting')).trim(), 'He go to work.');
-  // The reset detached the checked paragraph, so the old suggestions go; the next check on this editor is copy-only.
+  // The reset detached the checked paragraph, so the overlay drops the old suggestions and its card on its next poll. Wait for that
+  // rather than racing it; then the next check on this editor is copy-only.
+  await inline.locator('.badge').waitFor(el => /The editor changed/.test(el.getAttribute('aria-label')));
   await caretAfter('#reverting', 'work.'); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
   await openCard(); assert.equal(await inline.button('Accept').count(), 0); assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
 });
