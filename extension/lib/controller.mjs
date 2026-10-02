@@ -1,5 +1,5 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTO_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 
@@ -62,7 +62,8 @@ export function installController(api, {now = Date.now} = {}) {
         || typeof request.id !== 'string' || !/^[a-f0-9-]{36}$/.test(request.id) || !validText(request.text) || !MODES.includes(request.mode)) {
       send(peer.port, {type: 'error', id: request?.id, code: 'INVALID_REQUEST'}); return;
     }
-    if (automatic && request.mode !== 'proofread') { send(peer.port, {type: 'error', id: request.id, code: 'INVALID_REQUEST'}); return; }
+    // Only the correctness and clearer-wording checks may run unasked, and clearer wording is never requested by hand (Improve it is the explicit form).
+    if (automatic ? !AUTOMATIC_MODES.includes(request.mode) : request.mode === 'clarity') { send(peer.port, {type: 'error', id: request.id, code: 'INVALID_REQUEST'}); return; }
     peer.running = true; peer.automatic = automatic; peer.done = new Promise(resolve => { peer.finish = resolve; });
     peer.abort = new AbortController(); const signal = peer.abort.signal;
     let connection;
@@ -70,6 +71,7 @@ export function installController(api, {now = Date.now} = {}) {
       await initialized; const {settings} = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
+      if (request.mode === 'clarity' && !settings.clarity) throw new LineleafError('CLARITY_DISABLED');
       if (!automatic && active?.automatic) { const previous = active; cancelPeer(previous); await previous.done; await eligible(peer.sender); }
       if (active || diagnostic) throw new LineleafError('BUSY');
       if (now() < backoffUntil) throw waiting('PROVIDER_RATE_LIMITED', backoffUntil - now());
@@ -83,6 +85,7 @@ export function installController(api, {now = Date.now} = {}) {
       const latest = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
+      if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
       send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
       const answer = await connection.request('send', writingTurn(request.text, request.mode, latest.settings), {signal});
       const final = await eligible(peer.sender);
@@ -139,7 +142,7 @@ export function installController(api, {now = Date.now} = {}) {
       const next = {...settings, paused: p.paused}; await api.storage.local.set({preferences: next}); return next;
     }
     if (message.type === 'save-settings' && exactKeys(p, ['changes', 'expected', 'dictionary'])) {
-      const fields = ['model', 'variant', 'automatic'];
+      const fields = ['model', 'variant', 'automatic', 'clarity'];
       if (!p.changes || !exactKeys(p.expected, Object.keys(p.changes)) || !exactKeys(p.changes, Object.keys(p.expected))
           || !Object.keys(p.changes).every(key => fields.includes(key)) || !exactKeys(p.dictionary, ['add', 'remove'])
           || !['add', 'remove'].every(key => Array.isArray(p.dictionary[key]) && p.dictionary[key].length <= 500 && Array.from(p.dictionary[key]).every(word => dictionaryWord(word)))) throw new LineleafError('INVALID_REQUEST');
@@ -152,7 +155,7 @@ export function installController(api, {now = Date.now} = {}) {
       const remove = new Set(p.dictionary.remove.map(dictionaryWord));
       const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(dictionaryWord)])];
       if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
-      const next = {...settings, ...p.changes, dictionary};
+      const next = {...settings, ...p.changes, dictionary}; next.clarity = next.automatic && next.clarity; // Turning automatic checking off turns clearer wording off with it.
       if (JSON.stringify(next) !== JSON.stringify(settings)) await api.storage.local.set({preferences: next});
       return next;
     }
@@ -219,7 +222,7 @@ export function installController(api, {now = Date.now} = {}) {
   };
   api.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'site-state' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
-      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
+      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
     } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {
       changeFromContent(message, sender).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else {

@@ -31,7 +31,7 @@ The preservation promise concerns authorship, intent, and control. It does not r
 | --- | --- | --- |
 | Proofreading | Grammar, spelling, punctuation; minimal suggested edits | Additional languages and advanced style rules |
 | Inline interaction | Underlines/cards, accept, dismiss, pause | More polished positioning and grouped suggestions |
-| Rewriting | Selected text, or the caret paragraph in the inline card: improve it, paraphrase, clearer, shorter, more formal, friendlier; explicit actions with a before/after preview | Automatic clarity suggestions, multiple alternatives, custom tone presets and broader draft assistance |
+| Rewriting | Selected text, or the caret paragraph in the inline card: improve it, paraphrase, clearer, shorter, more formal, friendlier; explicit actions with a before/after preview, available without the automatic opt-in; optional, off-by-default clearer-wording underlines that need automatic checking and are labelled apart from corrections | Multiple alternatives, custom tone presets and broader draft assistance |
 | Explanations | Brief optional explanation for a correction | Learner-focused explanations and recurring patterns |
 | Editing support | Textarea, supported text inputs, basic contenteditable | Dedicated rich-editor and site adapters |
 | Preferences | English, US/UK variant, site enablement, personal dictionary | Other English variants, multilingual support, style profiles |
@@ -57,7 +57,7 @@ Initial tuning hypotheses, to validate with measurements:
 
 - Begin with roughly 1.5–2 seconds of idle time before a check, and check only changed paragraphs.
 - Keep one in-flight automatic check per active editor and coalesce queued changes to the latest revision.
-- Start with a minimum 10-second interval between automatic provider submissions; explicit rewrites bypass that local delay but still obey generic Seatline/provider limits.
+- Start with a minimum 10-second interval between automatic provider submissions; explicit rewrites bypass that local delay but still obey generic Seatline/provider limits. The optional clearer-wording check is a second automatic request per paragraph and spends the same interval and cap.
 - Bound automatic requests to about 2,000 characters initially. Larger explicit rewrites need a visible preview and separate limit.
 - Keep a small in-memory cache keyed by the text and writing settings. Do not persist raw draft text or text-derived cache keys by default.
 - Apply backoff for provider-limit/busy errors. Cap background traffic across all tabs in this extension; use existing shared scheduling if exposed. Do not claim cross-app fairness unless it is verified.

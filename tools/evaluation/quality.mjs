@@ -6,6 +6,8 @@ export const sha256 = value => createHash('sha256').update(typeof value === 'str
 const fail = () => { throw new Error('INVALID_EVALUATION_DATA'); };
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value);
 const hash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+// Optional clearer-wording suggestions are measured on their own cases and their own metrics, never folded into proofreading precision.
+export const CLARITY_MIN_CASES = 12;
 export const STRATA = ['grammar', 'spelling', 'punctuation', 'already_correct', 'informal', 'facts', 'negation', 'ambiguous', 'second_language', 'unicode', 'paragraph', 'multi_edit', 'variant'];
 export function validateCorpus(corpus) {
   if (!exactKeys(corpus, ['schema', 'id', 'author', 'kind', 'cases']) || corpus.schema !== 1 || !id(corpus.id)
@@ -20,7 +22,7 @@ export function validateCorpus(corpus) {
     candidates(JSON.stringify(c.proposal), c.source, c.mode);
     if (c.mode === 'shorter' && c.proposal.rewrite.length >= c.source.length) fail();
   }
-  const rewrites = corpus.cases.filter(c => c.mode !== 'proofread');
+  const rewrites = corpus.cases.filter(c => REWRITE_MODES.includes(c.mode));
   if (new Set(rewrites.map(c => c.source)).size !== rewrites.length) fail();
   return corpus;
 }
@@ -117,17 +119,19 @@ export function score(corpus, run, {labels = null, judgments = null, acceptance 
   }
   const reviewed = judgments ? validateJudgments(corpus, run, judgments, decoded) : null;
   const metrics = {proofread: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0, falsePositives: 0},
+    clarity: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0, falsePositives: 0},
     style: {cases: 0, emitted: 0, humanApproved: 0, notShorter: 0}, protectedViolations: 0, meaningViolations: 0, explanationErrors: 0};
   const strata = Object.fromEntries(STRATA.map(s => [s, {cases: 0, expected: 0, emitted: 0, referenceMatches: 0}]));
   for (const c of corpus.cases) {
     const edits = decoded.get(c.id) ?? [], gold = references.get(c.id), judgment = reviewed?.get(c.id);
-    const matches = c.mode === 'proofread' ? edits.filter(e => gold.some(g => sameEdit(e, g))).length : 0;
-    const group = c.mode === 'proofread' ? metrics.proofread : metrics.style; group.cases++; group.emitted += edits.length;
-    if (c.mode === 'proofread') {
+    const kind = c.mode === 'proofread' ? 'proofread' : c.mode === 'clarity' ? 'clarity' : 'style', suggests = kind !== 'style';
+    const matches = suggests ? edits.filter(e => gold.some(g => sameEdit(e, g))).length : 0;
+    const group = metrics[kind]; group.cases++; group.emitted += edits.length;
+    if (suggests) {
       group.expected += gold.length; group.referenceMatches += matches;
       if (judgment) { group.humanCorrect += judgment.suggestions.filter(x => x.correct).length; group.falsePositives += judgment.suggestions.filter(x => !x.correct).length; }
     } else if (judgment?.meaningPreserved && judgment.suggestions.every(x => x.correct)) group.humanApproved++;
-    for (const tag of c.strata) {
+    if (kind !== 'clarity') for (const tag of c.strata) {
       strata[tag].cases++; strata[tag].expected += c.mode === 'proofread' ? gold.length : 0;
       strata[tag].emitted += edits.length; strata[tag].referenceMatches += matches;
     }
@@ -141,6 +145,10 @@ export function score(corpus, run, {labels = null, judgments = null, acceptance 
   p.referencePrecision = p.emitted ? p.referenceMatches / p.emitted : null;
   p.referenceRecall = p.expected ? p.referenceMatches / p.expected : null;
   p.humanPrecision = reviewed && p.emitted ? p.humanCorrect / p.emitted : null;
+  const k = metrics.clarity;
+  k.referencePrecision = k.emitted ? k.referenceMatches / k.emitted : null;
+  k.referenceRecall = k.expected ? k.referenceMatches / k.expected : null;
+  k.humanPrecision = reviewed && k.emitted ? k.humanCorrect / k.emitted : null;
   const reasons = [];
   if (run.kind !== 'live') reasons.push(run.kind === 'planned' ? 'PLANNED_NOT_QUALITY_EVIDENCE' : 'FIXTURE_NOT_QUALITY_EVIDENCE');
   if (!labels) reasons.push('INDEPENDENT_LABEL_REVIEW_REQUIRED');
@@ -152,14 +160,16 @@ export function score(corpus, run, {labels = null, judgments = null, acceptance 
   const coverage = {proofreading: proofCases.length, paragraphs: proofCases.filter(c => c.source.length >= 200).length,
     nearLimit: proofCases.filter(c => c.source.length >= 1800).length,
     multiEdit: proofCases.filter(c => references.get(c.id).length > 1).length,
-    variant: proofCases.filter(c => c.strata.includes('variant')).length};
+    variant: proofCases.filter(c => c.strata.includes('variant')).length, clarity: metrics.clarity.cases};
   if (coverage.proofreading < 150 || coverage.paragraphs < 30 || coverage.nearLimit < 2 || coverage.multiEdit < 8 || coverage.variant < 6
-      || STRATA.some(s => !strata[s].cases)) reasons.push('CORPUS_COVERAGE_INCOMPLETE');
+      || coverage.clarity < CLARITY_MIN_CASES || STRATA.some(s => !strata[s].cases)) reasons.push('CORPUS_COVERAGE_INCOMPLETE');
   if (decoded.size !== corpus.cases.length || invalid.length) reasons.push('INCOMPLETE_OR_INVALID_RESPONSES');
   const unreviewed = [...decoded.keys()].filter(key => !reviewed?.get(key));
   if (judgments && unreviewed.length) reasons.push('INDEPENDENT_OUTPUT_REVIEW_INCOMPLETE');
   if (p.humanPrecision === null || p.humanPrecision < .95) reasons.push('PRECISION_GATE_NOT_MET');
   if (!p.expected || !p.referenceMatches) reasons.push('NO_VERIFIED_ERROR_DETECTION');
+  // Same human bar as corrections, applied to the clearer-wording suggestions alone; offering none cannot satisfy it.
+  if (k.humanPrecision === null || k.humanPrecision < .95) reasons.push('CLARITY_PRECISION_GATE_NOT_MET');
   if (REWRITE_MODES.some(mode => !corpus.cases.some(c => c.mode === mode))
       || metrics.style.humanApproved !== metrics.style.cases) reasons.push('REWRITE_REVIEW_GATE_NOT_MET');
   if (metrics.protectedViolations || metrics.meaningViolations) reasons.push('MEANING_PRESERVATION_GATE_NOT_MET');
@@ -177,7 +187,7 @@ export function score(corpus, run, {labels = null, judgments = null, acceptance 
     invalidOutputRate: decoded.size + invalid.length ? invalid.length / (decoded.size + invalid.length) : null,
     minimumReferenceRecall: minimumRecall, rejectedLabelCaseIds: labelReview?.rejected ?? [], metrics, strata, coverage,
     latency: {kind: run.kind, boundary: run.timingBoundary, includesBrowserUI: false, completionP50Ms: percentile(.5), completionP95Ms: percentile(.95)},
-    recallDefinition: 'Exact approved reference span/replacement/category matches; reported separately from human precision. Alternative valid edits require label adjudication.'};
+    recallDefinition: 'Exact approved reference span/replacement/category matches; reported separately from human precision. Alternative valid edits require label adjudication. Clearer-wording suggestions are scored apart from corrections (metrics.clarity) and are not part of the proofreading strata.'};
 }
 export function reviewTemplates(corpus, run) {
   const review = {kind: 'pending', reviewer: '', independent: false, reviewedAt: ''};

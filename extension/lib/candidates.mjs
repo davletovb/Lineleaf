@@ -1,4 +1,4 @@
-import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, LineleafError} from './policy.mjs';
+import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError} from './policy.mjs';
 
 // Bounded recursive JSON parser: JSON.parse alone silently accepts duplicate keys.
 export function strictJSON(source) {
@@ -90,9 +90,39 @@ const EXPLANATIONS = {
   improve: 'Optional improvement for clarity and flow. Review facts and meaning before accepting.',
   paraphrase: 'Optional paraphrase in different words. Review facts and meaning before accepting.'
 };
+// Clearer-wording suggestions are optional style, shown automatically as underlines, so they are held to a stricter bar than a
+// rewrite the user asked for: the response must follow the contract exactly (any violation rejects it, as for corrections), and
+// a well-formed suggestion is still dropped, not merely flagged, when it changes a number, name or negation, or only changes
+// spacing, punctuation or capitalisation (that is a correction, not a wording improvement).
+const bare = text => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+function clarity(data, source, points) {
+  const bad = () => { throw new LineleafError('INVALID_OUTPUT'); };
+  if (!exactKeys(data, ['suggestions']) || !Array.isArray(data.suggestions) || data.suggestions.length > CLARITY_MAX) bad();
+  const edits = [], spans = [];
+  for (const item of data.suggestions) {
+    if (!exactKeys(item, ['before', 'after', 'left', 'right', 'explanation'])
+        || !validText(item.before, 240) || typeof item.after !== 'string' || item.after.length > 240 || !item.after.isWellFormed()
+        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(item.after) || item.before === item.after
+        || !validText(item.explanation, 280)
+        || !['left', 'right'].every(k => typeof item[k] === 'string' && item[k].length <= 120 && item[k].isWellFormed())) bad();
+    const matches = [];
+    for (let from = 0, start; (start = source.indexOf(item.before, from)) !== -1; from = start + 1) {
+      const end = start + item.before.length;
+      if (source.slice(0, start).endsWith(item.left) && source.slice(end).startsWith(item.right)) matches.push({start, end});
+    }
+    if (matches.length !== 1) bad();
+    const {start, end} = matches[0];
+    if (!points.has(start) || !points.has(end) || spans.some(x => start < x.end && x.start < end)) bad();
+    spans.push({start, end});
+    if (bare(item.before) === bare(item.after) || preservationFlags(item.before, item.after).length) continue;
+    edits.push({...item, category: 'clarity', start, end});
+  }
+  return edits.sort((a, b) => a.start - b.start);
+}
 export function candidates(answer, source, mode) {
   const data = strictJSON(answer), points = boundaries(source), edits = [];
   const bad = () => { throw new LineleafError('INVALID_OUTPUT'); };
+  if (mode === 'clarity') return clarity(data, source, points);
   if (mode !== 'proofread') {
     if (!exactKeys(data, ['rewrite']) || !validText(data.rewrite)) bad();
     if (data.rewrite === source) { if (MAY_STAY_SAME.includes(mode)) return []; bad(); }

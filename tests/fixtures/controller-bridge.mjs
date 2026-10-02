@@ -1,13 +1,14 @@
 // Browser integration of the production controller/transport/panel with synthetic Chrome/native ports.
 import {installController} from '/lib/controller.mjs';
 import {fakeChrome, Event} from '/test-api.mjs';
-const worker = fakeChrome({sites: [location.origin], automatic: new URL(location.href).searchParams.has('automatic')});
+const params = new URL(location.href).searchParams;
+const worker = fakeChrome({sites: [location.origin], automatic: params.has('automatic'), clarity: params.has('clarity')});
 worker.api.tabs.query = async () => [{id: 7, url: location.href, incognito: false}];
 worker.api.tabs.get = async id => ({id, url: location.href});
 worker.sender.url = location.href;
 worker.api.scripting.executeScript = async ({target}) => (target.documentIds ?? [worker.sender.documentId]).map(documentId => ({documentId, frameId: 0, result: {url: location.href, topOrigin: location.origin}}));
 worker.api.tabs.sendMessage = async (_, message) => fixture.runtimeMessages.emit(message, {id: chrome.runtime.id});
-installController(worker.api);
+installController(worker.api, {now: () => Date.now()}); // looked up on every call so a test can move the clock
 chrome.runtime.sendMessage = message => new Promise(resolve => worker.api.runtime.onMessage.emit(message, {...worker.sender, url: location.href}, resolve));
 // One-shot faults for tests: the next connection cannot be made (`connect`), or the worker goes away after the next explicit
 // rewrite request arrives (`drop`).

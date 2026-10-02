@@ -46,7 +46,7 @@ async function typeAtEnd(text) {
   await page.evaluate(() => { const t = document.querySelector('#textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); });
   await page.keyboard.type(text);
 }
-async function selectIn(host, needle, whole = false) {
+async function placeSelection(host, needle) {
   await page.evaluate(([host, needle]) => {
     const root = document.querySelector(host), walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let found; for (let n; (n = walker.nextNode());) if (n.data.includes(needle)) { found = n; break; }
@@ -54,9 +54,9 @@ async function selectIn(host, needle, whole = false) {
     const range = document.createRange(); range.setStart(found, found.data.indexOf(needle)); range.setEnd(found, found.data.indexOf(needle) + needle.length);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
   }, [host, needle]);
-  await inline.locator('.badge').waitFor();
 }
-async function caretAfter(host, needle) {
+async function selectIn(host, needle) { await placeSelection(host, needle); await inline.locator('.badge').waitFor(); }
+async function placeCaret(host, needle) {
   await page.evaluate(([host, needle]) => {
     const root = document.querySelector(host), walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let found; for (let n; (n = walker.nextNode());) if (n.data.includes(needle)) { found = n; break; }
@@ -64,8 +64,8 @@ async function caretAfter(host, needle) {
     const range = document.createRange(); range.setStart(found, found.data.indexOf(needle) + needle.length); range.collapse(true);
     const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
   }, [host, needle]);
-  await inline.locator('.badge').waitFor();
 }
+async function caretAfter(host, needle) { await placeCaret(host, needle); await inline.locator('.badge').waitFor(); }
 
 test('Improve it rewrites the caret paragraph of a text field: explicit request, before/after preview, Replace and native undo', async () => {
   await load(); await rewriteAnswer('He goes to work.');
@@ -269,4 +269,80 @@ test('a selection rewrite in a verified rich editor is proofread again as the wh
   await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
   await page.waitForFunction(() => fixture.checks.some(x => x.kind === 'automatic'), null, {timeout: 8000});
   assert.deepEqual((await requests()).filter(x => x.kind === 'automatic'), [{mode: 'proofread', kind: 'automatic', text: 'He goes to work.'}]);
+});
+
+// F-03: explicit rewrites do not need the automatic opt-in. On an enabled, unpaused site the card is built only when the user presses
+// Alt Shift L in a field; nothing is read or sent until an action inside it names the text.
+const MANUAL = 'https://rewrite.lineleaf.test/compose';
+async function focusTextarea(value, selection) {
+  await page.evaluate(([value, selection]) => { const t = document.querySelector('#textarea'); t.value = value; t.focus(); t.setSelectionRange(...selection); }, [value, selection]);
+}
+const inlineHosts = () => page.locator('[data-lineleaf-inline]').count();
+
+test('with automatic checking off nothing is built, read or sent until Alt Shift L, and then only the explicit action sends', async () => {
+  await load(MANUAL); await rewriteAnswer('He goes to work.');
+  await focusTextarea('Intro. He go to work. Bye.', [26, 26]); await page.keyboard.type(' still typing');
+  await page.waitForTimeout(2300); // longer than the automatic idle window
+  assert.deepEqual(await requests(), []); assert.equal(await inlineHosts(), 0);
+  await focusTextarea('Intro. He go to work. Bye.', [7, 21]); // "He go to work."
+  await openCard();
+  assert.deepEqual(await requests(), []); // opening the card reads and sends nothing
+  assert.match(await inline.locator('#status').textContent(), /Automatic checking is off, so nothing is sent until you choose/);
+  await press('Improve it'); await suggested();
+  assert.deepEqual(await requests(), [{mode: 'improve', kind: 'manual', text: 'He go to work.'}]);
+  assert.match(await inline.locator('.category').textContent(), /Selected text/);
+  await press('Replace'); await inline.button('Undo last edit').waitFor();
+  assert.equal(await page.locator('#textarea').inputValue(), 'Intro. He goes to work. Bye.');
+  await page.waitForTimeout(2300); assert.equal((await requests()).length, 1); // the replacement queues no proofreading check
+  await press('Undo last edit'); await inline.locator('.badge').waitFor(el => /Undone/.test(el.getAttribute('aria-label')));
+  assert.equal(await page.locator('#textarea').inputValue(), 'Intro. He go to work. Bye.');
+});
+
+test('with automatic checking off, typing after the card is open says the text changed and sends nothing', async () => {
+  await load(MANUAL); await rewriteAnswer('He goes to work.');
+  await focusTextarea('He go to work.', [14, 14]); await openCard(); await press('✕');
+  await page.locator('#textarea').focus(); await page.keyboard.type('!');
+  await inline.locator('.badge').waitFor(el => /The text changed\. Choose Check now or a rewrite/.test(el.getAttribute('aria-label')));
+  await page.waitForTimeout(2300);
+  assert.deepEqual(await requests(), []);
+});
+
+test('Check now with automatic checking off is one explicit proofreading request', async () => {
+  await load(MANUAL); await proofreadAnswer();
+  await focusTextarea('He go to work.', [14, 14]); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
+  assert.deepEqual(await requests(), [{mode: 'proofread', kind: 'manual', text: 'He go to work.'}]);
+});
+
+test('on demand in rich editors: a verified editor replaces through its own path, a copy-only host only copies', async () => {
+  await load(MANUAL); await rewriteAnswer('He goes to work.');
+  await placeCaret('#prose', 'work.'); assert.equal(await inlineHosts(), 0);
+  await openCard(); await press('Improve it'); await suggested();
+  assert.equal(await inline.button('Replace').isDisabled(), false);
+  await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
+  assert.equal(await line('#prose'), 'He goes to work.');
+  await load('https://mail.google.com/mail/u/0/'); await rewriteAnswer('He goes to work.');
+  await placeCaret('#prose', 'work.'); await openCard(); await press('Improve it'); await suggested();
+  assert.equal(await inline.button('Replace').count(), 0); assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
+  assert.equal(await line('#prose'), 'He go to work.');
+});
+
+// Counts every card host added to the page, so a card that is built and torn down within one poll is still seen.
+const watchHosts = () => page.evaluate(() => {
+  window.__hostsBuilt = 0;
+  new MutationObserver(records => { for (const r of records) for (const n of r.addedNodes) if (n.nodeType === 1 && n.hasAttribute('data-lineleaf-inline')) window.__hostsBuilt++; }).observe(document.documentElement, {childList: true});
+});
+const hostsBuilt = () => page.evaluate(() => window.__hostsBuilt);
+
+test('pausing Lineleaf removes the on-demand card, and the shortcut builds nothing while paused', async () => {
+  await load(MANUAL);
+  await focusTextarea('He go to work.', [0, 14]); await openCard(); await press('Pause Lineleaf');
+  await page.waitForFunction(() => document.querySelectorAll('[data-lineleaf-inline]').length === 0);
+  await watchHosts(); await focusTextarea('He go to work.', [0, 14]); await page.keyboard.press('Alt+Shift+l'); await page.waitForTimeout(600);
+  assert.equal(await hostsBuilt(), 0); assert.deepEqual(await requests(), []);
+});
+
+test('the shortcut builds nothing in a field Lineleaf excludes, even with automatic checking off', async () => {
+  await load(MANUAL); await watchHosts();
+  await page.evaluate(() => document.querySelector('#secret').focus()); await page.keyboard.press('Alt+Shift+l'); await page.waitForTimeout(600);
+  assert.equal(await hostsBuilt(), 0); assert.deepEqual(await requests(), []);
 });

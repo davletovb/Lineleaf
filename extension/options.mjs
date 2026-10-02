@@ -6,7 +6,8 @@ let loaded;
 async function load() {
   const settings = await command('get-settings'); loaded = settings; query('#variant').value = settings.variant;
   query('#model').value = settings.model; query('#paused').checked = settings.paused;
-  query('#automatic').checked = settings.automatic; query('#dictionary').value = settings.dictionary.join('\n');
+  query('#automatic').checked = settings.automatic; query('#clarity').checked = settings.clarity; query('#clarity').disabled = !settings.automatic;
+  query('#dictionary').value = settings.dictionary.join('\n');
   query('#authorize').textContent = `seatline-companion authorize lineleaf codex chrome-extension://${chrome.runtime.id}/`;
   query('#sites').replaceChildren();
   for (const origin of settings.sites) {
@@ -22,7 +23,7 @@ query('#preferences').addEventListener('submit', async event => {
   const dictionary = query('#dictionary').value.split(/\r?\n/u).map(x => x.trim()).filter(Boolean);
   if (dictionary.length > 500 || dictionary.some(word => !dictionaryWord(word))) { show('Use one word per line, up to 500 words of at most 64 characters.'); return; }
   if (!loaded) return;
-  const values = {model: query('#model').value.trim(), variant: query('#variant').value, automatic: query('#automatic').checked};
+  const values = {model: query('#model').value.trim(), variant: query('#variant').value, automatic: query('#automatic').checked, clarity: query('#automatic').checked && query('#clarity').checked};
   const changes = {}, expected = {};
   for (const key of Object.keys(values)) if (values[key] !== loaded[key]) { changes[key] = values[key]; expected[key] = loaded[key]; }
   const words = [...new Set(dictionary.map(dictionaryWord))];
@@ -31,6 +32,7 @@ query('#preferences').addEventListener('submit', async event => {
   try { await command('save-settings', {changes, expected, dictionary: delta}); await load(); show('Preferences saved.'); }
   catch (error) { show(messageFor(errorCode(error))); }
 });
+query('#automatic').addEventListener('change', () => { query('#clarity').disabled = !query('#automatic').checked; if (!query('#automatic').checked) query('#clarity').checked = false; });
 query('#paused').addEventListener('change', async () => {
   const previous = !query('#paused').checked;
   query('#paused').disabled = true;

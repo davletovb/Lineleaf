@@ -16,15 +16,15 @@ export async function waitFor(predicate) {
   const until = Date.now() + 3000;
   while (!predicate()) { if (Date.now() > until) throw new Error('Timed out waiting for fixture'); await new Promise(resolve => setTimeout(resolve, 5)); }
 }
-export function fakeChrome({sites = ['https://writing.test'], state = READY, hang = false, automatic = false, dictionary = [], answer = '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'} = {}) {
+export function fakeChrome({sites = ['https://writing.test'], state = READY, hang = false, automatic = false, clarity = false, dictionary = [], answer = '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'} = {}) {
   const calls = [], ports = [], grants = new Set(sites.map(s => `${new URL(s).protocol}//${new URL(s).hostname}/*`));
-  let data = {preferences: {model: '', variant: 'US', paused: false, automatic, dictionary, sites}}, sessionData = {};
+  let data = {preferences: {model: '', variant: 'US', paused: false, automatic, clarity, dictionary, sites}}, sessionData = {};
   const api = {
     runtime: {id: 'lnbkadelggojehiapgnhonicnfonobal', onConnect: new Event(), onMessage: new Event(), async openOptionsPage() { calls.push({openedSettings: true}); }, connectNative() {
       const port = fakeNative((m, p) => {
         calls.push(m);
         if (m.method === 'status') { p.reply(m.id, {type: 'status', status: state}); p.reply(m.id, {type: 'completed'}); }
-        else if (m.method === 'send' && !hang) { p.reply(m.id, {type: 'delta', text: answer}); p.reply(m.id, {type: 'completed'}); }
+        else if (m.method === 'send' && !hang) { p.reply(m.id, {type: 'delta', text: typeof answer === 'function' ? answer(m.params) : answer}); p.reply(m.id, {type: 'completed'}); }
         else if (m.method === 'cancel') { p.reply(m.target, {type: 'stopped'}); p.reply(m.id, {type: 'completed'}); }
       }); ports.push(port); return port;
     }},
