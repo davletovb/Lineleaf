@@ -40,6 +40,12 @@ async function useTextarea(value, selection = null) {
   }, [value, selection]);
   await inline.locator('.badge').waitFor();
 }
+// Type at the end of the text field. The caret is placed through the selection API because the End key scrolls the page on macOS,
+// which takes a field below the fold out of view, and a field that is out of view is not checked.
+async function typeAtEnd(text) {
+  await page.evaluate(() => { const t = document.querySelector('#textarea'); t.focus(); t.setSelectionRange(t.value.length, t.value.length); });
+  await page.keyboard.type(text);
+}
 async function selectIn(host, needle, whole = false) {
   await page.evaluate(([host, needle]) => {
     const root = document.querySelector(host), walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -109,7 +115,7 @@ test('a rewrite that changes a number, a name or a negation says so', async () =
 
 test('"already reads well" shows no preview and keeps the proofreading suggestions; Back restores them too', async () => {
   await load(); await proofreadAnswer();
-  await useTextarea('He go to work.'); await page.keyboard.press('End'); await page.keyboard.type(' ');
+  await useTextarea('He go to work.'); await typeAtEnd(' ');
   await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000}); await inline.locator('.underline').waitFor();
   await rewriteAnswer('He go to work. '.trimEnd() + ' ');
   await openCard(); await press('Improve it');
@@ -189,7 +195,7 @@ for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not co
     assert.equal(await inline.locator('.underline').count(), 1); // the set-aside correction is back
     assert.equal(await inline.locator('.suggested').count(), 0);
     await page.evaluate(() => { fixture.worker.hold = false; fixture.worker.answer = '{"corrections":[]}'; fixture.checks.length = 0; });
-    await page.locator('#textarea').focus(); await page.keyboard.press('End'); await page.keyboard.type(' ');
+    await typeAtEnd(' ');
     await page.waitForFunction(() => fixture.checks.some(x => x.kind === 'automatic'), null, {timeout: 8000}); // not blocked
   });
 }
@@ -245,9 +251,15 @@ for (const [host, model] of [['#model-slate', 'modelSlate'], ['#model-draft', 'm
 test('a selection replacement whose surroundings the editor changes is detected, even when the selected words are right', async () => {
   await load(); await rewriteAnswer('goes to work');
   await selectIn('#mangling', 'go to work'); await openCard(); await press('Paraphrase'); await suggested();
-  await press('Replace'); await inline.locator('#status').waitFor(el => /did not apply|not what Lineleaf expected|reverted|copy-only/i.test(el.textContent));
-  assert.equal(await inline.button('Replace').isDisabled(), true); // copy-only from here on
+  await press('Replace');
+  // Which message the failure shows (did not apply, not what Lineleaf expected, reverted) depends on timing and the overlay's poll
+  // replaces it within a fraction of a second, so assert the stable outcome: the editor is left as it made itself, and from here on
+  // it is copy-only. The rebuilt paragraph detaches the checked one, which the overlay reports once the apply has finished.
+  await page.waitForFunction(() => document.querySelector('#mangling').textContent.includes('work!'));
+  await inline.locator('.badge').waitFor(el => /The editor changed/.test(el.getAttribute('aria-label')));
   assert.ok((await text('#mangling')).includes('He goes to work!'));
+  await rewriteAnswer('He works!'); await caretAfter('#mangling', 'work!'); await openCard(); await press('Improve it'); await suggested();
+  assert.equal(await inline.button('Replace').count(), 0); assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
 });
 
 test('a selection rewrite in a verified rich editor is proofread again as the whole paragraph', async () => {
