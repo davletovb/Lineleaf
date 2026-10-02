@@ -77,8 +77,8 @@ Capture only the active supported field/selection and necessary surrounding text
 
 These are proposed targets, not measured results:
 
-- Build at least 150 reviewed writing cases: real errors, already-correct text, informal voice, names/numbers, negation, ambiguous sentences, and second-language English. Use independent human review for labels and meaning preservation.
-- Target at least 95% precision for emitted grammar/spelling/punctuation corrections on that set. Report recall separately; hiding every suggestion must not count as success. Report optional style suggestions separately.
+- Build at least 150 reviewed writing cases: real errors, already-correct text, informal voice, names/numbers, negation, ambiguous sentences, and second-language English. Use independent human review for labels and meaning preservation, with an explicit per-case reference decision. Include paragraph-length, multi-error and US/UK-sensitive cases and distinct rewrite sources.
+- Target at least 95% precision for emitted grammar/spelling/punctuation corrections on that set. Report exact-reference recall separately and require a meaningful independently approved minimum per corpus/provider configuration, chosen before the live run. Hiding almost every suggestion must not count as success. Report optional style suggestions separately.
 - No accepted rewrite may alter a name, number, date, negation, or factual meaning in the reviewed beta set without making the change explicit for user review.
 - All deterministic stale-response, ambiguous-match, Unicode, editor-removal, and session-isolation scenarios must pass. No text-loss or corruption in the supported-editor regression suite.
 - Record typing overhead and provider latency on stated hardware and provider configurations. Set the inline latency release threshold after A-03; show progress and do not freeze typing while checking.

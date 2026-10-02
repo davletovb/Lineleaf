@@ -75,7 +75,7 @@ def record_terminal(diagnostics, name, event):
         diagnostics[name]["reason"] = safe_failure(event)
 
 
-def validate(binary, fake_provider=None):
+def validate(binary, fake_provider=None, *, coexistence=False):
     if sys.platform != "linux":
         return {"status": "blocked", "reason": "ISOLATED_REGISTRY_TEST_REQUIRES_LINUX"}
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
@@ -86,17 +86,28 @@ def validate(binary, fake_provider=None):
               "store_extension_id": None, "chrome_permission_ui_tested": False,
               "provider_diagnostics": {},
               "provider_probe": "upstream-fixture" if fake_provider else "missing-executable-only"}
+    if coexistence:
+        report.update(kind="native-coexistence-fixture", coexistence_checks={}, release_eligible=False,
+                      boundary="Isolated Linux broker/upstream fake provider; live browser/provider coexistence remains unverified.")
     try:
-        exercise(binary, fake_provider, contract, report)
+        if coexistence:
+            exercise(binary, fake_provider, contract, report, coexistence=True)
+        else:
+            exercise(binary, fake_provider, contract, report)
     except ERRORS as exc:
         report["reason"] = type(exc).__name__
         return report  # Keep every completed per-check result; never print private native output.
     if report["status"] != "blocked":
-        report["status"] = "passed" if checks and all(checks.values()) else "failed"
+        extra = report.get("coexistence_checks", {})
+        complete = True
+        if coexistence:
+            from tools.validate_coexistence import CHECKS
+            complete = set(extra) == set(CHECKS) and all(value is True for value in extra.values())
+        report["status"] = "passed" if checks and all(checks.values()) and complete else "failed"
     return report
 
 
-def exercise(binary, fake_provider, contract, report):
+def exercise(binary, fake_provider, contract, report, *, coexistence=False):
     checks = report["checks"]
     development = f"chrome-extension://{contract['development_extension_id']}/"
     other_origin = "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"
@@ -155,6 +166,11 @@ def exercise(binary, fake_provider, contract, report):
                 status = second.collect(second.start("codex", "status"), timeout=5)
                 checks["other_consumer_still_connected"] = status[-1]["type"] == "completed"
                 probe_turns(first, providers, fake_provider, checks, report["provider_diagnostics"])
+                if coexistence:
+                    if fake_provider is None:
+                        raise ValueError("fake provider required for bounded coexistence probes")
+                    from tools.validate_coexistence import shared_probes
+                    shared_probes(first, second, providers, empty, fake_provider, report["coexistence_checks"])
                 run("authorize", "lineleaf", "codex", development)
                 checks["reauthorization_closes_old_connection"] = connection_closed(first)
                 checks["reauthorized_origin_reconnects"] = False

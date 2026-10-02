@@ -1,0 +1,13 @@
+# Data and control
+
+Only an enabled, permitted site's eligible bounded selection or active paragraph is sent through the existing shared Seatline companion to the chosen provider. The provider receives writing instructions, the selected US/UK variant, and personal dictionary context. Provider processing can be remote and is governed by the provider's account terms.
+
+Automatic checking requires an explicit opt-in and stays off after a fresh install/reset. Focusing existing text alone does not send it. Suggestions are advisory; every replacement requires acceptance. Rewrites can deliberately change tone, so review their meaning and facts.
+
+Local extension storage holds preferences, dictionary words and enabled origins. Session storage holds pacing/backoff timestamps. The extension stores no draft history, model responses, credentials or page-text logs. Short-lived source snapshots/previews are cleared on cancellation, context changes, pause/revoke and bounded expiry. Shared native authorization credentials are managed by Seatline.
+
+Password, payment and one-time-code inputs, excluded/code regions, hidden/read-only content and incognito are refused. Unpermitted/cross-origin/opaque frames and closed shadow roots are excluded. These checks reduce accidental processing; enable sites deliberately and do not use this development candidate for sensitive drafts.
+
+Pause stops Lineleaf work globally. Disabling a site clears its Lineleaf policy and revokes optional site permission. Reset removes preferences/dictionary/site enablement, revokes optional site access and restores automatic checking to off. Browser removal clears extension storage; separately revoke Lineleaf's Seatline grant if native authorization should also be removed. Keep the shared companion for other consumers.
+
+Evaluation tooling is separate from the extension. It intentionally writes synthetic corpus responses and independent review files with private file modes for reproducible quality assessment. Its stdout contains aggregate metrics and fixed diagnostics, not writing or provider stderr. Do not substitute real drafts or upload response artifacts as ordinary CI logs. Candidate archives include the synthetic corpus and pending evidence template, never private responses, reviews or credentials.

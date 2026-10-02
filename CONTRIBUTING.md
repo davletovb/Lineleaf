@@ -24,6 +24,8 @@ The development toolchain is Node 24 and Python 3.12+. Run `npm ci --ignore-scri
 
 Move an item to IMPLEMENTED — VERIFY when the change exists but required validation is outstanding. Mark it DONE only with linked evidence that its acceptance criterion is met.
 
+For E evaluation, run `npm run evaluate:fixture`, `npm run measure:typing`, and `npm run beta:candidate` after the regression suites. The [evaluation guide](docs/implementation/evaluation-beta.md) describes independent labels/output judgments, isolated shared-broker probes and live evidence. `beta:release` refuses distribution without complete current-package human/live/device evidence; a review candidate is allowed to remain blocked.
+
 ## Respect ownership and user data
 
 Writing prompts, editor adapters, suggestions, preferences, and application-specific pacing belong in Lineleaf. Use the existing generic Seatline consumer interface and record missing capabilities as dependencies.
