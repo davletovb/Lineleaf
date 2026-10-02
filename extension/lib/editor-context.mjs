@@ -1,3 +1,5 @@
+import {EXCLUDED, COMPLEX} from './editor-policy.mjs';
+export {EXCLUDED} from './editor-policy.mjs';
 // Only the active editor's composed ancestry is inspected; no page-wide shadow traversal.
 export function ancestry(element) {
   const result = [];
@@ -59,7 +61,10 @@ export function contextCurrent(element, context) {
   return element.isConnected && embeddingAllowed() && context.route === navigationToken()
     && path.length === context.path.length && path.every((node, i) => node === context.path[i]);
 }
-export const EXCLUDED = '[data-lineleaf-ignore], [aria-hidden="true"], pre, code, .monaco-editor, .cm-editor, .CodeMirror';
+export function classPolicy(value) {
+  const probe = document.createElement('span'); probe.className = value ?? '';
+  return `${probe.matches(EXCLUDED)}:${probe.matches(COMPLEX)}`;
+}
 export function excluded(element) {
   if (!(element instanceof Element)) return true;
   if (ancestry(element).some(node => node instanceof Element && node.matches(EXCLUDED))) return true;
@@ -67,7 +72,6 @@ export function excluded(element) {
   return /(?:password|one-time-code|cc-|credit.?card|security.?code|cvc|cvv)/i.test(
     [element.getAttribute('autocomplete'), element.getAttribute('name'), element.id].filter(Boolean).join(' '));
 }
-const COMPLEX = '.ProseMirror, .ql-editor, .DraftEditor-root, .public-DraftEditor-content, [data-slate-editor], [data-lexical-editor]';
 export function replacementAllowed(element) {
   if (excluded(element)) return false;
   const host = location.hostname;

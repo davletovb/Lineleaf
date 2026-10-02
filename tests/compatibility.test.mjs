@@ -12,7 +12,7 @@ before(async () => {
   await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
+    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
@@ -262,6 +262,93 @@ test('nested scroll clipping, container resize and unsupported transforms do not
   await page.locator('#scroller').evaluate(el => { el.scrollTop = 0; el.style.transform = 'rotate(180deg)'; });
   await page.locator('#textarea').fill('He go to work. Again.'); await page.waitForTimeout(1700); assert.equal((await sends()).length, 1);
   assert.equal(await page.locator('#textarea').inputValue(), 'He go to work. Again.');
+});
+test('identity and translated ancestors keep underlines aligned with text and preserve native apply/undo', async () => {
+  for (const [target, transform] of [['body', 'translateZ(0)'], ['body', 'translate(0,0)'], ['body', 'translate(45px,30px)'], ['html', 'translate(-12px,18px)']]) {
+    await load(); await page.locator(target).evaluate((el, transform) => { el.style.transform = transform; }, transform);
+    await automatic('editable');
+    const expected = await page.locator('#editable').evaluate(el => {
+      const range = document.createRange(); range.setStart(el.firstChild, 3); range.setEnd(el.firstChild, 5);
+      const r = range.getBoundingClientRect(); return {left: r.left, right: r.right, top: r.bottom - 3};
+    });
+    const actual = await inline.locator('.underline').evaluate(el => { const r = el.getBoundingClientRect(); return {left: r.left, right: r.right, top: r.top}; });
+    for (const key of Object.keys(expected)) assert.ok(Math.abs(actual[key] - expected[key]) < 1, `${target} ${transform}: ${key}`);
+    await page.keyboard.press('Alt+Shift+l'); await inline.button('Accept').click();
+    assert.equal(await page.locator('#editable').textContent(), 'He goes to work.');
+    await inline.button('Undo last edit').click(); assert.equal(await page.locator('#editable').textContent(), 'He go to work.');
+    assert.equal((await sends()).length, 1);
+  }
+});
+test('translations preserve nested clipping; scale, rotation, skew and perspective remain unavailable', async () => {
+  await load(); await page.locator('#textarea').evaluate(el => {
+    const wrap = document.createElement('section'); wrap.id = 'translated'; wrap.style.cssText = 'overflow:hidden;width:125px;height:75px;transform:translate(65px,20px)';
+    el.before(wrap); wrap.append(el); el.style.cssText = 'width:300px;height:100px;margin:0';
+  });
+  await automatic(); const bounds = await page.locator('#translated').boundingBox();
+  assert.equal(await inline.locator('.underline').evaluate((_, bounds, lines) => lines.every(line => {
+    const r = line.getBoundingClientRect(); return r.left >= bounds.x && r.right <= bounds.x + bounds.width && r.bottom <= bounds.y + bounds.height;
+  }), bounds), true);
+  for (const [property, value] of [['transform', 'rotate(180deg)'], ['transform', 'scale(-1,1)'], ['transform', 'skewX(15deg)'], ['transform', 'perspective(100px) translateZ(10px)'], ['rotate', '180deg'], ['scale', '2']]) {
+    await load(); await page.locator('body').evaluate((el, [property, value]) => { el.style[property] = value; }, [property, value]);
+    await page.locator('#textarea').fill('He go to work.'); await page.waitForTimeout(1700);
+    assert.equal((await sends()).length, 0, `${property}: ${value}`); assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0);
+  }
+});
+test('harmless body, wrapper and field class changes retain inline suggestions and refresh layout', async () => {
+  await load(); await page.locator('#textarea').evaluate(el => { const wrap = document.createElement('section'); wrap.id = 'wrapper'; el.before(wrap); wrap.append(el); });
+  await automatic(); const before = await inline.locator('.underline').evaluate(el => el.getBoundingClientRect().x);
+  await page.evaluate(() => {
+    document.body.classList.add('is-scrolled'); document.querySelector('#wrapper').classList.add('focused');
+    const el = document.querySelector('#textarea'); el.classList.add('has-content'); el.style.marginLeft = '50px';
+  });
+  await inline.locator('.underline').waitFor((el, before) => Math.abs(el.getBoundingClientRect().x - before) > 40, before);
+  await page.keyboard.press('Alt+Shift+l'); assert.equal(await inline.button('Accept').isDisabled(), false);
+  assert.doesNotMatch(await inline.locator('#status').textContent(), /changed/);
+  await inline.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work.');
+  await inline.button('Undo last edit').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.'); assert.equal((await sends()).length, 1);
+});
+test('harmless ancestor classes retain a pending response and completed manual suggestion', async () => {
+  await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
+  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+  await page.evaluate(() => {
+    document.body.classList.add('is-scrolled'); document.querySelector('#textarea').classList.add('focused');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send');
+    port.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
+    port.reply(request.id, {type: 'completed'});
+  });
+  await panel.button('Accept').waitFor(); await page.evaluate(() => document.body.classList.remove('is-scrolled'));
+  await page.waitForTimeout(400); assert.equal(await panel.button('Accept').isDisabled(), false);
+  await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work.');
+  await panel.button('Undo last edit').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.'); assert.equal((await sends()).length, 1);
+});
+test('exclusion/framework class and attribute ABA still invalidate exact captures', async () => {
+  for (const [name, value] of [['class', 'monaco-editor'], ['class', 'cm-editor'], ['class', 'CodeMirror'], ['class', 'ProseMirror'], ['data-lineleaf-ignore', ''], ['aria-hidden', 'true'], ['data-lexical-editor', 'true']]) {
+    await load(); await open(); await check();
+    await page.evaluate(([name, value]) => { document.body.setAttribute(name, value); document.body.removeAttribute(name); }, [name, value]);
+    await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.', name + value);
+  }
+});
+test('context invalidation does not announce typing or authorize a new automatic check', async () => {
+  await load(); await automatic(); await page.evaluate(() => { document.body.classList.add('ProseMirror'); document.body.classList.remove('ProseMirror'); });
+  await inline.locator('.underline').waitFor((_, __, lines) => lines.length === 0);
+  await page.keyboard.press('Alt+Shift+l'); assert.match(await inline.locator('#status').textContent(), /editor changed.*Choose Check now/);
+  await page.waitForTimeout(1700); assert.equal((await sends()).length, 1);
+});
+test('serialized worker frame probe honors all shared code-editor embedding exclusions', async () => {
+  await load(); await page.evaluate(() => {
+    const wrap = document.createElement('section'); wrap.id = 'frame-wrapper';
+    const frame = document.createElement('iframe'); frame.name = 'guarded-child'; frame.src = '/child?automatic'; wrap.append(frame); document.body.prepend(wrap);
+  });
+  const frame = await page.waitForSelector('iframe').then(() => page.frame({name: 'guarded-child'}));
+  await frame.waitForFunction(() => window.__lineleafMounted);
+  await frame.evaluate(() => { fixture.worker.api.scripting.executeScript = async ({func, args, target}) => [{documentId: target.documentIds[0], frameId: 0, result: func(...args)}]; });
+  const state = () => frame.evaluate(() => chrome.runtime.sendMessage({type: 'site-state', payload: null}));
+  assert.equal((await state()).ok, true);
+  for (const name of ['monaco-editor', 'cm-editor', 'CodeMirror']) {
+    await page.locator('#frame-wrapper').evaluate((el, name) => { el.className = name; }, name);
+    assert.equal((await state()).code, 'RESTRICTED_PAGE');
+  }
+  assert.equal(await frame.evaluate(() => fixture.worker.calls.some(x => x.method === 'send')), false);
 });
 test('same-origin frame inherits parent navigation, hidden/excluded embedding and sandbox guards', async () => {
   await load(); await page.evaluate(() => {

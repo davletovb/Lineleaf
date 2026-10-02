@@ -1,5 +1,13 @@
 import {ancestry} from './editor-context.mjs';
 
+function translationOnly(transform) {
+  if (transform === 'none') return true;
+  try {
+    const matrix = new DOMMatrixReadOnly(transform);
+    return ['m11', 'm22', 'm33', 'm44'].every(key => matrix[key] === 1)
+      && ['m12', 'm13', 'm14', 'm21', 'm23', 'm24', 'm31', 'm32', 'm34'].every(key => matrix[key] === 0);
+  } catch { return false; }
+}
 export function visibleEditorRect(element) {
   const box = element.getBoundingClientRect();
   let left = Math.max(0, box.left + element.clientLeft), top = Math.max(0, box.top + element.clientTop);
@@ -9,7 +17,8 @@ export function visibleEditorRect(element) {
     if (!(parent instanceof Element)) continue;
     const style = getComputedStyle(parent);
     // Rotated/scaled/perspective or shaped clipping needs its own tested geometry adapter.
-    if (style.visibility !== 'visible' || style.display === 'none' || style.transform !== 'none'
+    if (style.visibility !== 'visible' || style.display === 'none' || !translationOnly(style.transform)
+        || style.rotate !== 'none' || style.scale !== 'none'
         || style.perspective !== 'none' || style.clipPath !== 'none') return null;
     if (parent === element) continue;
     const r = parent.getBoundingClientRect();

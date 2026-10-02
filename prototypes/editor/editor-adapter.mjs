@@ -1,4 +1,4 @@
-import {contextFor, contextCurrent, replacementAllowed, excluded, selectionFor, rangeFor, deepActive} from '../../extension/lib/editor-context.mjs';
+import {contextFor, contextCurrent, replacementAllowed, excluded, embeddingAllowed, classPolicy, selectionFor, rangeFor, deepActive} from '../../extension/lib/editor-context.mjs';
 // A-04 investigation: deliberately small Chromium adapter, not a site integration.
 const INLINE = new Set(["SPAN", "B", "STRONG", "I", "EM", "U", "S"]);
 const UNSAFE = new WeakSet();
@@ -110,6 +110,7 @@ export class EditorAdapter {
   constructor(element) {
     this.element = element;
     this.revision = 0;
+    this.layoutRevision = 0;
     this.documentRevision = 0;
     this.composing = false;
     this.snapshots = new WeakSet();
@@ -121,20 +122,39 @@ export class EditorAdapter {
     element.addEventListener("compositionstart", this.compositionStart);
     element.addEventListener("compositionend", this.compositionEnd);
     document.addEventListener("input", this.documentChanged, true);
-    this.observer = new MutationObserver(records => { if (records.length) this.revision++; });
-    this.observer.observe(element, {subtree: true, characterData: true, childList: true, attributes: true});
     const path = contextFor(element).path;
-    this.contextChanged = records => {
-      if (records.some(record => record.type === 'attributes' || [...record.addedNodes, ...record.removedNodes].some(node => path.includes(node)))) this.revision++;
+    this.policy = this.eligibility();
+    this.mutations = (records, context = false) => {
+      if (!records.length) return;
+      const policy = this.eligibility();
+      const structural = records.some(record => record.type === 'attributes' ? record.target !== element && !context
+        : !context || [...record.addedNodes, ...record.removedNodes].some(node => path.includes(node)));
+      // oldValue retains safety-marker/slot ABA changes even when the final policy is unchanged.
+      const restriction = records.some(record => {
+        if (record.type !== 'attributes') return false;
+        const name = record.attributeName, value = record.target.getAttribute(name), old = record.oldValue;
+        if (name === 'class') return classPolicy(old) !== classPolicy(value);
+        if (['data-lineleaf-ignore', 'sandbox', 'data-slate-editor', 'data-lexical-editor', 'disabled', 'readonly'].includes(name)) return (old === null) !== (value === null);
+        if (name === 'aria-hidden') return (old === 'true') !== (value === 'true');
+        return old !== value && (['contenteditable', 'slot'].includes(name) || (name === 'name' && record.target.localName === 'slot')
+          || (record.target === element && ['type', 'autocomplete', 'name', 'id'].includes(name)));
+      });
+      if (structural || restriction || policy !== this.policy) this.revision++;
+      this.policy = policy;
+      if (records.some(record => record.type === 'attributes')) this.layoutRevision++;
     };
+    this.observer = new MutationObserver(records => this.mutations(records));
+    this.observer.observe(element, {subtree: true, characterData: true, childList: true, attributes: true, attributeOldValue: true});
+    this.contextChanged = records => this.mutations(records, true);
     this.contextObserver = new MutationObserver(this.contextChanged);
     this.slots = path.filter(node => node.nodeType === Node.ELEMENT_NODE && node.localName === 'slot');
     for (const slot of this.slots) slot.addEventListener('slotchange', this.changed);
-    for (const parent of path.slice(1)) this.contextObserver.observe(parent, parent.nodeType === Node.ELEMENT_NODE ? {childList: true, attributes: true,
-      attributeFilter: ['data-lineleaf-ignore', 'aria-hidden', 'contenteditable', 'class', 'sandbox', 'slot', 'name', 'data-slate-editor', 'data-lexical-editor']} : {childList: true});
+    for (const parent of path.slice(1)) this.contextObserver.observe(parent, parent.nodeType === Node.ELEMENT_NODE ? {childList: true, attributes: true, attributeOldValue: true,
+      attributeFilter: ['data-lineleaf-ignore', 'aria-hidden', 'contenteditable', 'class', 'style', 'sandbox', 'slot', 'name', 'data-slate-editor', 'data-lexical-editor']} : {childList: true});
   }
 
-  flush() { if (this.observer.takeRecords().length) this.revision++; this.contextChanged(this.contextObserver.takeRecords()); }
+  eligibility() { return [excluded(this.element), replacementAllowed(this.element), embeddingAllowed(), supported(this.element)].join(':'); }
+  flush() { this.mutations(this.observer.takeRecords()); this.contextChanged(this.contextObserver.takeRecords()); }
 
   snapshot({copy = false} = {}) {
     this.flush();

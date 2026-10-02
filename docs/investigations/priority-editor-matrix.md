@@ -17,7 +17,7 @@ Ordinary text/search inputs and textareas outside excluded or recognized complex
 
 The tested adapter remains limited to ordinary textarea/text/search inputs and basic contenteditable with flat text and inline formatting. Cross-format replacements, blocks, noneditable islands, multiline replacements, recognized rich-editor frameworks, and unverified priority rich editors use explicit preview/copy. If no usable DOM selection exists, open the panel, paste 1–2,000 characters, choose **Use pasted text**, then **Check selection**. This path never replaces page text and never starts an automatic request.
 
-Open shadow roots expose only their active field to Lineleaf. Closed roots are outside support. Same-origin HTTP(S) child frames may operate only when their exact origin is enabled and permitted and the top page has that same origin. Cross-origin, sandboxed/opaque, `about:blank`, `srcdoc`, data/blob frames and transformed inline geometry are outside this slice. No new extension permission is introduced.
+Open shadow roots expose only their active field to Lineleaf. Closed roots are outside support. Same-origin HTTP(S) child frames may operate only when their exact origin is enabled and permitted and the top page has that same origin. Cross-origin, sandboxed/opaque, `about:blank`, `srcdoc`, and data/blob frames are outside this slice. Inline geometry supports identity transforms and pure translations, including a translated document root and nested clipping. Rotation, skew, scale, perspective, individual CSS rotate/scale properties and shaped clipping remain outside support. No new extension permission is introduced.
 
 ## Live acceptance procedure
 

@@ -27,7 +27,7 @@ Only supported, visible, writable fields in eligible same-origin HTTP(S) documen
 
 A manual selection opened while an inline card has focus retains the original field selection. Live-region text changes only on message transitions, not on each keystroke. Human screen-reader validation remains open.
 
-Lineleaf does not mutate the field to draw underlines. Unsupported transforms or vertical writing show card/badge controls without a guessed underline. Style/tree/source revisions clear obsolete suggestions. Exact source, revision, inline formatting, unique context, Unicode boundaries, non-overlap, and supported native replacement are checked again before acceptance. Failed replacement restores the source when possible and keeps Copy available.
+Lineleaf does not mutate the field to draw underlines. Identity transforms and translations retain aligned overlays, including translated roots and clipping ancestors. Scale, rotation, skew, perspective or shaped clipping prevent inline mounting/checking; use the manual selection panel. Vertical writing does not get a guessed underline. Harmless field/ancestor class and style changes redraw geometry without discarding suggestions. Text/tree changes and safety-marker or context changes still invalidate captures, including remove/reinsert and marker/slot ABA. Exact source, revision, inline formatting, unique context, Unicode boundaries, non-overlap, and supported native replacement are checked again before acceptance. Failed replacement restores the source when possible and keeps Copy available.
 
 ## Request and data lifecycle
 

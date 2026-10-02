@@ -74,19 +74,21 @@ class InlineView {
   draw() {
     const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
     this.layer.hidden = !r; if (!r) { this.mirror.textContent = ''; return; }
-    this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth))}px`;
-    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - 30, r.bottom + 3))}px`;
+    // A translated document root also translates fixed-position containing blocks.
+    const origin = this.layer.getBoundingClientRect();
+    this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth)) - origin.left}px`;
+    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - 30, r.bottom + 3)) - origin.top}px`;
     if (!this.card.hidden) {
       const width = this.card.offsetWidth, height = this.card.offsetHeight;
-      this.card.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, r.right - width))}px`;
-      this.card.style.top = `${Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8))}px`;
+      this.card.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, r.right - width)) - origin.left}px`;
+      this.card.style.top = `${Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8)) - origin.top}px`;
     }
     if (!this.capture?.adapter.current(this.capture.snapshot)) { this.mirror.textContent = ''; return; }
     for (let i = 0; i < this.edits.length; i++) {
       const edit = this.edits[i], start = this.capture.offset + edit.start, end = this.capture.offset + edit.end;
       for (const rectangle of suggestionRects(field, this.capture.snapshot.source, start, end, this.mirror)) {
         const line = this.button('', () => this.open(i), {class: 'underline', tabindex: '-1', 'aria-hidden': 'true', 'data-category': edit.category});
-        line.style.left = `${rectangle.left}px`; line.style.top = `${rectangle.bottom - 3}px`; line.style.width = `${rectangle.right - rectangle.left}px`; this.lines.append(line);
+        line.style.left = `${rectangle.left - origin.left}px`; line.style.top = `${rectangle.bottom - 3 - origin.top}px`; line.style.width = `${rectangle.right - rectangle.left}px`; this.lines.append(line);
       }
     }
   }
@@ -207,7 +209,7 @@ export function mountInline(api) {
     if (applying || !field || !(target === field || field.contains(target))) return;
     stop(); capture = null; edits = []; undo = false; copyOnly = false; dirty = event.isTrusted === true;
     try { pendingKey = dirty ? keyFor(captureParagraph(field, adapter)) : null; } catch { pendingKey = null; }
-    update('Text changed. Checking after a pause.'); queue();
+    update(dirty ? 'Text changed. Checking after a pause.' : 'The editor changed. Choose Check now to review the current text.'); queue();
   };
   document.addEventListener('focusin', event => { const target = eventElement(event); if (target !== view?.host) choose(target); }, true);
   document.addEventListener('input', event => { if (!field) choose(eventElement(event)); changed(event); }, true);
@@ -226,7 +228,7 @@ export function mountInline(api) {
     navigated(); if (!field || applying) return;
     if (!permitted() || !eligibleDOM() || !view?.host.isConnected) { drop(); return; }
     if (capture && !adapter.current(capture.snapshot)) { changed({target: field}); }
-    const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft].join(':');
+    const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft, adapter.layoutRevision].join(':');
     if (position !== geometry) { geometry = position; paint(); }
   }, 250);
   api.runtime.onMessage.addListener((message, sender) => {

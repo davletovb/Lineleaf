@@ -5,6 +5,8 @@ import {candidates, strictJSON} from '../extension/lib/candidates.mjs';
 import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary} from '../extension/lib/policy.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
+import {messageFor} from '../extension/lib/messages.mjs';
+import {EXCLUDED} from '../extension/lib/editor-policy.mjs';
 import {fakeNative, fakeChrome, READY, waitFor} from './fixtures/extension-api.mjs';
 const correction = (before = 'go', after = 'goes', left = '', right = '') => ({before, after, left, right, category: 'grammar', explanation: 'Subject agreement'});
 const output = corrections => JSON.stringify({corrections});
@@ -143,7 +145,8 @@ test('cross-origin, sandboxed, removed and navigated frame documents cannot send
     f.api.scripting.executeScript = async () => changed === 'removed' ? [] : [{documentId: sender.documentId,
       frameId: changed === 'wrong-frame' ? 5 : 4, result: changed === 'sandboxed' ? null : {
         url: changed === 'navigated' ? 'https://writing.test/other' : sender.url, topOrigin: 'https://writing.test'}}];
-    const port = f.connect(sender); start(port); await waitFor(() => port.received.some(x => x.code === 'SITE_DISABLED'));
+    const port = f.connect(sender); start(port); await waitFor(() => port.received.some(x => x.type === 'error'));
+    assert.equal(port.received.find(x => x.type === 'error').code, ['navigated', 'removed', 'wrong-frame'].includes(changed) ? 'STALE_DOCUMENT' : 'RESTRICTED_PAGE');
     assert.equal(f.calls.some(x => x.method === 'send'), false);
   }
 });
@@ -151,14 +154,14 @@ test('navigation between status and writing is refused and never submitted', asy
   const f = fakeChrome(); installController(f.api); let checks = 0;
   f.api.scripting.executeScript = async () => [{documentId: f.sender.documentId, frameId: 0,
     result: {url: ++checks === 1 ? f.sender.url : 'https://writing.test/new-draft', topOrigin: 'https://writing.test'}}];
-  const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'SITE_DISABLED'));
+  const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'STALE_DOCUMENT'));
   assert.equal(f.calls.some(x => x.method === 'send'), false);
 });
 test('a document changed after provider submission cannot receive validated suggestions', async () => {
   const f = fakeChrome(); installController(f.api); let checks = 0;
   f.api.scripting.executeScript = async () => [{documentId: f.sender.documentId, frameId: 0,
     result: {url: ++checks < 3 ? f.sender.url : 'https://writing.test/new-draft', topOrigin: 'https://writing.test'}}];
-  const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'SITE_DISABLED'));
+  const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'STALE_DOCUMENT'));
   assert.equal(f.calls.filter(x => x.method === 'send').length, 1); assert.equal(port.received.some(x => x.type === 'result'), false);
 });
 test('open panel targets only the focused document and refuses ambiguous focus', async () => {
@@ -176,6 +179,18 @@ test('open panel targets only the focused document and refuses ambiguous focus',
       assert.deepEqual(calls[2][2], {documentId: 'focused-document'});
     } else assert.equal(calls.length, 1);
   }
+});
+test('frame probes use shared exclusions and distinguish site access from document failures', async () => {
+  const f = fakeChrome(); installController(f.api); const probe = f.api.scripting.executeScript;
+  f.api.scripting.executeScript = async args => { assert.deepEqual(args.args, [EXCLUDED]); return probe(args); };
+  assert.equal((await f.rpc('site-state', null, f.sender)).ok, true);
+  await f.api.storage.local.set({preferences: {...f.data.preferences, sites: []}});
+  assert.equal((await f.rpc('site-state', null, f.sender)).code, 'SITE_DISABLED');
+  f.api.scripting.executeScript = async () => { throw new Error('Document gone'); };
+  assert.equal((await f.rpc('site-state', null, f.sender)).code, 'STALE_DOCUMENT');
+  assert.match(messageFor('STALE_DOCUMENT'), /page or frame changed/);
+  assert.match(messageFor('RESTRICTED_PAGE'), /same-origin frames/);
+  assert.doesNotMatch(messageFor('STALE_DOCUMENT') + messageFor('RESTRICTED_PAGE'), /Enable this site/);
 });
 test('site registration includes matching frames without opaque-origin inheritance and policy broadcasts to all documents', async () => {
   const f = fakeChrome(); const registered = [], messages = [];

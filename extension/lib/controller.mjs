@@ -1,6 +1,7 @@
 import {NativeSeatline} from './native-seatline.mjs';
 import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTO_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
+import {EXCLUDED} from './editor-policy.mjs';
 
 export function installController(api, {now = Date.now} = {}) {
   let active = null, diagnostic = false, backoffUntil = 0;
@@ -18,25 +19,28 @@ export function installController(api, {now = Date.now} = {}) {
   const send = (port, message) => { try { port.postMessage(message); } catch { /* document closed */ } };
   async function eligible(sender, allowPaused = false) {
     if (sender.id !== api.runtime.id || !Number.isInteger(sender.tab?.id) || (!Number.isInteger(sender.frameId) || sender.frameId < 0)
-        || sender.tab.incognito || !sender.documentId) throw new LineleafError('SITE_DISABLED');
+        || sender.tab.incognito || !sender.documentId) throw new LineleafError('RESTRICTED_PAGE');
     const origin = originOf(sender.url), current = await api.tabs.get(sender.tab.id);
-    if (!origin || current.incognito || originOf(current.url) !== origin) throw new LineleafError('SITE_DISABLED');
+    if (!origin || current.incognito || originOf(current.url) !== origin) throw new LineleafError('RESTRICTED_PAGE');
     let documents;
     try {
       documents = await api.scripting.executeScript({target: {tabId: sender.tab.id, documentIds: [sender.documentId]},
-        func: () => { try {
+        args: [EXCLUDED], func: exclusions => { try {
           for (let current = window; current !== current.top; current = current.parent) {
             const frame = current.frameElement;
             if (!frame || frame.hasAttribute('sandbox') || !frame.getClientRects().length) return null;
             for (let node = frame; node; node = node.assignedSlot ?? node.parentElement ?? node.getRootNode().host) {
-              if (node.matches('[data-lineleaf-ignore], [aria-hidden="true"], pre, code') || current.parent.getComputedStyle(node).visibility !== 'visible') return null;
+              if (node.matches(exclusions) || current.parent.getComputedStyle(node).visibility !== 'visible') return null;
             }
           }
           return {url: location.href, topOrigin: window.top.location.origin};
         } catch { return null; } }});
-    } catch { throw new LineleafError('SITE_DISABLED'); }
-    const document = documents?.find(item => item.documentId === sender.documentId && item.frameId === sender.frameId)?.result;
-    if (!document || document.url !== sender.url || document.topOrigin !== origin) throw new LineleafError('SITE_DISABLED');
+    } catch { throw new LineleafError('STALE_DOCUMENT'); }
+    const matching = documents?.find(item => item.documentId === sender.documentId && item.frameId === sender.frameId);
+    if (!matching) throw new LineleafError('STALE_DOCUMENT');
+    const document = matching.result;
+    if (!document || document.topOrigin !== origin) throw new LineleafError('RESTRICTED_PAGE');
+    if (document.url !== sender.url) throw new LineleafError('STALE_DOCUMENT');
     const settings = await read();
     if (settings.paused && !allowPaused) throw new LineleafError('PAUSED');
     if (!settings.sites.includes(origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
