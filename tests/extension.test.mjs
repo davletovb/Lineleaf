@@ -5,6 +5,8 @@ import {candidates, strictJSON} from '../extension/lib/candidates.mjs';
 import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary} from '../extension/lib/policy.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
+import {messageFor} from '../extension/lib/messages.mjs';
+import {EXCLUDED} from '../extension/lib/editor-policy.mjs';
 import {fakeNative, fakeChrome, READY, waitFor} from './fixtures/extension-api.mjs';
 const correction = (before = 'go', after = 'goes', left = '', right = '') => ({before, after, left, right, category: 'grammar', explanation: 'Subject agreement'});
 const output = corrections => JSON.stringify({corrections});
@@ -122,9 +124,81 @@ test('disabled sites and API-key/unknown sign-in never issue a writing send', as
     await waitFor(() => port.received.some(m => m.type === 'error')); assert.equal(f.calls.some(m => m.method === 'send'), false);
   }
 });
-test('untrusted senders, iframes and incognito ports are rejected immediately', () => {
+test('untrusted senders, invalid frame IDs and incognito ports are rejected immediately', () => {
   const f = fakeChrome(); installController(f.api);
-  for (const change of [{id: 'other'}, {frameId: 1}, {tab: {id: 7, incognito: true}}, {url: 'file:///private'}, {documentId: null}]) assert.equal(f.connect(change).closed, true);
+  for (const change of [{id: 'other'}, {frameId: -1}, {frameId: '1'}, {tab: {id: 7, incognito: true}}, {url: 'file:///private'}, {documentId: null}]) assert.equal(f.connect(change).closed, true);
+});
+test('same-origin permitted frame validates its exact document before provider work', async () => {
+  const f = fakeChrome(); installController(f.api);
+  f.api.scripting.executeScript = async ({target}) => target.documentIds.map(documentId => ({documentId, frameId: 4,
+    result: {url: 'https://writing.test/frame', topOrigin: 'https://writing.test'}}));
+  const sender = {...f.sender, frameId: 4, documentId: 'frame-document', url: 'https://writing.test/frame'};
+  assert.equal((await f.rpc('site-state', null, sender)).ok, true);
+  const port = f.connect(sender); start(port); await waitFor(() => port.received.some(x => x.type === 'result'));
+  assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+});
+test('cross-origin, sandboxed, removed and navigated frame documents cannot send text', async () => {
+  for (const changed of ['cross-origin', 'sandboxed', 'removed', 'navigated', 'wrong-frame']) {
+    const f = fakeChrome({sites: ['https://writing.test', 'https://other.test']}); installController(f.api);
+    const sender = {...f.sender, frameId: 4, documentId: 'frame-document', url: 'https://writing.test/frame'};
+    if (changed === 'cross-origin') sender.url = 'https://other.test/frame';
+    f.api.scripting.executeScript = async () => changed === 'removed' ? [] : [{documentId: sender.documentId,
+      frameId: changed === 'wrong-frame' ? 5 : 4, result: changed === 'sandboxed' ? null : {
+        url: changed === 'navigated' ? 'https://writing.test/other' : sender.url, topOrigin: 'https://writing.test'}}];
+    const port = f.connect(sender); start(port); await waitFor(() => port.received.some(x => x.type === 'error'));
+    assert.equal(port.received.find(x => x.type === 'error').code, ['navigated', 'removed', 'wrong-frame'].includes(changed) ? 'STALE_DOCUMENT' : 'RESTRICTED_PAGE');
+    assert.equal(f.calls.some(x => x.method === 'send'), false);
+  }
+});
+test('navigation between status and writing is refused and never submitted', async () => {
+  const f = fakeChrome(); installController(f.api); let checks = 0;
+  f.api.scripting.executeScript = async () => [{documentId: f.sender.documentId, frameId: 0,
+    result: {url: ++checks === 1 ? f.sender.url : 'https://writing.test/new-draft', topOrigin: 'https://writing.test'}}];
+  const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'STALE_DOCUMENT'));
+  assert.equal(f.calls.some(x => x.method === 'send'), false);
+});
+test('a document changed after provider submission cannot receive validated suggestions', async () => {
+  const f = fakeChrome(); installController(f.api); let checks = 0;
+  f.api.scripting.executeScript = async () => [{documentId: f.sender.documentId, frameId: 0,
+    result: {url: ++checks < 3 ? f.sender.url : 'https://writing.test/new-draft', topOrigin: 'https://writing.test'}}];
+  const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'STALE_DOCUMENT'));
+  assert.equal(f.calls.filter(x => x.method === 'send').length, 1); assert.equal(port.received.some(x => x.type === 'result'), false);
+});
+test('open panel targets only the focused document and refuses ambiguous focus', async () => {
+  for (const ambiguous of [false, true]) {
+    const f = fakeChrome(); installController(f.api); const calls = [];
+    f.api.scripting.executeScript = async args => {
+      calls.push(args);
+      return args.target.allFrames ? [{frameId: 0, documentId: 'top-document', result: ambiguous},
+        {frameId: 4, documentId: 'focused-document', result: true}] : [];
+    };
+    f.api.tabs.sendMessage = async (...args) => calls.push(args);
+    const result = await f.rpc('open-panel', {tabId: 7}); assert.equal(result.ok, !ambiguous);
+    if (!ambiguous) {
+      assert.deepEqual(calls[1].target, {tabId: 7, documentIds: ['focused-document']});
+      assert.deepEqual(calls[2][2], {documentId: 'focused-document'});
+    } else assert.equal(calls.length, 1);
+  }
+});
+test('frame probes use shared exclusions and distinguish site access from document failures', async () => {
+  const f = fakeChrome(); installController(f.api); const probe = f.api.scripting.executeScript;
+  f.api.scripting.executeScript = async args => { assert.deepEqual(args.args, [EXCLUDED]); return probe(args); };
+  assert.equal((await f.rpc('site-state', null, f.sender)).ok, true);
+  await f.api.storage.local.set({preferences: {...f.data.preferences, sites: []}});
+  assert.equal((await f.rpc('site-state', null, f.sender)).code, 'SITE_DISABLED');
+  f.api.scripting.executeScript = async () => { throw new Error('Document gone'); };
+  assert.equal((await f.rpc('site-state', null, f.sender)).code, 'STALE_DOCUMENT');
+  assert.match(messageFor('STALE_DOCUMENT'), /page or frame changed/);
+  assert.match(messageFor('RESTRICTED_PAGE'), /same-origin frames/);
+  assert.doesNotMatch(messageFor('STALE_DOCUMENT') + messageFor('RESTRICTED_PAGE'), /Enable this site/);
+});
+test('site registration includes matching frames without opaque-origin inheritance and policy broadcasts to all documents', async () => {
+  const f = fakeChrome(); const registered = [], messages = [];
+  f.api.scripting.registerContentScripts = async scripts => registered.push(...scripts);
+  f.api.tabs.query = async () => [{id: 7}]; f.api.tabs.sendMessage = async (...args) => messages.push(args);
+  installController(f.api); await waitFor(() => messages.length > 0);
+  assert.equal(registered[0].allFrames, true); assert.notEqual(registered[0].matchOriginAsFallback, true);
+  assert.equal(messages[0].length, 2);
 });
 test('one global request prevents duplicate work; disconnect cancels the target', async () => {
   const f = fakeChrome({hang: true}); installController(f.api); const first = f.connect(); start(first);
@@ -204,7 +278,7 @@ test('automatic rewrites and unknown kinds are refused before provider access', 
 });
 test('content controls are site-scoped; dictionary additions serialize and reset clears all preferences', async () => {
   const f = fakeChrome({automatic: true}); installController(f.api);
-  const denied = await f.rpc('add-word', {word: 'Seatline'}, {...f.sender, frameId: 1}); assert.equal(denied.ok, false);
+  const denied = await f.rpc('add-word', {word: 'Seatline'}, {...f.sender, frameId: 1, url: 'https://other.test/frame'}); assert.equal(denied.ok, false);
   await Promise.all([f.rpc('add-word', {word: 'Seatline'}, f.sender), f.rpc('add-word', {word: 'Lineleaf'}, f.sender)]);
   assert.deepEqual(f.data.preferences.dictionary, ['seatline', 'lineleaf']);
   assert.equal((await f.rpc('pause', null, f.sender)).ok, true); assert.equal(f.data.preferences.paused, true);

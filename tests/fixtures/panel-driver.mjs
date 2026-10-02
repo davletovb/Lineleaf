@@ -6,7 +6,7 @@ async function session(page) {
 }
 function findPanel(node, attribute) {
   if (node.attributes?.includes(attribute)) return node.shadowRoots?.find(x => x.shadowRootType === 'closed');
-  for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? [])]) {
+  for (const child of [...(node.children ?? []), ...(node.shadowRoots ?? []), ...(node.contentDocument ? [node.contentDocument] : [])]) {
     const root = findPanel(child, attribute); if (root) return root;
   }
   return null;
@@ -38,7 +38,7 @@ export function panelFor(page, {attribute = 'data-lineleaf-root'} = {}) {
     return {evaluate, waitFor,
       async click() {
         await waitFor();
-        const box = await evaluate(el => { const r = el.getBoundingClientRect(); return {x: r.x + r.width / 2, y: r.y + r.height / 2}; });
+        const box = await evaluate(el => { el.scrollIntoView({block: 'nearest'}); const r = el.getBoundingClientRect(); let x = r.x + r.width / 2, y = r.y + r.height / 2; for (let w = el.ownerDocument.defaultView; w !== w.top; w = w.parent) { const frame = w.frameElement, bounds = frame.getBoundingClientRect(); x += bounds.x + frame.clientLeft; y += bounds.y + frame.clientTop; } return {x, y}; });
         await page.mouse.click(box.x, box.y);
       },
       textContent: () => evaluate(el => el.textContent),

@@ -12,7 +12,7 @@ before(async () => {
   await page.route('https://inline.lineleaf.test/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
+    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
@@ -115,7 +115,9 @@ test('underlines follow textarea scrolling and layout shifts without editing its
   const after = await inline.locator('.underline').evaluate(el => el.getBoundingClientRect().top);
   assert.ok(after < before); assert.equal(await page.locator('#textarea').evaluate(el => el.childNodes.length), 1);
   await page.locator('#textarea').evaluate(el => { el.style.marginTop = '120px'; });
-  await page.waitForTimeout(300); assert.equal(await inline.locator('.underline').count(), 0); // Attribute/revision changes invalidate rather than misplace an edit.
+  await inline.locator('.underline').waitFor((el, after) => el.getBoundingClientRect().top > after + 100, after);
+  assert.equal((await sends()).length, 1); // Layout-only changes retain the exact source and suggestion.
+  await open(); assert.equal(await inline.button('Accept').isDisabled(), false);
 });
 test('moving the caret to an unrelated paragraph before idle sends neither paragraph', async () => {
   await type('textarea', 'He go to work.\nOther paragraph.');

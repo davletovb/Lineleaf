@@ -1,6 +1,7 @@
 import {NativeSeatline} from './native-seatline.mjs';
 import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTO_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
+import {EXCLUDED} from './editor-policy.mjs';
 
 export function installController(api, {now = Date.now} = {}) {
   let active = null, diagnostic = false, backoffUntil = 0;
@@ -17,10 +18,29 @@ export function installController(api, {now = Date.now} = {}) {
     && [`chrome-extension://${api.runtime.id}/popup.html`, `chrome-extension://${api.runtime.id}/options.html`].includes(sender.url);
   const send = (port, message) => { try { port.postMessage(message); } catch { /* document closed */ } };
   async function eligible(sender, allowPaused = false) {
-    if (sender.id !== api.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0
-        || sender.tab.incognito || !sender.documentId) throw new LineleafError('SITE_DISABLED');
+    if (sender.id !== api.runtime.id || !Number.isInteger(sender.tab?.id) || (!Number.isInteger(sender.frameId) || sender.frameId < 0)
+        || sender.tab.incognito || !sender.documentId) throw new LineleafError('RESTRICTED_PAGE');
     const origin = originOf(sender.url), current = await api.tabs.get(sender.tab.id);
-    if (!origin || originOf(current.url) !== origin) throw new LineleafError('SITE_DISABLED');
+    if (!origin || current.incognito || originOf(current.url) !== origin) throw new LineleafError('RESTRICTED_PAGE');
+    let documents;
+    try {
+      documents = await api.scripting.executeScript({target: {tabId: sender.tab.id, documentIds: [sender.documentId]},
+        args: [EXCLUDED], func: exclusions => { try {
+          for (let current = window; current !== current.top; current = current.parent) {
+            const frame = current.frameElement;
+            if (!frame || frame.hasAttribute('sandbox') || !frame.getClientRects().length) return null;
+            for (let node = frame; node; node = node.assignedSlot ?? node.parentElement ?? node.getRootNode().host) {
+              if (node.matches(exclusions) || current.parent.getComputedStyle(node).visibility !== 'visible') return null;
+            }
+          }
+          return {url: location.href, topOrigin: window.top.location.origin};
+        } catch { return null; } }});
+    } catch { throw new LineleafError('STALE_DOCUMENT'); }
+    const matching = documents?.find(item => item.documentId === sender.documentId && item.frameId === sender.frameId);
+    if (!matching) throw new LineleafError('STALE_DOCUMENT');
+    const document = matching.result;
+    if (!document || document.topOrigin !== origin) throw new LineleafError('RESTRICTED_PAGE');
+    if (document.url !== sender.url) throw new LineleafError('STALE_DOCUMENT');
     const settings = await read();
     if (settings.paused && !allowPaused) throw new LineleafError('PAUSED');
     if (!settings.sites.includes(origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
@@ -84,7 +104,7 @@ export function installController(api, {now = Date.now} = {}) {
   }
   api.runtime.onConnect.addListener(port => {
     if (port.name !== 'lineleaf-writing-v1' || peers.size >= 32 || port.sender?.id !== api.runtime.id
-        || !Number.isInteger(port.sender.tab?.id) || port.sender.frameId !== 0 || port.sender.tab.incognito
+        || !Number.isInteger(port.sender.tab?.id) || (!Number.isInteger(port.sender.frameId) || port.sender.frameId < 0) || port.sender.tab.incognito
         || !port.sender.documentId || !originOf(port.sender.url)) { port.disconnect(); return; }
     const peer = {port, sender: port.sender, running: false}; peers.add(peer);
     port.onMessage.addListener(message => {
@@ -97,13 +117,13 @@ export function installController(api, {now = Date.now} = {}) {
     await initialized; const settings = await read(), matches = [];
     for (const site of settings.sites) if (!settings.paused && await api.permissions.contains({origins: [sitePattern(site)]})) matches.push(sitePattern(site));
     await api.scripting.unregisterContentScripts({ids: ['lineleaf-sites']}).catch(() => {});
-    if (matches.length) await api.scripting.registerContentScripts([{id: 'lineleaf-sites', matches: [...new Set(matches)], js: ['content.js'], runAt: 'document_idle', allFrames: false, persistAcrossSessions: false}]);
+    if (matches.length) await api.scripting.registerContentScripts([{id: 'lineleaf-sites', matches: [...new Set(matches)], js: ['content.js'], runAt: 'document_idle', allFrames: true, persistAcrossSessions: false}]);
     for (const peer of peers) {
       const origin = originOf(peer.sender.url);
       if (!allowed(settings, origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) cancelPeer(peer);
     }
     const tabs = await api.tabs.query({});
-    for (const tab of tabs) if (!tab.incognito) api.tabs.sendMessage(tab.id, {type: 'lineleaf-policy-changed'}, {frameId: 0}).catch(() => {});
+    for (const tab of tabs) if (!tab.incognito) api.tabs.sendMessage(tab.id, {type: 'lineleaf-policy-changed'}).catch(() => {});
   }
   let sync = Promise.resolve();
   const schedule = () => { sync = sync.catch(() => {}).then(reconcile).catch(() => {}); };
@@ -154,8 +174,23 @@ export function installController(api, {now = Date.now} = {}) {
       const tab = await api.tabs.get(p.tabId), origin = originOf(tab.url);
       if (!origin || tab.incognito) throw new LineleafError('RESTRICTED_PAGE');
       if (!allowed(settings, origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
-      await api.scripting.executeScript({target: {tabId: tab.id, frameIds: [0]}, files: ['content.js']});
-      await api.tabs.sendMessage(tab.id, {type: 'lineleaf-open'}, {frameId: 0}); return true;
+      // Query only focus metadata. Never read another frame's selection or draft.
+      const frames = await api.scripting.executeScript({target: {tabId: tab.id, allFrames: true}, func: () => {
+        try {
+          if (!['http:', 'https:'].includes(location.protocol) || location.origin !== window.top.location.origin) return false;
+          let current = window;
+          while (current !== current.top) {
+            if (!current.frameElement || current.frameElement.hasAttribute('sandbox') || current.parent.document.activeElement !== current.frameElement) return false;
+            current = current.parent;
+          }
+          return !['IFRAME', 'FRAME'].includes(document.activeElement?.tagName);
+        } catch { return false; }
+      }});
+      const focused = frames.filter(frame => frame.result === true);
+      if (focused.length !== 1 || !focused[0].documentId) throw new LineleafError('RESTRICTED_PAGE');
+      const documentId = focused[0].documentId;
+      await api.scripting.executeScript({target: {tabId: tab.id, documentIds: [documentId]}, files: ['content.js']});
+      await api.tabs.sendMessage(tab.id, {type: 'lineleaf-open'}, {documentId}); return true;
     }
     if (message.type === 'site-state' && p === null) return {enabled: allowed(settings, originOf(sender.url))};
     if (message.type === 'check-connection' && p === null) {

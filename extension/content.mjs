@@ -1,17 +1,18 @@
+import {deepActive, eventElement, navigationToken, observeNavigation} from './lib/editor-context.mjs';
 import {captureSelection, editorOf} from './lib/selection.mjs';
 import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
-import {errorCode} from './lib/policy.mjs';
+import {errorCode, validText} from './lib/policy.mjs';
 import styles from './panel.css';
 import {mountInline} from './lib/inline.mjs';
 import {categoryLabel, dictionaryWord} from './lib/policy.mjs';
 
 export function mountContent(api) {
   mountInline(api);
-  let focused = document.activeElement, host, root, capture = null, port = null, requestId, edits = [], stale = false;
+  let focused = deepActive(), host, root, capture = null, port = null, requestId, edits = [], stale = false;
   let expiry, watchdog, poll, starting = false;
   const composing = new Set();
-  const focus = event => { if (event.target !== host && !event.target?.hasAttribute?.('data-lineleaf-inline')) focused = event.target; };
+  const focus = event => { const target = eventElement(event); if (target !== host && !target?.hasAttribute?.('data-lineleaf-inline')) focused = target; };
   document.addEventListener('focusin', focus, true);
   const query = selector => root.querySelector(selector);
   const status = text => { query('#status').textContent = text; };
@@ -20,13 +21,13 @@ export function mountContent(api) {
     clearTimeout(watchdog); if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
     if (root) { query('#cancel').hidden = true; query('#check').disabled = !capture; }
   }
-  function clear() { stop(); capture?.adapter?.dispose(); capture = null; edits = []; clearTimeout(expiry); clearInterval(poll); }
+  function clear() { stop(); capture?.guard?.dispose(); capture = null; edits = []; clearTimeout(expiry); clearInterval(poll); }
   function close() { clear(); host?.remove(); host = root = null; }
   function markStale() {
     if (stale || !capture) return; stale = true; stop();
-    status(messageFor('STALE')); render();
+    query('#check').disabled = true; status(messageFor('STALE')); render();
   }
-  function expire() { clear(); query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status('Selection expired. Select text and reopen Lineleaf.'); }
+  function expire() { clear(); query('#pasted').value = ''; query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status('Selection expired. Select text and reopen Lineleaf.'); }
   function render() {
     const results = query('#results'); results.replaceChildren();
     for (const edit of edits) {
@@ -44,14 +45,16 @@ export function mountContent(api) {
       const accept = document.createElement('button'); accept.textContent = 'Accept'; accept.className = 'primary'; accept.disabled = !canApply;
       accept.addEventListener('click', event => {
         if (!event.isTrusted || !capture) return;
+        const selected = capture, openedRoot = root;
         const result = capture.adapter?.apply(capture.snapshot, fullEdit);
+        if (root !== openedRoot || capture !== selected) return;
         if (result?.status === 'applied') {
           stop(); edits = []; stale = true; query('#results').replaceChildren();
           query('#selected').textContent = ''; query('#check').disabled = true;
           query('#undo').hidden = false; status('Applied. You can undo this edit. Select text and reopen Lineleaf for another check.');
         } else {
           stale = true;
-          status(result?.restored ? `Original text restored. This editor rejected the change; use Copy.${result.stateUncertain ? ' Its internal state could not be verified.' : ''}`
+          status(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : result?.restored ? `Original text restored. This editor rejected the change; use Copy.${result.stateUncertain ? ' Its internal state could not be verified.' : ''}`
             : 'Safe replacement is unavailable. Copy the suggestion below.');
           render();
         }
@@ -90,6 +93,9 @@ export function mountContent(api) {
       node('header', '', {}, [node('h2', 'Lineleaf ❧'), node('button', '✕', {class: 'quiet', id: 'close', 'aria-label': 'Close Lineleaf'})]),
       node('p', 'Clearer writing. Still your words.', {class: 'tagline'}), node('label', 'Your selection'), node('blockquote', '', {id: 'selected'}),
       node('p', 'Only this selection goes through Seatline to Codex when you press Check. Drafts are not saved.', {class: 'muted'}),
+      node('section', '', {id: 'paste-section'}, [node('label', 'Or paste text for preview and copy', {for: 'pasted'}),
+        node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
+        node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'For editors that cannot expose a safe selection, copy text yourself and paste it here. Lineleaf will only offer a preview and Copy.', {class: 'muted'})]),
       node('label', 'What would you like to do?', {for: 'mode'}),
       node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
         ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
@@ -100,15 +106,30 @@ export function mountContent(api) {
     query('#close').addEventListener('click', event => { if (event.isTrusted) close(); });
     query('#cancel').addEventListener('click', event => { if (event.isTrusted) { stop(); status(messageFor('CANCELLED')); } });
     query('#undo').addEventListener('click', event => {
-      if (!event.isTrusted) return; const result = capture?.adapter?.undo(); query('#undo').hidden = true;
-      status(result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored
+      if (!event.isTrusted) return; const selected = capture, openedRoot = root, result = capture?.adapter?.undo();
+      if (root !== openedRoot || capture !== selected) return;
+      query('#undo').hidden = true;
+      status(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored
         ? 'Original text restored. This editor could not confirm native undo; further edits use copy only.'
         : 'Undo is unavailable after other edits. Use the editor’s own undo control.');
     });
     query('#check').addEventListener('click', event => { if (event.isTrusted) void run(); });
+    query('#pasted').addEventListener('input', markStale);
+    query('#use-pasted').addEventListener('click', event => {
+      if (!event.isTrusted) return;
+      const text = query('#pasted').value;
+      if (!validText(text)) { status('Paste 1–2,000 characters of text to check.'); return; }
+      clear(); stale = false;
+      const route = navigationToken(), paste = query('#pasted');
+      capture = {text, adapter: null, snapshot: null, offset: 0, field: null,
+        valid: () => host?.isConnected && paste.value === text && navigationToken() === route};
+      query('#selected').textContent = text; query('#results').replaceChildren(); query('#undo').hidden = true;
+      query('#check').disabled = false; status('Ready to check pasted text. Suggestions offer preview and copy only.');
+      expiry = setTimeout(expire, 5 * 60 * 1000);
+    });
     query('#pause').addEventListener('click', async event => {
       if (!event.isTrusted) return;
-      try { const result = await api.runtime.sendMessage({type: 'pause', payload: null}); if (root) { clear(); query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status(messageFor(result.ok ? 'PAUSED' : result.code)); } }
+      try { const result = await api.runtime.sendMessage({type: 'pause', payload: null}); if (root) { clear(); query('#pasted').value = ''; query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status(messageFor(result.ok ? 'PAUSED' : result.code)); } }
       catch { if (root) status(messageFor('UNAVAILABLE')); }
     });
     root.addEventListener('keydown', event => { if (event.key === 'Escape' && event.isTrusted) close(); });
@@ -122,15 +143,16 @@ export function mountContent(api) {
     let next, failure;
     try {
       if (composing.size) throw new Error();
-      next = captureSelection(editorOf(document.activeElement) ? document.activeElement : focused);
+      next = captureSelection(editorOf(deepActive()) ? deepActive() : focused);
     } catch (error) { failure = errorCode(error) === 'UNAVAILABLE' ? 'INVALID_REQUEST' : errorCode(error); }
     clear(); if (!host?.isConnected) create(); stale = false; capture = next ?? null;
     query('#undo').hidden = true; query('#results').replaceChildren(); query('#selected').textContent = capture?.text ?? '';
+    query('#pasted').value = ''; query('#paste-section').hidden = Boolean(capture?.adapter);
     query('#check').disabled = !capture; status(failure ? messageFor(failure) : capture?.adapter ? 'Ready to check your selection.' : 'This surface offers preview and copy only.');
     expiry = setTimeout(expire, 5 * 60 * 1000);
     poll = setInterval(() => {
-      if (!host?.isConnected) { close(); return; }
-      if (!stale && capture?.adapter && !capture.adapter.current(capture.snapshot)) markStale();
+      navigated(); if (!host?.isConnected) { close(); return; }
+      if (!stale && capture && !capture.valid()) markStale();
     }, 500);
     const openedRoot = root, selected = capture, state = await siteState();
     if (root !== openedRoot || capture !== selected) return;
@@ -139,7 +161,7 @@ export function mountContent(api) {
   }
   async function run() {
     if (!capture || port || starting) return;
-    if (stale || (capture.adapter && !capture.adapter.current(capture.snapshot))) { markStale(); return; }
+    if (stale || !capture.valid()) { markStale(); return; }
     starting = true; query('#check').disabled = true;
     const selected = capture;
     const state = await siteState();
@@ -156,7 +178,7 @@ export function mountContent(api) {
         else if (message.type === 'error') { stop(); status(messageFor(message.code)); }
         else if (message.type === 'result') {
           stop();
-          if (capture?.adapter && !capture.adapter.current(capture.snapshot)) { markStale(); return; }
+          if (capture && !capture.valid()) { markStale(); return; }
           if (!Array.isArray(message.edits)) { status(messageFor('INVALID_OUTPUT')); return; }
           edits = message.edits; render(); status(edits.length ? 'Review each suggestion before accepting.' : 'No corrections suggested.');
         }
@@ -165,18 +187,21 @@ export function mountContent(api) {
       current.postMessage({type: 'start', id, text: capture.text, mode: query('#mode').value});
     } catch { stop(); status(messageFor('UNAVAILABLE')); }
   }
-  const input = event => { if (capture?.field && (event.target === capture.field || capture.field.contains(event.target))) markStale(); };
+  const input = event => { const target = eventElement(event); if (capture?.field && (target === capture.field || capture.field.contains(target))) markStale(); };
   document.addEventListener('input', input, true);
-  document.addEventListener('compositionstart', event => { composing.add(event.target); input(event); }, true);
-  document.addEventListener('compositionend', event => { composing.delete(event.target); }, true);
+  document.addEventListener('compositionstart', event => { composing.add(eventElement(event)); input(event); }, true);
+  document.addEventListener('compositionend', event => { composing.delete(eventElement(event)); }, true);
   document.addEventListener('mouseup', event => {
-    if (event.target !== host && !host?.contains(event.target)) focused = editorOf(document.activeElement) ? document.activeElement : event.target;
+    const target = eventElement(event); if (target !== host && !target?.hasAttribute?.('data-lineleaf-inline')) focused = editorOf(deepActive()) ? deepActive() : target;
   }, true);
   api.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== api.runtime.id) return;
     if (message.type === 'lineleaf-open') void open();
-    if (message.type === 'lineleaf-policy-changed') { clear(); if (root) { query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status('Settings changed. Reopen Lineleaf to check a new selection.'); } }
+    if (message.type === 'lineleaf-policy-changed') { clear(); if (root) { query('#pasted').value = ''; query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status('Settings changed. Reopen Lineleaf to check a new selection.'); } }
   });
+  let route = navigationToken();
+  const navigated = () => { const next = navigationToken(); if (next !== route) { route = next; focused = null; close(); } };
+  observeNavigation(navigated);
   window.addEventListener('pagehide', close);
   return {open, close};
 }

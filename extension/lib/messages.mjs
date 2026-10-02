@@ -19,7 +19,8 @@ export const MESSAGES = {
   SETTINGS_CHANGED: 'Preferences changed elsewhere. Reload settings before saving your changes.',
   OFFLINE: 'You are offline. Check your connection, then retry when ready.',
   CANCELLED: 'Cancelled. No changes were made.', STALE: 'The selection changed. Select text and check again.',
+  STALE_DOCUMENT: 'The page or frame changed. Select the current text and check again.',
   UNAVAILABLE: 'Lineleaf could not complete this action. Reopen the extension and try again.',
-  RESTRICTED_PAGE: 'Lineleaf is available on ordinary HTTP and HTTPS pages in the main frame.',
+  RESTRICTED_PAGE: 'Lineleaf is available on ordinary HTTP and HTTPS pages and eligible same-origin frames. This page or frame is unavailable.',
 };
 export const messageFor = code => MESSAGES[code] ?? MESSAGES.UNAVAILABLE;

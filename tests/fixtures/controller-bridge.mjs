@@ -5,11 +5,12 @@ const worker = fakeChrome({sites: [location.origin], automatic: new URL(location
 worker.api.tabs.query = async () => [{id: 7, url: location.href, incognito: false}];
 worker.api.tabs.get = async id => ({id, url: location.href});
 worker.sender.url = location.href;
+worker.api.scripting.executeScript = async ({target}) => (target.documentIds ?? [worker.sender.documentId]).map(documentId => ({documentId, frameId: 0, result: {url: location.href, topOrigin: location.origin}}));
 worker.api.tabs.sendMessage = async (_, message) => fixture.runtimeMessages.emit(message, {id: chrome.runtime.id});
 installController(worker.api);
-chrome.runtime.sendMessage = message => new Promise(resolve => worker.api.runtime.onMessage.emit(message, worker.sender, resolve));
+chrome.runtime.sendMessage = message => new Promise(resolve => worker.api.runtime.onMessage.emit(message, {...worker.sender, url: location.href}, resolve));
 chrome.runtime.connect = () => {
-  const server = worker.connect(), client = {onMessage: new Event(), onDisconnect: new Event()};
+  const server = worker.connect({url: location.href}), client = {onMessage: new Event(), onDisconnect: new Event()};
   server.postMessage = message => queueMicrotask(() => client.onMessage.emit(structuredClone(message)));
   server.onDisconnect.addListener(() => client.onDisconnect.emit());
   client.disconnect = () => server.disconnect();

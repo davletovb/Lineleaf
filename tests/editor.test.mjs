@@ -19,7 +19,9 @@ async function fixture(run) {
       const path = new URL(route.request().url()).pathname;
       const files = new Map([
         ["/", ["./fixtures/editors.html", "text/html"]],
-        ["/prototypes/editor/editor-adapter.mjs", ["../prototypes/editor/editor-adapter.mjs", "text/javascript"]]
+        ["/prototypes/editor/editor-adapter.mjs", ["../prototypes/editor/editor-adapter.mjs", "text/javascript"]],
+        ["/extension/lib/editor-context.mjs", ["../extension/lib/editor-context.mjs", "text/javascript"]],
+        ["/extension/lib/editor-policy.mjs", ["../extension/lib/editor-policy.mjs", "text/javascript"]]
       ]);
       const file = files.get(path);
       if (!file) return route.abort();

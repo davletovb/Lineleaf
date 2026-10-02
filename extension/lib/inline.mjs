@@ -1,6 +1,7 @@
+import {deepActive, eventElement, navigationToken, observeNavigation, embeddingAllowed} from './editor-context.mjs';
 import {EditorAdapter, validSpan} from '../../prototypes/editor/editor-adapter.mjs';
 import {captureParagraph, editorOf, excluded} from './selection.mjs';
-import {suggestionRects} from './geometry.mjs';
+import {suggestionRects, visibleEditorRect} from './geometry.mjs';
 import {AUTO_IDLE, AUTO_INTERVAL, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import styles from '../inline.css';
@@ -71,20 +72,23 @@ class InlineView {
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
   hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); }
   draw() {
-    const field = this.field, r = field.getBoundingClientRect(); this.lines.replaceChildren();
-    this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth))}px`;
-    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - 30, r.bottom + 3))}px`;
+    const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
+    this.layer.hidden = !r; if (!r) { this.mirror.textContent = ''; return; }
+    // A translated document root also translates fixed-position containing blocks.
+    const origin = this.layer.getBoundingClientRect();
+    this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth)) - origin.left}px`;
+    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - 30, r.bottom + 3)) - origin.top}px`;
     if (!this.card.hidden) {
       const width = this.card.offsetWidth, height = this.card.offsetHeight;
-      this.card.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, r.right - width))}px`;
-      this.card.style.top = `${Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8))}px`;
+      this.card.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, r.right - width)) - origin.left}px`;
+      this.card.style.top = `${Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8)) - origin.top}px`;
     }
     if (!this.capture?.adapter.current(this.capture.snapshot)) { this.mirror.textContent = ''; return; }
     for (let i = 0; i < this.edits.length; i++) {
       const edit = this.edits[i], start = this.capture.offset + edit.start, end = this.capture.offset + edit.end;
       for (const rectangle of suggestionRects(field, this.capture.snapshot.source, start, end, this.mirror)) {
         const line = this.button('', () => this.open(i), {class: 'underline', tabindex: '-1', 'aria-hidden': 'true', 'data-category': edit.category});
-        line.style.left = `${rectangle.left}px`; line.style.top = `${rectangle.bottom - 3}px`; line.style.width = `${rectangle.right - rectangle.left}px`; this.lines.append(line);
+        line.style.left = `${rectangle.left - origin.left}px`; line.style.top = `${rectangle.bottom - 3 - origin.top}px`; line.style.width = `${rectangle.right - rectangle.left}px`; this.lines.append(line);
       }
     }
   }
@@ -96,7 +100,7 @@ export function mountInline(api) {
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
   const compositions = new WeakSet();
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
-  const active = () => document.activeElement === field;
+  const active = () => deepActive() === field;
   const stop = () => {
     generation++; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
@@ -110,11 +114,11 @@ export function mountInline(api) {
     const ticket = ++epoch, result = await rpc('site-state'); if (ticket !== epoch) return;
     policy = result.ok ? result.value : null;
     if (!permitted()) { drop(); return; }
-    choose(document.activeElement);
+    choose(deepActive());
   }
   function eligibleDOM() {
-    return field?.isConnected && !excluded(field) && !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code')
-      && !field.disabled && !field.readOnly && field.getClientRects().length > 0 && getComputedStyle(field).visibility === 'visible';
+    return field?.isConnected && embeddingAllowed() && !excluded(field) && !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code')
+      && !field.disabled && !field.readOnly && visibleEditorRect(field) !== null;
   }
   function choose(target) {
     if (applying || target === view?.host) return;
@@ -181,42 +185,50 @@ export function mountInline(api) {
   function accept(edit) {
     if (!capture || !eligibleDOM()) return;
     stop(); applying = true;
+    const selected = capture, selectedView = view;
     let result;
     try { result = capture.adapter.apply(capture.snapshot, {...edit, start: capture.offset + edit.start, end: capture.offset + edit.end}); }
     finally { applying = false; }
+    if (capture !== selected || view !== selectedView) return;
     undo = result?.status === 'applied'; edits = undo ? [] : [edit]; copyOnly = !undo;
-    update(undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
+    update(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
     if (!undo) { blocked = true; view.open(); return; }
     capture = null; view.capture = null;
     try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; }
     queue(); view.open();
   }
   function undoEdit() {
-    applying = true; let result;
+    applying = true; let result; const selectedView = view;
     try { result = adapter?.undo(); } finally { applying = false; }
+    if (view !== selectedView) return;
     undo = false; edits = []; capture = null; lastKey = null;
-    update(result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
+    update(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
   }
   const changed = event => {
-    if (applying || !field || !(event.target === field || field.contains(event.target))) return;
+    const target = eventElement(event);
+    if (applying || !field || !(target === field || field.contains(target))) return;
     stop(); capture = null; edits = []; undo = false; copyOnly = false; dirty = event.isTrusted === true;
     try { pendingKey = dirty ? keyFor(captureParagraph(field, adapter)) : null; } catch { pendingKey = null; }
-    update('Text changed. Checking after a pause.'); queue();
+    update(dirty ? 'Text changed. Checking after a pause.' : 'The editor changed. Choose Check now to review the current text.'); queue();
   };
-  document.addEventListener('focusin', event => { if (event.target !== view?.host) choose(event.target); }, true);
-  document.addEventListener('input', event => { if (!field) choose(event.target); changed(event); }, true);
-  document.addEventListener('compositionstart', event => { compositions.add(editorOf(event.target) ?? event.target); if (field && (event.target === field || field.contains(event.target))) { composing = true; changed(event); } }, true);
-  document.addEventListener('compositionend', event => { compositions.delete(editorOf(event.target) ?? event.target); if (field && (event.target === field || field.contains(event.target))) { composing = false; changed(event); } }, true);
+  document.addEventListener('focusin', event => { const target = eventElement(event); if (target !== view?.host) choose(target); }, true);
+  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); changed(event); }, true);
+  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; changed(event); } }, true);
+  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; changed(event); } }, true);
   document.addEventListener('keydown', trusted(event => {
     if (event.altKey && event.shiftKey && event.code === 'KeyL' && view) { event.preventDefault(); view.open(); }
   }), true);
   const paint = () => { if (!frame) frame = requestAnimationFrame(() => { frame = null; view?.draw(); }); };
   document.addEventListener('scroll', paint, {capture: true, passive: true}); window.addEventListener('resize', paint);
+  let route = navigationToken();
+  const navigated = () => { const next = navigationToken(); if (next !== route) { route = next; epoch++; drop(); void refresh(); } };
+  observeNavigation(navigated);
+  window.visualViewport?.addEventListener('resize', paint); window.visualViewport?.addEventListener('scroll', paint);
   const poll = setInterval(() => {
-    if (!field || applying) return;
+    navigated(); if (!field || applying) return;
     if (!permitted() || !eligibleDOM() || !view?.host.isConnected) { drop(); return; }
     if (capture && !adapter.current(capture.snapshot)) { changed({target: field}); }
-    const r = field.getBoundingClientRect(), position = [r.x, r.y, r.width, r.height, field.scrollTop, field.scrollLeft].join(':');
+    const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft, adapter.layoutRevision].join(':');
     if (position !== geometry) { geometry = position; paint(); }
   }, 250);
   api.runtime.onMessage.addListener((message, sender) => {
