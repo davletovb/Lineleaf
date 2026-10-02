@@ -9,7 +9,8 @@
 | Textarea/text/search input; simple inline contenteditable | Synthetic edit, caret, formatting, Unicode, stale response and native undo regressions | Actual device/editor checks pending |
 | Gmail, GitHub, LinkedIn, Slack | Synthetic priority-editor policy and safe copy fallback | Authenticated synthetic-draft matrix pending; no real-site replacement claim |
 | Same-origin frames and open shadow roots | Scoped synthetic frame/slot/privacy/geometry regressions | Live editor/device validation pending |
-| Google Docs and complex block/framework editors | Explicit pasted-text/manual preview and Copy when eligible | No generic replacement or automatic-checking support |
+| Rich editors (Draft.js such as X, Lexical, Slate, ProseMirror, Quill, Gmail, LinkedIn, Slack, Notion) | Explicit preview/Copy; with the automatic opt-in, a copy-only inline preview of the caret paragraph (synthetic fixtures; local runs against the real libraries) | Authenticated real-site check pending; no replacement support |
+| Google Docs and canvas/code editors | Explicit pasted-text/manual preview and Copy when eligible | No replacement and no automatic checking |
 | Windows, Firefox, Edge, mobile; closed/cross-origin/opaque frames | Outside current acceptance targets | Not advertised |
 
 Identity transforms and translations retain inline geometry. Scale, rotation, skew, perspective, shaped clipping and vertical writing use the manual/copy boundary. Password/payment/one-time-code fields, excluded/code regions, hidden/read-only content, incognito and oversized paragraphs are refused.

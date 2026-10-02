@@ -88,7 +88,14 @@ for (const [name, url, id, canApply] of [
     assert.equal(await page.locator(`#${id}`).evaluate(el => el.value ?? el.textContent), 'He go to work.');
     if (id === 'editable') assert.equal(await page.locator('#editable strong').textContent(), 'go');
     await panel.button('✕').click(); await page.locator(`#${id}`).focus(); await page.keyboard.press('End'); await page.keyboard.type(' ');
-    if (!canApply) { await page.waitForTimeout(1700); assert.equal((await sends()).length, 1); assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0); }
+    if (!canApply) {
+      // Rich composers now get an opt-in, copy-only inline preview: one more request, a card without Accept, no edit.
+      await page.waitForFunction(() => fixture.worker.calls.filter(x => x.method === 'send').length === 2, null, {timeout: 14000});
+      await inline.locator('.underline').waitFor(); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
+      assert.equal(await inline.button('Accept').count(), 0);
+      assert.match(await page.locator(`#${id}`).evaluate(el => el.textContent), /^He go to work\.[ \u00a0]$/); // Only the user's own typed space was added.
+      assert.equal(await page.locator('#editable strong').textContent(), 'go');
+    }
   });
 }
 test('Google Docs input proxy is copy-only; canvas-only documents use explicit pasted-text fallback', async () => {

@@ -32,6 +32,8 @@ function supported(element) {
     && !child.hasAttribute("contenteditable") && !child.shadowRoot);
 }
 
+export const replacementSupported = supported;
+
 function textNodes(element) {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   const nodes = [];
