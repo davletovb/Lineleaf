@@ -12,10 +12,14 @@
 | [MVP scope and toolchain](architecture/mvp-scope-and-toolchain.md) | A-05 conservative scope, development commands, and unresolved decisions |
 | [Selection prototype](implementation/selection-mvp.md) | B-01–B-05 build/load instructions, explicit writing flow, validation, and acceptance limits |
 | [Inline prototype](implementation/inline-mvp.md) | C-01–C-05 opt-in automatic checking, accessible review controls, preferences, privacy, and verification boundaries |
-
 | [Priority editor matrix](investigations/priority-editor-matrix.md) | D-01 synthetic boundaries, live-site acceptance checklist and copy fallback |
 | [Complex editor feasibility](investigations/complex-editor-feasibility.md) | D-03 Google Docs/framework decision and gates for dedicated adapters |
 | [Dynamic editor evidence](evidence/editor-compatibility-ci.md) | D-02 context, SPA, geometry, frames and open-shadow regression evidence |
+| [Evaluation and beta packaging](implementation/evaluation-beta.md) | E-01–E-03 quality reviews, coexistence probes, responsiveness and gated candidate/release commands |
+| [Candidate setup](beta/SETUP.md) | Development installation and shared-companion setup |
+| [Candidate support](beta/SUPPORT.md) | Tested development boundaries and pending advertised-device targets |
+| [Candidate privacy](beta/PRIVACY.md) | Processing, storage, controls and evaluation artifact handling |
+| [Beta acceptance](beta/ACCEPTANCE.md) | Independent human/live/device release checklist |
 
 The product is named **Lineleaf**. The preservation principle is that the user's intent, authorship, and control remain theirs, including when they deliberately request a different tone.
 

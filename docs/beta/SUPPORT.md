@@ -1,0 +1,19 @@
+# Candidate support matrix
+
+`review.json` is the package-bound gate report. A blocked candidate advertises no supported platform. The following are development boundaries and acceptance targets.
+
+| Surface | Implemented/tested boundary | Beta acceptance |
+| --- | --- | --- |
+| Desktop Chrome on Linux/macOS | Installed MV3 tests in pinned Playwright Chromium on both CI operating systems | Actual Chrome install, update, uninstall, permission prompt, successful native turn and human accessibility checks pending per advertised device |
+| Codex through shared Seatline | Strict protocol, subscription/tool-isolation readiness, bounded ephemeral no-tools turns | Independently reviewed live quality and approved latency per exact model/CLI/runtime configuration pending |
+| Textarea/text/search input; simple inline contenteditable | Synthetic edit, caret, formatting, Unicode, stale response and native undo regressions | Actual device/editor checks pending |
+| Gmail, GitHub, LinkedIn, Slack | Synthetic priority-editor policy and safe copy fallback | Authenticated synthetic-draft matrix pending; no real-site replacement claim |
+| Same-origin frames and open shadow roots | Scoped synthetic frame/slot/privacy/geometry regressions | Live editor/device validation pending |
+| Google Docs and complex block/framework editors | Explicit pasted-text/manual preview and Copy when eligible | No generic replacement or automatic-checking support |
+| Windows, Firefox, Edge, mobile; closed/cross-origin/opaque frames | Outside current acceptance targets | Not advertised |
+
+Identity transforms and translations retain inline geometry. Scale, rotation, skew, perspective, shaped clipping and vertical writing use the manual/copy boundary. Password/payment/one-time-code fields, excluded/code regions, hidden/read-only content, incognito and oversized paragraphs are refused.
+
+Provider errors use fixed diagnostics. Check the shared native host, exact Lineleaf grant, subscription sign-in and tool isolation. Pause or disable the site to stop work. Reconnects do not automatically resend drafts. After an error, use an explicit check on current text. Rate-limit/queue cooldowns protect the shared provider; do not defeat them to benchmark live quotas.
+
+For review reports include candidate/package hash, browser/OS version, provider CLI/model/version, fixed error code and synthetic reproduction. Never include credentials, account paths, real drafts or raw provider stderr. Filing or sending a report remains an explicit reviewer action.

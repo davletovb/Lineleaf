@@ -1,7 +1,7 @@
 # Lineleaf — Implementation Tracker
 
 Established: 2026-10-01  
-Status: A/B/C slices merged; D-01 through D-03 editor boundaries and feasibility implemented in PR #4. Live/device/provider and real-site acceptance gates remain open.
+Status: A/B/C/D development slices merged; E-01 through E-03 tooling implemented for review; beta distribution remains gated. Live/device/provider and real-site acceptance gates remain open.
 
 This is the authoritative progress record. Requirements are defined in the [product framework](lineleaf-product-framework.md) and [Seatline integration document](../architecture/seatline-integration.md).
 
@@ -19,10 +19,10 @@ PR #3 review follow-up at `e18ebb67a8ea8daf337c3b8c1aae400172161636` passes **12
 
 - Planned implementation items: **21**
 - DONE: **9**
-- IMPLEMENTED — VERIFY: **9**
+- IMPLEMENTED — VERIFY: **12**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
-- TODO: **3**
+- TODO: **0**
 
 Repository setup is recorded separately below and is not counted as product implementation.
 
@@ -72,13 +72,13 @@ A staged decision can have separate dependency gates only when the decision log 
 | D-01 | Validate priority real-world editors | C-05 | Publish a tested matrix for Gmail compose, GitHub comments, LinkedIn posts, and Slack web; unsupported surfaces use fallback | IMPLEMENTED — VERIFY | Codex | [Priority matrix](../investigations/priority-editor-matrix.md) and [regressions/evidence](../evidence/editor-compatibility-ci.md): priority-host fallback and GitHub textarea boundaries tested on intercepted synthetic HTML; authenticated draft-only Gmail/GitHub/LinkedIn/Slack checks remain |
 | D-02 | Handle dynamic fields and geometry | D-01 | SPA navigation, resizing, scrolling, permitted frames, and supported open shadow roots do not misapply edits | DONE | Codex | [Reliability review follow-up](../evidence/editor-compatibility-ci.md#reliability-review-follow-up): CI run 36948449397 on fc946419 passes 163 per Linux/macOS plus fifteen native checks; translation geometry, harmless-class retention, safe marker/slot/context invalidation and corrected frame probes/diagnostics pass within declared development boundaries. Authenticated real-site checks remain D-01 |
 | D-03 | Investigate Google Docs and complex editors | D-01 | Produce a separate feasibility result; do not advertise support without a working tested adapter | DONE | Codex | [Separate feasibility decision](../investigations/complex-editor-feasibility.md): no generic Google Docs/complex replacement claim; guarded frameworks/Docs input proxy and explicit pasted-text copy fallback verified on synthetic browser tests |
-| E-01 | Run writing-quality and regression evaluation | C-03, D-01 | Meet the product framework's beta quality gates across the validated provider configurations | TODO | — | — |
-| E-02 | Validate shared-companion coexistence | B-02, C-01 | Concurrent use with another consumer neither mixes sessions nor creates uncontrolled background traffic | TODO | — | — |
-| E-03 | Package a reviewable beta | E-01, E-02 | Install/update/uninstall and permission behavior verified on each advertised browser/OS; beta package and support matrix ready | TODO | — | — |
+| E-01 | Run writing-quality and regression evaluation | C-03, D-01 | Meet the product framework's beta quality gates across the validated provider configurations | IMPLEMENTED — VERIFY | Codex | [Production evaluation and review workflow](../implementation/evaluation-beta.md): 150 proofreading/24 rewrite draft cases, strict scorer and regression/typing probes implemented; independent labels/output judgments, live provider quality/latency and D-01 authenticated drafts remain gates |
+| E-02 | Validate shared-companion coexistence | B-02, C-01 | Concurrent use with another consumer neither mixes sessions nor creates uncontrolled background traffic | IMPLEMENTED — VERIFY | Codex | [Existing-broker coexistence probes](../implementation/evaluation-beta.md#shared-companion-and-responsiveness): thirteen bounded routing/session/cancel/queue/recovery checks plus existing authorization and production pacing regressions; CI verification and actual live multi-consumer device use remain |
+| E-03 | Package a reviewable beta | E-01, E-02 | Install/update/uninstall and permission behavior verified on each advertised browser/OS; beta package and support matrix ready | IMPLEMENTED — VERIFY | Codex | [Reproducible gated review archive](../implementation/evaluation-beta.md#candidate-and-release), [support matrix](../beta/SUPPORT.md), installed profile/update regression and [acceptance checklist](../beta/ACCEPTANCE.md); candidate is explicitly blocked, advertised platforms empty, distribution requires current human/live/device evidence |
 
 ## First development slice
 
-The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C development follows the owner’s subsequent C-01–C-05 instruction. The owner now requests D-01–D-03 as one slice; E stays TODO.
+The merged A-01–A-05 foundation slice includes executable investigation tools and a minimal native status probe. It does not count as B-01 product scaffolding. The owner subsequently requested B-01–B-05 together: development proceeds with the explicit staged evidence above, while live provider/latency and device acceptance remain open. C/D development follows the owner's combined-slice instructions. The owner now requests E-01–E-03 together; tooling and a gated review candidate proceed while live/human/device release gates remain explicit.
 
 Inline automation follows safe replacement, validated provider behavior, and explicit selection actions.
 
@@ -113,3 +113,4 @@ The A/B slices now establish development tools, extension source, and CI packagi
 | 2026-10-02 | Verify D-02 assigned-slot privacy/geometry follow-up | [Run 36939222072](https://github.com/davletovb/Lineleaf/actions/runs/36939222072) on `c819b88d5dc854504e850f61b4bdd428829a2485` passes 155 checks per OS plus fifteen native checks. The review thread is resolved and downloaded packages equal the local build. Real-account priority editor acceptance remains D-01 verify. |
 | 2026-10-02 | Reopen D-02 acceptance for reliability review fixes | [Review](https://github.com/davletovb/Lineleaf/pull/4#pullrequestreview-5387120985): permit identity/translation geometry and retain suggestions across harmless ancestor classes while preserving safety invalidation. Record the remaining transform boundary and reverify the changed code in Linux/macOS installed-extension CI. D-01 live acceptance and E beta gates stay open. |
 | 2026-10-02 | Verify D-02 reliability review fixes | [Run 36948449397](https://github.com/davletovb/Lineleaf/actions/runs/36948449397) on `fc946419bb7b0990315ab9aef30eed02a3d05e6f` passes 163 checks per Linux/macOS and fifteen native checks; downloaded packages match the local build. Identity/translation geometry and retained harmless-class suggestions are verified with safe ABA invalidation; unsupported transform and live-site boundaries stay explicit. |
+| 2026-10-02 | Owner explicitly authorizes E-01–E-03 as one implementation slice | Implement quality evaluation using production prompts/validators, a synthetic corpus with independent-human review workflow, shared-broker coexistence validation, and reproducible review-candidate packaging. Accepted C/D deterministic and B transport fixtures enable tooling; they do not satisfy live writing, real editors, human accessibility or actual device acceptance. Candidate output must remain blocked from beta distribution until those evidence gates pass. |

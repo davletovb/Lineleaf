@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "packageHash": null,
+  "engineHash": null,
+  "seatlineRevision": null,
+  "quality": [],
+  "regression": {
+    "kind": "pending",
+    "packageHash": null,
+    "engineHash": null,
+    "commit": null,
+    "run": null,
+    "platforms": {
+      "linux": null,
+      "macos": null
+    },
+    "checks": {
+      "editing": null,
+      "privacy": null,
+      "requestLimits": null,
+      "frames": null,
+      "keyboardSemantics": null
+    },
+    "review": {
+      "kind": "pending",
+      "reviewer": "",
+      "independent": false,
+      "reviewedAt": ""
+    }
+  },
+  "coexistence": {
+    "kind": "pending",
+    "packageHash": null,
+    "seatlineRevision": null,
+    "consumers": null,
+    "checks": {
+      "concurrentRouting": null,
+      "sessionIsolation": null,
+      "cancellationIsolation": null,
+      "automaticBudget": null,
+      "recovery": null
+    },
+    "review": {
+      "kind": "pending",
+      "reviewer": "",
+      "independent": false,
+      "reviewedAt": ""
+    }
+  },
+  "latency": {
+    "kind": "pending",
+    "packageHash": null,
+    "configurations": [],
+    "review": {
+      "kind": "pending",
+      "reviewer": "",
+      "independent": false,
+      "reviewedAt": ""
+    }
+  },
+  "devices": [],
+  "editors": {
+    "packageHash": null,
+    "surfaces": {
+      "gmail": null,
+      "github": null,
+      "linkedin": null,
+      "slack": null
+    },
+    "review": {
+      "kind": "pending",
+      "reviewer": "",
+      "independent": false,
+      "reviewedAt": ""
+    }
+  }
+}

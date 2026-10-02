@@ -32,6 +32,19 @@ jobs:
       - run: npm test
       - run: npm run test:extension
       - run: npm run package
+      - name: Exercise evaluation and blocked beta-review packaging
+        run: |
+          node tools/evaluate-writing.mjs --fixture --out test-results/quality-fixture > test-results/quality-fixture-summary.json
+          node tools/measure-typing.mjs > test-results/typing-summary.json
+          node tools/package-beta.mjs --candidate > test-results/beta-review-summary.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: lineleaf-beta-review-${{ runner.os }}
+          path: |
+            dist/lineleaf-0.1.0-beta-review.zip
+            test-results/quality-fixture-summary.json
+            test-results/typing-summary.json
+            test-results/beta-review-summary.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lineleaf-extension-${{ runner.os }}
@@ -68,8 +81,13 @@ jobs:
         run: |
           mkdir -p test-results
           python3 -m tools.validate_authorization --companion .seatline-audit/target/release/seatline-companion --fake-provider .seatline-audit/target/release/seatline-fake-provider > test-results/native-authorization.json
+      - name: Validate isolated concurrent-consumer coexistence
+        run: |
+          python3 -m tools.validate_coexistence --companion .seatline-audit/target/release/seatline-companion --fake-provider .seatline-audit/target/release/seatline-fake-provider > test-results/native-coexistence.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: native-authorization
-          path: test-results/native-authorization.json
+          path: |
+            test-results/native-authorization.json
+            test-results/native-coexistence.json
