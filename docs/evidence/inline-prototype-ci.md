@@ -1,5 +1,17 @@
 # C-01–C-05 inline prototype evidence
 
+## Rich-editor copy-only preview
+
+Code revision: [`7b80ba54b4d473f0c7b7e5872dbb0e984e458c5a`](https://github.com/davletovb/Lineleaf/commit/7b80ba54b4d473f0c7b7e5872dbb0e984e458c5a), in [PR #6](https://github.com/davletovb/Lineleaf/pull/6). [CI run 36969011135](https://github.com/davletovb/Lineleaf/actions/runs/36969011135) passed all three jobs. `npm test` includes `tests/rich.test.mjs`.
+
+| Job | ID | Result |
+| --- | --- | --- |
+| Linux | `110718856655` | Passed |
+| macOS | `110718857199` | Passed |
+| Shared companion | `110718856447` | Passed |
+
+These are synthetic editor-shaped fixtures. Real Draft.js, Slate, Quill, ProseMirror and Lexical runs were local and uncommitted. Real X, Gmail, LinkedIn, Slack and Notion composers, human screen-reader use and authenticated provider quality in rich text are not verified; C-02 and D-01 remain IMPLEMENTED — VERIFY. Later documentation-only commits record this result.
+
 ## Review follow-up
 
 Code revision: [`e18ebb67a8ea8daf337c3b8c1aae400172161636`](https://github.com/davletovb/Lineleaf/commit/e18ebb67a8ea8daf337c3b8c1aae400172161636). [CI run 36911704950](https://github.com/davletovb/Lineleaf/actions/runs/36911704950) passed all three jobs: **121 tests per OS** (26 Python, 34 extension logic, 16 editor, 20 manual panel, 20 inline, five installed-extension), plus fifteen native checks.
