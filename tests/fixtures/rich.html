@@ -2,7 +2,7 @@
 <style>
   body{font:16px system-ui;padding:30px}
   [contenteditable=true],textarea{display:block;margin:12px 0;width:380px;min-height:28px;border:1px solid #bbb;padding:4px}
-  .public-DraftEditor-content,[data-lexical-editor],[data-slate-editor],.ql-editor,.ProseMirror{white-space:pre-wrap;word-wrap:break-word}
+  .public-DraftEditor-content,[data-lexical-editor],[data-slate-editor],.ql-editor,.ProseMirror,#controlled-editor{white-space:pre-wrap;word-wrap:break-word}
   p{margin:0 0 6px}
 </style>
 <!-- Structures mirror each library's rendered DOM; none of their code is loaded. -->
@@ -18,6 +18,12 @@ He go to work.
 Third line.</p></div>
 <div id="nbsp" contenteditable="true"><p>He&nbsp;go&nbsp;to&nbsp;work.&#x200B;&#xFEFF;</p></div>
 <div id="island" contenteditable="true"><p>He go to work with <span contenteditable="false" class="chip">@maya</span> today.</p></div>
+<div id="inlinews" contenteditable="true"><p>He go<b> </b>to work.</p></div>
+<div id="prettyspans" contenteditable="true"><p>Alpha
+      <span>beta</span>
+      <span>gamma</span> .</p></div>
+<div id="runs" contenteditable="true"><p>One   two
+      three</p></div>
 <div id="mixed" contenteditable="true"><p>Run <code>npm test</code> now.</p><p>He go to work.</p><pre>He go to work in a pre block.</pre></div>
 <div id="controlled-editor" contenteditable="true"></div>
 <textarea id="textarea">He go to work.</textarea>

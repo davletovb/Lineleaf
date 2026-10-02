@@ -122,12 +122,12 @@ test('Backspace and Enter in a state-owning editor also arm a check of the parag
 });
 test('focusing text, moving the caret, or leaving the typed paragraph before the pause sends nothing', async () => {
   await load();
-  await caretAfter('#draft', 'work.'); await page.keyboard.press('ArrowUp'); await page.keyboard.press('End'); await idle();
+  await caretAfter('#draft', 'work.'); await page.keyboard.press('ArrowUp'); await caretAfter('#draft', 'Intro paragraph.'); await idle();
   assert.equal((await sends()).length, 0); assert.equal(await inline.locator('.underline').count().catch(() => 0), 0);
   // Type in the first paragraph, then move into the second before the idle window ends: neither is sent.
   await page.keyboard.type(' '); await page.keyboard.press('ArrowDown'); await idle();
   assert.equal((await sends()).length, 0);
-  await page.keyboard.press('End'); await page.keyboard.type(' ');
+  await caretAfter('#draft', 'work.'); await page.keyboard.type(' ');
   await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
 });
@@ -235,4 +235,71 @@ test('closing the card restores the caret in editors that clear the DOM selectio
   assert.equal(await page.evaluate(() => getSelection().rangeCount), 0); // The editor really did drop its selection.
   await page.keyboard.press('Escape'); await page.keyboard.type('X');
   assert.equal(await page.locator('#draft').innerText(), 'Intro paragraph.\nHe go to work. X');
+});
+
+// --- Review follow-ups -------------------------------------------------------------------------------------------------
+const wrapInCode = host => page.evaluate(host => {
+  const paragraph = document.querySelector(host), code = document.createElement('code'); code.append(...paragraph.childNodes); paragraph.append(code);
+}, host);
+test('a descendant exclusion added after capture removes the preview without changing the text', async () => {
+  await load(); await checked('#quill', 'work.');
+  await wrapInCode('#quill p:nth-of-type(2)');
+  await inline.locator('.underline').waitFor((_, __, all) => all.length === 0);
+  assert.equal((await sends()).length, 1);
+});
+test('a descendant exclusion added while the provider request is pending discards its result', async () => {
+  await load(); await page.evaluate(() => { fixture.worker.hold = true; });
+  await typeAfter('#quill', 'work.');
+  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await wrapInCode('#quill p:nth-of-type(2)');
+  await page.evaluate(() => {
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send');
+    port.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
+    port.reply(request.id, {type: 'completed'});
+  });
+  await page.waitForTimeout(600);
+  assert.equal(await inline.locator('.underline').count(), 0);
+  assert.match(await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label')), /selection changed|editor changed|Select text/i);
+});
+test('a keystroke the editor rejects does not arm a check of the unchanged paragraph', async () => {
+  await load();
+  await page.evaluate(() => document.querySelector('#draft').addEventListener('beforeinput', event => event.preventDefault(), {capture: true, once: false, passive: false}));
+  await typeAfter('#draft', 'work.'); await page.keyboard.type('x'); await idle();
+  assert.equal((await sends()).length, 0); assert.equal(await page.locator('#draft').innerText(), 'Intro paragraph.\nHe go to work.');
+});
+test('a rejected keystroke leaves an already armed check in place', async () => {
+  await load();
+  await typeAfter('#draft', 'work.'); // Accepted: arms the check.
+  await page.evaluate(() => document.querySelector('#draft').addEventListener('beforeinput', event => event.preventDefault(), true));
+  await page.keyboard.type('x'); // Rejected within the idle window.
+  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
+});
+test('Check now uses the remembered caret when the editor cleared its selection on blur, whether the card opened by key or mouse', async () => {
+  for (const how of ['keyboard', 'mouse']) {
+    await load();
+    await page.evaluate(() => document.querySelector('#draft').addEventListener('blur', () => getSelection().removeAllRanges()));
+    await checked('#draft', 'work.');
+    if (how === 'mouse') await inline.locator('.badge').click(); else await page.keyboard.press('Alt+Shift+l');
+    await inline.locator('#card-title').waitFor();
+    assert.equal(await page.evaluate(() => getSelection().rangeCount), 0, how); // The editor really did drop its selection.
+    await press('Check now');
+    await page.waitForFunction(() => fixture.worker.calls.filter(x => x.method === 'send').length === 2, null, {timeout: 8000});
+    assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.', 'He go to work.'], how);
+  }
+});
+test('the request carries the rendered text for whitespace-only inline content and pretty-printed or collapsible whitespace', async () => {
+  for (const [host, needle, expected, answer] of [
+    ['#inlinews', 'work.', 'He go to work.', null],
+    ['#prettyspans', ' .', 'Alpha beta gamma .', {before: 'beta', left: 'Alpha ', right: ' gamma'}],
+    ['#runs', 'three', 'One two three', {before: 'two', left: 'One ', right: ' three'}]
+  ]) {
+    await load();
+    if (answer) await page.evaluate(a => { fixture.worker.answer = JSON.stringify({corrections: [{...a, after: 'X', category: 'grammar', explanation: 'Synthetic'}]}); }, answer);
+    await checked(host, needle);
+    const [text] = await requestTexts(); assert.equal(text.trim(), expected, host);
+    assert.equal(text.trim(), await page.locator(`${host} p`).evaluate(el => el.innerText.replace(/ /g, ' ').trim()), host); // The browser agrees.
+    const [u] = await underlines(), w = await wordBox(host, answer ? answer.before : 'He go', answer ? answer.before : 'go');
+    assert.ok(close(u.left, w.left) && close(u.right, w.right), `${host}: ${JSON.stringify(u)} vs ${JSON.stringify(w)}`);
+  }
 });

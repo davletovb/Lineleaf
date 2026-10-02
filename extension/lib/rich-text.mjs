@@ -7,7 +7,6 @@ import {visibleEditorRect} from './geometry.mjs';
 
 const invalid = () => new LineleafError('INVALID_REQUEST');
 const INLINE = /^(?:inline|contents|ruby)/;
-const KEEPS_NEWLINES = /^(?:pre|pre-wrap|pre-line|break-spaces)$/;
 const MAX_BLOCK = 100000;
 
 // Block-level container of a node, found without relying on any framework markup.
@@ -17,9 +16,18 @@ function blockFor(host, node) {
   return element && host.contains(element) ? element : host;
 }
 
+// How CSS treats whitespace inside `element`: spaces are kept (pre, pre-wrap, break-spaces) and/or newlines are line breaks.
+function whitespaceOf(element) {
+  const style = getComputedStyle(element);
+  const collapse = style.whiteSpaceCollapse || {normal: 'collapse', nowrap: 'collapse', pre: 'preserve', 'pre-wrap': 'preserve',
+    'pre-line': 'preserve-breaks', 'break-spaces': 'break-spaces'}[style.whiteSpace] || 'collapse';
+  return {spaces: collapse === 'preserve' || collapse === 'break-spaces', breaks: collapse !== 'collapse'};
+}
+
 // Visible text of `root` as one string with a 1:1 UTF-16 mapping back to DOM text nodes. Block boundaries and <br>
-// become '\n'. Zero-width editor placeholders are skipped; NBSP is normalised to a space so model-supplied context
-// matches. Nothing here changes the DOM.
+// become '\n'. Collapsible whitespace is reduced the way CSS renders it (one space; none at the start or end of a
+// line), zero-width editor placeholders are skipped and NBSP is normalised to a space so model-supplied context
+// matches. Skipped characters simply have no entry. Nothing here changes the DOM.
 function textMap(root) {
   const runs = [], inline = new Map();
   const isInline = element => {
@@ -35,28 +43,44 @@ function textMap(root) {
     acceptNode: node => node.nodeType === Node.TEXT_NODE || node.localName === 'br' ? NodeFilter.FILTER_ACCEPT
       : getComputedStyle(node).display === 'none' ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP
   });
-  let text = '', previous = null;
+  let text = '', previous = null, space = true; // `space`: the next collapsible space is leading or follows another
   const append = (value, run) => { runs.push({...run, start: text.length, length: value.length}); text += value; };
+  // A collapsible space that ends a line is not rendered.
+  const trim = () => {
+    const last = runs.at(-1);
+    if (!last?.trailingSpace || last.start + last.length !== text.length) return;
+    text = text.slice(0, -1); last.length--; last.trailingSpace = false;
+    if (!last.length) runs.pop();
+  };
+  const lineBreak = run => { trim(); append('\n', run); space = true; };
   const separate = block => {
-    if (previous && block !== previous && text && !text.endsWith('\n')) append('\n', {node: null});
+    if (previous && block !== previous && text && !text.endsWith('\n')) lineBreak({node: null});
     previous = block;
   };
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.nodeType !== Node.TEXT_NODE) { separate(owner(node)); append('\n', {node: null, br: node}); continue; }
-    const keeps = KEEPS_NEWLINES.test(getComputedStyle(node.parentElement).whiteSpace);
-    // Source-formatting whitespace between blocks is collapsed by CSS and never rendered: it is not text.
-    if (!keeps && !/\S/.test(node.data) && [node.previousSibling, node.nextSibling].every(sibling => !sibling || (sibling.nodeType === Node.ELEMENT_NODE && !isInline(sibling)))) continue;
     separate(owner(node));
-    let piece = '', from = 0;
-    const flush = () => { if (piece) append(piece, {node, nodeStart: from}); piece = ''; };
+    if (node.nodeType !== Node.TEXT_NODE) { lineBreak({node: null, br: node}); continue; }
+    const mode = whitespaceOf(node.parentElement);
+    let piece = '', from = 0, trailing = false;
+    const flush = () => { if (piece) append(piece, {node, nodeStart: from, trailingSpace: trailing}); piece = ''; trailing = false; };
+    const keep = (i, value, collapsible) => { if (!piece) from = i; piece += value; trailing = collapsible; space = collapsible; };
     for (let i = 0; i < node.data.length; i++) {
       const c = node.data[i];
-      if (c === '​' || c === '﻿') { flush(); continue; }
-      if (!piece) from = i;
-      piece += c === ' ' || c === '\r' ? ' ' : c === '\n' && !keeps ? ' ' : c;
+      // Skipped from the text, but still a character in the line: a space before it is not at the end of the line.
+      if (c === '\u200b' || c === '\ufeff') { flush(); if (runs.at(-1)) runs.at(-1).trailingSpace = false; space = false; continue; }
+      if (c === '\u00a0') { keep(i, ' ', false); continue; }
+      if (c === '\n' && mode.breaks) { flush(); trim(); keep(i, '\n', false); flush(); space = true; continue; }
+      if (c === ' ' || c === '\t' || c === '\r' || c === '\f' || c === '\n') {
+        if (mode.spaces) keep(i, c === '\r' || c === '\f' ? ' ' : c, false);
+        else if (space) flush(); // Collapsed into the previous space or the start of the line.
+        else keep(i, ' ', true);
+        continue;
+      }
+      keep(i, c, false);
     }
     flush();
   }
+  trim();
   return {text, runs};
 }
 
@@ -104,7 +128,7 @@ export function captureRichParagraph(host) {
   if (!validText(text) || !/\p{L}/u.test(text)) throw invalid();
   if (!ids.has(block)) ids.set(block, ++counter);
   const context = contextFor(host), source = map.text;
-  const valid = () => host.isConnected && block.isConnected && previewAllowed(host) && !excluded(block)
+  const valid = () => host.isConnected && block.isConnected && previewAllowed(host) && !excluded(block) && !block.querySelector(EXCLUDED)
     && contextCurrent(host, context) && textMap(block).text === source;
   return {preview: true, id: ids.get(block), text, offset: start, snapshot: null, adapter: null, field: host, valid,
     // Underlines are recomputed from the live nodes each time, so framework re-renders cannot leave detached ranges.

@@ -25,6 +25,7 @@ class InlineView {
     this.mirror = node('div', '', {class: 'mirror', 'aria-hidden': 'true'});
     this.layer.append(this.lines, this.badge, this.card, this.announcer); this.root.append(this.layer, this.mirror);
     document.documentElement.append(this.host);
+    this.track = () => this.remember(); document.addEventListener('selectionchange', this.track);
     this.badge.addEventListener('click', trusted(() => this.open()));
     this.root.addEventListener('keydown', trusted(event => { if (event.key === 'Escape') { event.preventDefault(); this.hide(); } }));
   }
@@ -113,13 +114,13 @@ class InlineView {
       }
     }
   }
-  close() { this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
+  close() { document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
 }
 
 export function mountInline(api) {
   let field, adapter, view, capture, edits = [], port, timer, expiry, watchdog, frame, policy = null, epoch = 0, generation = 0;
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
-  let mode = 'edit', settling = 0; // 'preview' = rich editor: suggestions to copy, never an edit
+  let mode = 'edit', settling = 0, before; // 'preview' = rich editor: suggestions to copy, never an edit
   const compositions = new WeakSet();
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
   const active = () => deepActive() === field;
@@ -127,7 +128,7 @@ export function mountInline(api) {
     generation++; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
   };
-  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); field = adapter = view = capture = null; mode = 'edit'; settling++; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
+  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
   function update(message) { view?.update(capture, edits, message, undo, copyOnly); }
   async function rpc(type, payload = null) {
     try { return await api.runtime.sendMessage({type, payload}); } catch { return {ok: false, code: 'UNAVAILABLE'}; }
@@ -163,8 +164,7 @@ export function mountInline(api) {
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});
-      update(mode === 'preview' ? 'Lineleaf checks this paragraph after you pause typing and shows suggestions to copy. It never edits this editor. Alt Shift L opens controls.'
-        : 'Lineleaf checks this paragraph after you pause typing. Alt Shift L opens controls.');
+      update(idleMessage());
     }
     queue();
   }
@@ -178,7 +178,7 @@ export function mountInline(api) {
     if (automatic && (!permitted() || !active() || blocked)) return;
     if (!navigator.onLine) { blocked = true; update(messageFor('OFFLINE')); return; }
     // Explicit Check now restores the field focus before capturing its current paragraph.
-    if (!automatic) { field.focus({preventScroll: true}); blocked = false; }
+    if (!automatic) { field.focus({preventScroll: true}); view?.restore(); blocked = false; }
     let next;
     try { next = capturePara(); }
     catch { capture = null; edits = []; update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.'); return; }
@@ -235,29 +235,47 @@ export function mountInline(api) {
     undo = false; edits = []; capture = null; lastKey = null;
     update(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
   }
-  // Draft.js, Lexical and Slate cancel `beforeinput` and re-render, so no native `input` event may follow. The typed
-  // paragraph is therefore read one task later, after the editor has applied the change.
+  // Rich editors. A trusted typing event only arms a check when the caret paragraph really changed: an editor can cancel
+  // `beforeinput` (maxlength, read-only state, a handler) without re-rendering or emitting `input`. Draft.js, Lexical and
+  // Slate cancel it *and* re-render with no native `input`, so the result is read one task later. The pre-edit key comes
+  // only from `beforeinput`/`compositionstart`; `input` never overwrites it, or editors that apply the change and also
+  // emit `input` would never arm.
+  const paragraphKey = () => { try { return keyFor(capturePara()); } catch { return null; } };
+  const idleMessage = () => mode === 'preview'
+    ? 'Lineleaf checks this paragraph after you pause typing and shows suggestions to copy. It never edits this editor. Alt Shift L opens controls.'
+    : 'Lineleaf checks this paragraph after you pause typing. Alt Shift L opens controls.';
   function settle() {
     const ticket = ++settling;
     setTimeout(() => {
       if (ticket !== settling || mode !== 'preview' || !field) return;
-      try { pendingKey = keyFor(capturePara()); } catch { pendingKey = null; }
+      const was = before, after = paragraphKey(); before = undefined;
+      if (after === was) return; // The editor rejected or ignored the edit: keep any check already armed.
+      stop(); capture = null; edits = []; undo = false; copyOnly = false; pendingKey = after; dirty = after !== null;
+      update(dirty ? 'Text changed. Checking after a pause.' : idleMessage()); queue();
     }, 0);
+  }
+  function typed(event) {
+    const target = eventElement(event);
+    if (applying || !field || mode !== 'preview' || !(target === field || field.contains(target))) return;
+    if (event.type === 'compositionstart') { stop(); capture = null; edits = []; update('Text changed. Checking after a pause.'); }
+    // Keep the pre-edit key of the earliest edit that has not settled yet: on a busy page a later rejected keystroke could
+    // otherwise overwrite it with the already-changed key and hide the change.
+    if ((event.type === 'compositionstart' || (event.type === 'beforeinput' && !event.isComposing)) && before === undefined) before = paragraphKey();
+    settle();
   }
   const changed = event => {
     const target = eventElement(event);
     if (applying || !field || !(target === field || field.contains(target))) return;
     stop(); capture = null; edits = []; undo = false; copyOnly = false; dirty = event.isTrusted === true;
     pendingKey = null;
-    if (dirty && mode === 'preview') settle();
-    else if (dirty) { try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; } }
+    if (dirty) { try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; } }
     update(dirty ? 'Text changed. Checking after a pause.' : 'The editor changed. Choose Check now to review the current text.'); queue();
   };
   document.addEventListener('focusin', event => { const target = eventElement(event); if (target !== view?.host) choose(target); }, true);
-  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); changed(event); }, true);
-  document.addEventListener('beforeinput', event => { if (mode === 'preview' && field) changed(event); }, true);
-  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; changed(event); } }, true);
-  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; changed(event); } }, true);
+  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); }, true);
+  document.addEventListener('beforeinput', event => { if (mode === 'preview' && field && event.isTrusted) typed(event); }, true);
+  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); } }, true);
+  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); } }, true);
   document.addEventListener('keydown', trusted(event => {
     if (event.altKey && event.shiftKey && event.code === 'KeyL' && view) { event.preventDefault(); view.open(); }
   }), true);
