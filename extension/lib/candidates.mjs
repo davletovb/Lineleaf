@@ -61,19 +61,19 @@ const OPENERS = new Set(('A An The This That These Those There Here It Its He Sh
   'What Why How Who Whom Which Where Whose All Any Some Each Every Both Many Most More Much Few Several Such One Two Another Other Once').split(' '));
 const tally = (items) => { const counts = new Map(); for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1); return counts; };
 const sameCounts = (a, b) => a.size === b.size && [...a].every(([key, count]) => b.get(key) === count);
-// `all` holds every capitalised word; `kept` those that count as names (sentence openers and "I" excluded); `inner` the kept
-// words that do not begin a sentence.
+// Occurrence counts of capitalised words: `all` every one; `kept` those that count as names (sentence openers and "I" excluded);
+// `inner` the kept ones that do not begin a sentence. Counting occurrences means "Maya thanked Maya" → "Maya thanked" is a change.
 function capitalised(text) {
-  const all = new Set(), kept = new Set(), inner = new Set();
+  const all = new Map(), kept = new Map(), inner = new Map(), add = (map, word) => map.set(word, (map.get(word) ?? 0) + 1);
   for (const match of text.matchAll(WORDS)) {
     const word = match[0].replace(/['’]s?$/iu, ''), head = word.replace(/['’].*$/u, '');
-    all.add(word);
+    add(all, word);
     if (head === 'I') continue;
     const before = text.slice(0, match.index);
     const opening = before.trim() === '' || /[.!?…:]["'”’)\]]*\s+$/u.test(before) || /\n\s*$/.test(before);
     if (opening && OPENERS.has(head)) continue;
-    kept.add(word);
-    if (!opening) inner.add(word);
+    add(kept, word);
+    if (!opening) add(inner, word);
   }
   return {all, kept, inner};
 }
@@ -81,7 +81,7 @@ const negations = text => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS
 export function preservationFlags(source, rewrite) {
   const flags = [], a = capitalised(source), b = capitalised(rewrite);
   if (!sameCounts(tally(source.match(NUMBERS) ?? []), tally(rewrite.match(NUMBERS) ?? []))) flags.push('number');
-  if ([...a.kept].some(word => !b.all.has(word)) || [...b.inner].some(word => !a.all.has(word))
+  if ([...a.kept].some(([word, n]) => (b.all.get(word) ?? 0) < n) || [...b.inner].some(([word, n]) => n > (a.all.get(word) ?? 0))
       || !sameCounts(tally(source.match(HANDLES) ?? []), tally(rewrite.match(HANDLES) ?? []))) flags.push('name');
   if (!sameCounts(negations(source), negations(rewrite))) flags.push('negation');
   return flags;
@@ -114,7 +114,8 @@ function clarity(data, source, points) {
     const {start, end} = matches[0];
     if (!points.has(start) || !points.has(end) || spans.some(x => start < x.end && x.start < end)) bad();
     spans.push({start, end});
-    if (bare(item.before) === bare(item.after) || preservationFlags(item.before, item.after).length) continue;
+    // The whole paragraph is compared with and without the edit: an isolated phrase hides the context ("May" → "June" before "6").
+    if (bare(item.before) === bare(item.after) || preservationFlags(source, source.slice(0, start) + item.after + source.slice(end)).length) continue;
     edits.push({...item, category: 'clarity', start, end});
   }
   return edits.sort((a, b) => a.start - b.start);

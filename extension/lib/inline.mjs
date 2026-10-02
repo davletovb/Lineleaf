@@ -224,7 +224,7 @@ export function mountInline(api) {
       drop(); field = next; composing = compositions.has(field);
       if (replacementSupported(field)) {
         adapter = new EditorAdapter(field);
-        if (!adapter.snapshot() || !eligibleDOM()) { drop(); return; }
+        if (!adapter.usable() || !eligibleDOM()) { drop(); return; } // Eligibility only: the text is read when an action names what to check.
       } else if (previewAllowed(field)) {
         mode = 'rich';
         if (!eligibleDOM()) { drop(); return; }
@@ -241,7 +241,8 @@ export function mountInline(api) {
   const keyFor = value => `${value.id ?? ''}:${value.offset}:${value.text}`;
   function queue(delay = AUTO_IDLE) {
     clearTimeout(timer); if (!permitted() || !navigator.onLine || !active() || composing || blocked || !eligibleDOM()) return;
-    if (dirty) timer = setTimeout(() => { timer = null; void run(true); }, Math.max(delay, nextAt - Date.now()));
+    // A change that has not been checked yet (its paragraph key differs from the last one checked) comes before the optional wording check.
+    if (dirty && pendingKey !== lastKey) timer = setTimeout(() => { timer = null; void run(true); }, Math.max(delay, nextAt - Date.now()));
     else if (clarityDue) timer = setTimeout(() => { timer = null; void run(true, null, true); }, Math.max(0, nextAt - Date.now())); // After the corrections, on the shared interval.
   }
   async function run(automatic, rewriteMode = null, wording = false) {
@@ -288,7 +289,7 @@ export function mountInline(api) {
           else {
             edits = message.edits; update(edits.length ? countMessage() : 'No corrections suggested.');
             // With the optional setting on, the same paragraph gets one more automatic request for clearer wording, after the shared interval.
-            if (automatic && policy?.clarity === true) { dirty = false; clarityDue = true; clarityFor = keyFor(capture); queue(); } // This change is checked; the next timer is the wording one.
+            if (automatic && policy?.clarity === true) { clarityDue = true; clarityFor = keyFor(capture); queue(); }
           }
           clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
         } else if (message.type === 'error') {
@@ -343,6 +344,7 @@ export function mountInline(api) {
       const recheck = result.typed === true || Boolean(edit.rewrite); // A rewrite's new text is proofread after a pause.
       // The automatic check reads the whole caret paragraph, so its key (not the key of a rewritten selection) is what must match.
       held = null; capture = next; undo = false; copyOnly = false; lastKey = recheck ? null : keyFor(next); pendingKey = recheck ? paragraphKey() : null; dirty = recheck;
+      if (clarityDue) clarityFor = keyFor(next);
       update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
       if (here) view.hide();
       queue(); return;
@@ -362,7 +364,7 @@ export function mountInline(api) {
     undo = result?.status === 'applied'; edits = undo ? [] : [edit]; copyOnly = !undo;
     update(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
     if (!undo) { blocked = true; view.open(); return; }
-    held = null; capture = null; view.capture = null; if (edit.rewrite) dirty = true;
+    held = null; capture = null; view.capture = null; clarityDue = false; if (edit.rewrite) dirty = true; // The new text gets its corrections first, then its own wording check.
     try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; }
     queue(); view.open();
   }
@@ -400,6 +402,7 @@ export function mountInline(api) {
   function typed(event) {
     const target = eventElement(event);
     if (applying || !field || mode !== 'rich' || !(target === field || field.contains(target))) return;
+    if (!permitted()) { stop(); capture = null; edits = []; held = null; update(changedMessage(true)); return; } // Nothing is checked unasked, so nothing is read per keystroke.
     if (event.type === 'compositionstart') { stop(); capture = null; edits = []; update(changedMessage(true)); }
     // Keep the pre-edit key of the earliest edit that has not settled yet: on a busy page a later rejected keystroke could
     // otherwise overwrite it with the already-changed key and hide the change.

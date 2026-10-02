@@ -346,3 +346,30 @@ test('the shortcut builds nothing in a field Lineleaf excludes, even with automa
   await page.evaluate(() => document.querySelector('#secret').focus()); await page.keyboard.press('Alt+Shift+l'); await page.waitForTimeout(600);
   assert.equal(await hostsBuilt(), 0); assert.deepEqual(await requests(), []);
 });
+
+// The promise is literal: until an action names what to check, the field's text is not read, by opening the card or by typing.
+test('with automatic checking off the field is not read by opening the card or by typing, only by the action that names the text', async () => {
+  await load(MANUAL); await proofreadAnswer();
+  await page.evaluate(() => {
+    window.__reads = 0; const real = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    Object.defineProperty(HTMLTextAreaElement.prototype, 'value', {...real, get() { if (this.id === 'textarea') window.__reads++; return real.get.call(this); }});
+  });
+  const reads = () => page.evaluate(() => window.__reads), full = 'Intro paragraph. He go to work. Bye.';
+  await focusTextarea(full, [full.length, full.length]); await page.keyboard.type(' typing'); assert.equal(await reads(), 0);
+  await focusTextarea(full, [17, 31]); await openCard(); assert.equal(await reads(), 0); // opening the card
+  await press('✕'); await focusTextarea(full, [full.length, full.length]); await page.keyboard.type('!'); assert.equal(await reads(), 0); // editing after it opened
+  await openCard(); await press('Check now'); await inline.locator('.underline').waitFor(); assert.ok(await reads() > 0); // the action reads
+});
+
+test('with automatic checking off, typing in a rich editor reads nothing more and says the text changed', async () => {
+  await load(MANUAL);
+  await page.evaluate(() => {
+    window.__reads = 0; const real = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+    Object.defineProperty(Node.prototype, 'textContent', {...real, get() { if (this.id === 'prose') window.__reads++; return real.get.call(this); }});
+  });
+  const reads = () => page.evaluate(() => window.__reads);
+  await placeCaret('#prose', 'work.'); await openCard(); await press('✕'); const opened = await reads();
+  await page.keyboard.type('!'); await page.keyboard.type('?');
+  await inline.locator('.badge').waitFor(el => /The text changed\. Choose Check now or a rewrite/.test(el.getAttribute('aria-label')));
+  assert.equal(await reads(), opened); assert.deepEqual(await requests(), []);
+});

@@ -158,9 +158,14 @@ export class EditorAdapter {
   eligibility() { return [excluded(this.element), replacementAllowed(this.element), embeddingAllowed(), supported(this.element)].join(':'); }
   flush() { this.mutations(this.observer.takeRecords()); this.contextChanged(this.contextObserver.takeRecords()); }
 
-  snapshot({copy = false} = {}) {
+  // The conditions snapshot() requires, checked without reading the field's text.
+  usable({copy = false} = {}) {
     this.flush();
-    if (this.composing || excluded(this.element) || !this.element.isConnected || this.element.disabled || this.element.readOnly || (!copy && !supported(this.element))) return null;
+    return !(this.composing || excluded(this.element) || !this.element.isConnected || this.element.disabled || this.element.readOnly || (!copy && !supported(this.element)));
+  }
+
+  snapshot({copy = false} = {}) {
+    if (!this.usable({copy})) return null;
     const result = Object.freeze({source: text(this.element), revision: this.revision, context: contextFor(this.element)});
     this.snapshots.add(result);
     return result;

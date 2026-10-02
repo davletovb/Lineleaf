@@ -136,3 +136,21 @@ test('a change the editor reports without trusted typing ends the pending wordin
   await underlineCount(0); await skipInterval(); await page.waitForTimeout(2300);
   assert.deepEqual((await requests()).map(x => x.mode), ['proofread']);
 });
+
+test('accepting one correction while clearer wording is on still gets the remaining corrections re-checked', async () => {
+  await load(); const text = 'He go to work in order to earn money, and they was late.';
+  await page.evaluate(() => { // the provider corrects whatever is still wrong in the text it is sent
+    fixture.worker.answer = params => {
+      const sent = JSON.parse(params.messages[0].text).text;
+      if (params.system.includes('"suggestions"')) return JSON.stringify({suggestions: []});
+      const fixes = [['go', 'goes', 'He ', ' to work', 'He go to'], ['was', 'were', 'they ', ' late', 'they was']].filter(x => sent.includes(x[4]));
+      return JSON.stringify({corrections: fixes.map(([before, after, left, right]) => ({before, after, left, right, category: 'grammar', explanation: 'Agreement'}))});
+    };
+  });
+  await typeInField(text); await underlineCount(2);
+  await openCard(); await press('Accept'); await inline.button('Undo last edit').waitFor();
+  assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work in order to earn money, and they was late. ');
+  await press('✕'); await skipInterval();
+  await page.waitForFunction(() => fixture.checks.some(x => x.mode === 'proofread' && x.text.startsWith('He goes')), null, {timeout: 8000}); // the edited paragraph is checked again
+  await underlineCount(1); assert.equal(await underlines('grammar'), 1); // the remaining correction is back
+});

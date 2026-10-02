@@ -59,7 +59,9 @@ test('rewrites report silent changes to numbers, names and negation instead of h
   assert.deepEqual(flags('Thanks for coming.', 'Thank you for coming.'), []);
   assert.deepEqual(flags('Maya paid the invoice.', 'Priya paid the invoice.'), ['name']); // a name that begins the text still counts
   assert.deepEqual(flags('Maya paid the invoice.', 'The invoice was paid by Maya.'), []);
-  assert.deepEqual(flags('I met Dr. Okafor. Okafor was late.', 'I met Dr. Okafor, who was late.'), []);
+  assert.deepEqual(flags('Maya thanked Maya for the notes.', 'Maya thanked for the notes.'), ['name']); // a repeated name is counted by occurrence
+  assert.deepEqual(flags('I met Dr. Okafor. Okafor was late.', 'I met Dr. Okafor, who was late.'), ['name']); // merging two mentions is reported, not hidden
+  assert.deepEqual(flags('We met Maya.', 'We met Maya, and Maya agreed.'), ['name']); // a name added to the rewrite more often than the source had it
   assert.deepEqual(flags('Maya\u2019s team won.', 'The team led by Maya won.'), []);
   assert.deepEqual(flags('The purpose of this note is to remind you that it is due.', 'Reminder: it is due.'), []); // a new first word is not an added name
   assert.deepEqual(flags('I am not available.', 'I am never available.'), ['negation']); // swapping one negator for another is still reported
@@ -414,6 +416,12 @@ test('a clearer-wording suggestion that changes a number, name or negation, or o
   assert.deepEqual(candidates(clarityOutput(dropped), source, 'clarity'), []);
   const kept = candidates(clarityOutput([...dropped, suggestion('to look at it', 'to review it', 'team ', '.')]), source, 'clarity');
   assert.deepEqual(kept.map(x => x.after), ['to review it']);
+  // Preservation is judged on the whole paragraph with the edit applied, not on the isolated phrase: the context decides.
+  const inContext = (text, before, after, left, right) => candidates(clarityOutput([suggestion(before, after, left, right)]), text, 'clarity');
+  assert.deepEqual(inContext('We meet on May 6.', 'May', 'June', 'on ', ' 6'), []);
+  assert.deepEqual(inContext('We asked the finance team to check.', 'the finance team', 'Maya', 'asked ', ' to check'), []);
+  assert.deepEqual(inContext('Maya thanked Maya for the notes.', 'Maya thanked Maya', 'Maya thanked', '', ' for the notes'), []); // one of two occurrences of a name
+  assert.equal(inContext('We asked the finance team to look at it.', 'to look at it', 'to review it', 'team ', '.').length, 1);
 });
 test('the clearer-wording prompt keeps corrections out, forbids changing facts and bounds the output', () => {
   const turn = writingTurn('We met in order to plan.', 'clarity', preferences({variant: 'UK'}));
