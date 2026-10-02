@@ -34,6 +34,7 @@ jobs:
       - run: npm run package
       - name: Exercise evaluation and blocked beta-review packaging
         run: |
+          mkdir -p test-results
           node tools/evaluate-writing.mjs --fixture --out test-results/quality-fixture > test-results/quality-fixture-summary.json
           node tools/measure-typing.mjs > test-results/typing-summary.json
           node tools/package-beta.mjs --candidate > test-results/beta-review-summary.json
