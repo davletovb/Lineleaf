@@ -6,7 +6,7 @@ export const MODES = ['proofread', ...REWRITE_MODES];
 export const REWRITE_LABELS = {improve: 'Improve it', paraphrase: 'Paraphrase', clearer: 'Clearer', shorter: 'Shorter', formal: 'More formal', friendly: 'Friendlier'};
 // Modes where "nothing to change" is a valid answer; the others must return different text.
 export const MAY_STAY_SAME = ['improve', 'paraphrase'];
-export const FLAG_LABELS = {number: 'a number or date', name: 'a name, mention or link', negation: 'a negation'};
+export const FLAG_LABELS = {number: 'a number or date', name: 'a name or capitalised word, mention or link', negation: 'a negation'};
 export const AUTO_IDLE = 1500;
 export const AUTO_INTERVAL = 10000;
 export const DEFAULTS = Object.freeze({provider: 'codex', model: '', variant: 'US', paused: false, automatic: false, dictionary: [], sites: []});

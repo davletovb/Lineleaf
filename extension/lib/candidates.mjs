@@ -43,33 +43,47 @@ export function strictJSON(source) {
 export function boundaries(text) {
   return new Set([text.length, ...Array.from(new Intl.Segmenter('en', {granularity: 'grapheme'}).segment(text), x => x.index)]);
 }
-// Deterministic guard for rewrites: what must not change silently. Numbers and dates, names (capitalised words away from a
-// sentence start, @mentions, #tags, links, e-mail addresses) and negations are compared between the source and the rewrite.
-// A difference is not a rejection (shortening may drop a number on purpose); it is reported so the user is asked to check it.
-// Spelled-out numbers and names that begin a sentence are not tracked.
+// Deterministic guard for rewrites: what must not change silently. Numbers and dates, names (capitalised words, @mentions, #tags,
+// links, e-mail addresses) and negations are compared between the source and the rewrite. A difference is not a rejection
+// (shortening may drop a number on purpose); it is reported so the user is asked to check it.
+// A capitalised word that begins a sentence or the selection counts as a name in the source unless it is a common sentence opener,
+// so "Maya paid" becoming "Priya paid" or "The invoice was paid" is caught; the price is an occasional flag when a rewrite drops an
+// uncommon first word ("Quickly we left" → "Soon we left"). A new first word in the rewrite is not treated as an added name.
+// Spelled-out numbers and shifts of meaning that keep every tracked token are not detected.
 const NUMBERS = /\p{N}+(?:[.,:/-]\p{N}+)*%?/gu;
 const HANDLES = /[@#][\p{L}\p{N}_]+|https?:\/\/[^\s)]+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.\p{L}{2,}/gu;
-const NEGATIONS = /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|cannot|without)\b|n['’]t\b/giu;
+const NEGATIONS = /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|cannot|without)\b|\b\p{L}*n['’]t\b/giu;
 const WORDS = /\p{Lu}[\p{L}\p{M}'’-]*/gu;
-const tally = (text, pattern) => { const counts = new Map(); for (const [token] of text.matchAll(pattern)) counts.set(token, (counts.get(token) ?? 0) + 1); return counts; };
+const OPENERS = new Set(('A An The This That These Those There Here It Its He She We You They I My Our Your His Her Their Me Us Him Them ' +
+  'And But Or So Yet For Nor If When While Because Although Though Since Unless Until As At By In On Of To From With Without About After Before During Over Under ' +
+  'Please Thanks Thank Hi Hello Hey Dear Due Yes No Not Also Then Now Today Tomorrow Yesterday However Therefore Finally First Second Third Next Last Maybe Perhaps ' +
+  'Just Only Even Still Well Okay OK Sorry Let Do Does Did Is Are Was Were Be Been Am Can Could Will Would Shall Should May Might Must Have Has Had ' +
+  'What Why How Who Whom Which Where Whose All Any Some Each Every Both Many Most More Much Few Several Such One Two Another Other Once').split(' '));
+const tally = (items) => { const counts = new Map(); for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1); return counts; };
 const sameCounts = (a, b) => a.size === b.size && [...a].every(([key, count]) => b.get(key) === count);
-function midSentenceNames(text) {
-  const names = new Set();
+// `all` holds every capitalised word; `kept` those that count as names (sentence openers and "I" excluded); `inner` the kept
+// words that do not begin a sentence.
+function capitalised(text) {
+  const all = new Set(), kept = new Set(), inner = new Set();
   for (const match of text.matchAll(WORDS)) {
+    const word = match[0].replace(/['’]s?$/iu, ''), head = word.replace(/['’].*$/u, '');
+    all.add(word);
+    if (head === 'I') continue;
     const before = text.slice(0, match.index);
-    if (match[0] === 'I' || /^I['’]/.test(match[0]) || before.trim() === '' || /[.!?…:]["'”’)\]]*\s+$/u.test(before) || /\n\s*$/.test(before)) continue;
-    names.add(match[0]);
+    const opening = before.trim() === '' || /[.!?…:]["'”’)\]]*\s+$/u.test(before) || /\n\s*$/.test(before);
+    if (opening && OPENERS.has(head)) continue;
+    kept.add(word);
+    if (!opening) inner.add(word);
   }
-  return names;
+  return {all, kept, inner};
 }
+const negations = text => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS), ([token]) => /n['’]t$|^cannot$/u.test(token) ? 'not' : token));
 export function preservationFlags(source, rewrite) {
-  const flags = [];
-  if (!sameCounts(tally(source, NUMBERS), tally(rewrite, NUMBERS))) flags.push('number');
-  const kept = new Set(Array.from(rewrite.matchAll(WORDS), m => m[0]));
-  const lost = [...midSentenceNames(source)].some(name => !kept.has(name)), added = [...midSentenceNames(rewrite)].some(name => !new Set(Array.from(source.matchAll(WORDS), m => m[0])).has(name));
-  if (lost || added || !sameCounts(tally(source, HANDLES), tally(rewrite, HANDLES))) flags.push('name');
-  const negations = text => { const counts = tally(text.toLowerCase(), NEGATIONS); return [...counts.values()].reduce((sum, n) => sum + n, 0); };
-  if (negations(source) !== negations(rewrite)) flags.push('negation');
+  const flags = [], a = capitalised(source), b = capitalised(rewrite);
+  if (!sameCounts(tally(source.match(NUMBERS) ?? []), tally(rewrite.match(NUMBERS) ?? []))) flags.push('number');
+  if ([...a.kept].some(word => !b.all.has(word)) || [...b.inner].some(word => !a.all.has(word))
+      || !sameCounts(tally(source.match(HANDLES) ?? []), tally(rewrite.match(HANDLES) ?? []))) flags.push('name');
+  if (!sameCounts(negations(source), negations(rewrite))) flags.push('negation');
   return flags;
 }
 const EXPLANATIONS = {

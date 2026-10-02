@@ -31,7 +31,7 @@ The preservation promise concerns authorship, intent, and control. It does not r
 | --- | --- | --- |
 | Proofreading | Grammar, spelling, punctuation; minimal suggested edits | Additional languages and advanced style rules |
 | Inline interaction | Underlines/cards, accept, dismiss, pause | More polished positioning and grouped suggestions |
-| Rewriting | Selected text or the caret paragraph: improve it, paraphrase, clearer, shorter, more formal, friendlier; explicit actions with a before/after preview | Automatic clarity suggestions, multiple alternatives, custom tone presets and broader draft assistance |
+| Rewriting | Selected text, or the caret paragraph in the inline card: improve it, paraphrase, clearer, shorter, more formal, friendlier; explicit actions with a before/after preview | Automatic clarity suggestions, multiple alternatives, custom tone presets and broader draft assistance |
 | Explanations | Brief optional explanation for a correction | Learner-focused explanations and recurring patterns |
 | Editing support | Textarea, supported text inputs, basic contenteditable | Dedicated rich-editor and site adapters |
 | Preferences | English, US/UK variant, site enablement, personal dictionary | Other English variants, multilingual support, style profiles |

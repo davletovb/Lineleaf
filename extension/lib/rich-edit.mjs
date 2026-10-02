@@ -76,27 +76,32 @@ async function restore(fresh, saved, edit, capture) {
   if (a && b) await select(fresh.field, a[0], a[1], b[0], b[1]);
 }
 
-// Reads the checked text again: from its own block when the editor kept it, so a moved caret cannot change what is verified,
-// otherwise from the paragraph the caret is in. A selection-scoped capture reads the same span of its block (`length`).
+// Reads the checked text again: from its own block when the editor kept it, so a moved caret cannot change what is verified.
+// Editors that own their state rebuild blocks when they re-render, which detaches the original, so the block the caret is in
+// is the fallback; a selection-scoped capture reads the same span (`length`) of that block.
 function reread(host, capture, index, length) {
-  const spans = capture.scope === 'selection' ? {length} : {};
-  for (const options of [{editable: true, at: {block: capture.block, index, ...spans}}, ...(capture.scope === 'selection' ? [] : [{editable: true}])]) {
-    try { return captureRichParagraph(host, options); } catch { /* try the caret paragraph */ }
+  const selected = capture.scope === 'selection', spans = selected ? {length} : {};
+  const attempts = [() => captureRichParagraph(host, {editable: true, at: {block: capture.block, index, ...spans}}),
+    () => { const around = captureRichParagraph(host, {editable: true}); return selected ? captureRichParagraph(host, {editable: true, at: {block: around.block, index, length}}) : around; }];
+  for (const attempt of attempts) {
+    try { return attempt(); } catch { /* try the block the caret is in */ }
   }
   return null;
 }
 // The edit counts as applied when the text is exactly the expected text. If the user kept typing while it settled the text
 // legitimately differs, so then the replacement and its left context must still be there and the original wording (with its
-// surroundings) must not have come back: that is the signature of an editor restoring its old state.
+// surroundings) must not have come back: that is the signature of an editor restoring its old state. A selection is verified
+// as a span and as the whole block around it, so a rebuilt block cannot hide a change to the text next to the selection.
 function check(host, capture, edit, expected, typed) {
-  const fresh = capture.scope === 'selection'
-    ? reread(host, capture, capture.offset + edit.start, edit.after.length)
-    : reread(host, capture, capture.offset + edit.start + edit.after.length);
+  const selected = capture.scope === 'selection', start = capture.offset + edit.start, end = capture.offset + edit.end;
+  const fresh = selected ? reread(host, capture, start, edit.after.length) : reread(host, capture, start + edit.after.length);
   if (!fresh) return null;
-  if (fresh.text === expected && fresh.offset === capture.offset) return fresh;
+  const whole = capture.source.slice(0, start) + edit.after + capture.source.slice(end);
+  if (fresh.text === expected && fresh.offset === capture.offset && (!selected || fresh.source === whole)) return fresh;
   if (!typed) return null;
-  const left = capture.text.slice(Math.max(0, edit.start - 20), edit.start);
-  return !fresh.text.includes(capture.text.slice(Math.max(0, edit.start - 20), edit.end + 20)) && fresh.text.includes(left + edit.after) ? fresh : null;
+  const text = selected ? fresh.source : fresh.text, source = selected ? capture.source : capture.text, from = selected ? start : edit.start, to = selected ? end : edit.end;
+  const left = source.slice(Math.max(0, from - 20), from);
+  return !text.includes(source.slice(Math.max(0, from - 20), to + 20)) && text.includes(left + edit.after) ? fresh : null;
 }
 const failed = (host, capture, edit, reason = null) => {
   markRichUnsafe(host);

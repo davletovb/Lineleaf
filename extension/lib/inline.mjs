@@ -168,6 +168,12 @@ export function mountInline(api) {
     if (!previous?.capture.valid()) return false;
     capture = previous.capture; edits = previous.edits; update(message); return true;
   }
+  // A failed explicit rewrite is not a failed check: it brings back the suggestions set aside for it, leaves automatic checking
+  // alone and opens the card with the reason. Only a failed proofreading check pauses further automatic checks.
+  function failed(code, rewriteMode) {
+    if (rewriteMode) restoreHeld(messageFor(code)); else blocked = true;
+    update(messageFor(code)); if (rewriteMode) view?.open();
+  }
   async function rpc(type, payload = null) {
     try { return await api.runtime.sendMessage({type, payload}); } catch { return {ok: false, code: 'UNAVAILABLE'}; }
   }
@@ -184,10 +190,12 @@ export function mountInline(api) {
   }
   const capturePara = () => mode === 'rich' ? captureRichParagraph(field, {editable: richReplacementAllowed(field)}) : captureParagraph(field, adapter);
   // Explicit rewrites: the selection when there is one, otherwise the caret paragraph.
+  // Only an empty selection falls back to the paragraph: a selection Lineleaf cannot use is refused, never widened to more text.
   function captureScope() {
     if (mode !== 'rich') return captureRewriteScope(field, adapter);
-    const editable = richReplacementAllowed(field);
-    try { return captureRichParagraph(field, {editable, selection: true}); } catch { return captureRichParagraph(field, {editable}); }
+    const editable = richReplacementAllowed(field), selection = selectionFor(field);
+    const selected = Boolean(selection?.rangeCount && field.contains(selection.focusNode) && !selection.isCollapsed);
+    return captureRichParagraph(field, selected ? {editable, selection: true} : {editable});
   }
   // Whether Accept can ever exist for this field: the adapter editors and the verified rich families, until one misbehaves.
   const replaceable = () => mode === 'edit' || (Boolean(field) && richReplacementAllowed(field));
@@ -222,21 +230,21 @@ export function mountInline(api) {
   async function run(automatic, rewriteMode = null) {
     if (!field || port || composing || applying || !eligibleDOM() || document.visibilityState !== 'visible') return;
     if (automatic && (!permitted() || !active() || blocked)) return;
-    if (!navigator.onLine) { blocked = true; update(messageFor('OFFLINE')); return; }
+    if (!navigator.onLine) { failed('OFFLINE', rewriteMode); return; }
     // Explicit Check now restores the field focus before capturing its current paragraph.
     if (!automatic) { field.focus({preventScroll: true}); view?.restore(); blocked = false; }
     let next;
     try { next = rewriteMode ? captureScope() : capturePara(); }
     catch {
-      if (rewriteMode) { update('Rewrites need 1–2,000 characters of text with letters in one paragraph. Select some text, or put the caret in a paragraph.'); view?.open(); return; }
+      if (rewriteMode) { update('Rewrites need 1–2,000 characters of text with letters inside one paragraph. Select text within a single paragraph, or put the caret in one.'); view?.open(); return; }
       capture = null; edits = []; update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.'); return;
     }
     if (automatic && (!dirty || keyFor(next) !== pendingKey || keyFor(next) === lastKey)) return;
     const ticket = ++generation, selectedField = field, state = await rpc('site-state');
     if (ticket !== generation || selectedField !== field || !eligibleDOM() || !next.valid()) return;
-    if (!state.ok || (automatic && !state.value.automatic)) { blocked = true; update(messageFor(state.code ?? 'AUTOMATIC_DISABLED')); if (rewriteMode) view?.open(); return; }
+    if (!state.ok || (automatic && !state.value.automatic)) { failed(state.code ?? 'AUTOMATIC_DISABLED', rewriteMode); return; }
     if (rewriteMode) held = capture && !edits.some(edit => edit.rewrite) ? {capture, edits} : held; // Set the suggestions aside; Back restores them.
-    policy = state.value; capture = next; edits = []; undo = false; copyOnly = false; if (!rewriteMode) lastKey = keyFor(next);
+    policy = state.value; capture = next; edits = []; copyOnly = false; if (!rewriteMode) lastKey = keyFor(next); // `undo` stays: the adapter refuses it once the text has changed
     clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
     update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with Codex… You can keep typing.` : 'Checking with Codex… You can keep typing.');
@@ -244,12 +252,12 @@ export function mountInline(api) {
     try {
       const current = api.runtime.connect({name: 'lineleaf-writing-v1'}); port = current;
       const finish = () => { clearTimeout(watchdog); if (port === current) port = null; try { current.disconnect(); } catch { /* document gone */ } };
-      current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; blocked = true; clearTimeout(watchdog); update(messageFor('UNAVAILABLE')); if (rewriteMode) view?.open(); } });
+      current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; clearTimeout(watchdog); failed('UNAVAILABLE', rewriteMode); } });
       current.onMessage.addListener(message => {
         if (port !== current || message.id !== id || ticket !== generation) return;
         if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; held = null; queue(); update(messageFor('STALE')); return; }
         if (message.type === 'result') {
-          finish(); if (!Array.isArray(message.edits)) { blocked = true; update(messageFor('INVALID_OUTPUT')); if (rewriteMode) view?.open(); return; }
+          finish(); if (!Array.isArray(message.edits)) { failed('INVALID_OUTPUT', rewriteMode); return; }
           if (rewriteMode) {
             edits = message.edits; clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
             const label = REWRITE_LABELS[rewriteMode];
@@ -267,9 +275,9 @@ export function mountInline(api) {
           update(messageFor(message.code)); if (rewriteMode) view?.open();
         }
       });
-      watchdog = setTimeout(() => { stop(); blocked = true; update(messageFor('PROVIDER_TIMEOUT')); if (rewriteMode) view?.open(); }, 65000);
+      watchdog = setTimeout(() => { stop(); failed('PROVIDER_TIMEOUT', rewriteMode); }, 65000);
       current.postMessage({type: 'start', id, text: capture.text, mode: rewriteMode ?? 'proofread', kind: automatic ? 'automatic' : 'manual'});
-    } catch { stop(); blocked = true; update(messageFor('UNAVAILABLE')); if (rewriteMode) view?.open(); }
+    } catch { stop(); failed('UNAVAILABLE', rewriteMode); }
   }
   const RICH_FAILURES = {
     stale_or_unavailable: 'The text changed before this could be applied. Choose Check now to review the current text.',
@@ -303,7 +311,8 @@ export function mountInline(api) {
         .filter(x => (x.end <= edit.start || x.start >= edit.end + delta) && next.text.slice(x.start, x.end) === x.before);
       // Typing during the edit was not seen as typing (it happened while applying): check the paragraph again after a pause.
       const recheck = result.typed === true || Boolean(edit.rewrite); // A rewrite's new text is proofread after a pause.
-      held = null; capture = next; undo = false; copyOnly = false; lastKey = recheck ? null : keyFor(next); pendingKey = recheck ? keyFor(next) : null; dirty = recheck;
+      // The automatic check reads the whole caret paragraph, so its key (not the key of a rewritten selection) is what must match.
+      held = null; capture = next; undo = false; copyOnly = false; lastKey = recheck ? null : keyFor(next); pendingKey = recheck ? paragraphKey() : null; dirty = recheck;
       update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
       if (here) view.hide();
       queue(); return;

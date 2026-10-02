@@ -57,6 +57,14 @@ test('rewrites report silent changes to numbers, names and negation instead of h
   assert.deepEqual(flags('I do not agree.', 'I disagree.'), ['negation']);
   assert.deepEqual(flags('I do not agree.', 'I don\u2019t agree.'), []);
   assert.deepEqual(flags('Thanks for coming.', 'Thank you for coming.'), []);
+  assert.deepEqual(flags('Maya paid the invoice.', 'Priya paid the invoice.'), ['name']); // a name that begins the text still counts
+  assert.deepEqual(flags('Maya paid the invoice.', 'The invoice was paid by Maya.'), []);
+  assert.deepEqual(flags('I met Dr. Okafor. Okafor was late.', 'I met Dr. Okafor, who was late.'), []);
+  assert.deepEqual(flags('Maya\u2019s team won.', 'The team led by Maya won.'), []);
+  assert.deepEqual(flags('The purpose of this note is to remind you that it is due.', 'Reminder: it is due.'), []); // a new first word is not an added name
+  assert.deepEqual(flags('I am not available.', 'I am never available.'), ['negation']); // swapping one negator for another is still reported
+  assert.deepEqual(flags('I am not available.', 'I am unavailable.'), ['negation']);
+  assert.deepEqual(flags('I cannot attend.', 'I can\u2019t attend.'), []);
   assert.deepEqual(candidates('{"rewrite":"Maya paid $2,500 and did not object."}', 'Maya paid $1,250 and objected.', 'shorter')[0].flags, ['number', 'negation']);
 });
 test('writing requests are bounded, ephemeral and have no tools/continuation', () => {

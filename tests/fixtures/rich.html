@@ -39,6 +39,7 @@ Third line.</p></div>
 <div id="reverting" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
 <div id="spans" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He <b>go</b> to work.</p></div>
 <div id="multi" class="ql-editor" contenteditable="true"><p>Intro paragraph.</p><p>He go to work and they was late.</p></div>
+<div id="mangling" class="ql-editor" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
 <script>
 // A minimal state-owning editor in the style of Draft.js/Lexical/Slate: it cancels beforeinput, updates its own
 // model, and re-renders by replacing every text node. No native `input` event ever follows.
@@ -129,7 +130,17 @@ function modelEditor(host, kind, initial) {
 window.modelSlate = modelEditor(document.getElementById('model-slate'), 'slate', ['Intro paragraph.', 'He go to work.']);
 window.modelDraft = modelEditor(document.getElementById('model-draft'), 'draft', ['Intro paragraph.', 'He go to work.']);
 // An editor that cancels every edit (a maxlength or read-only state), and one that accepts the edit and then re-renders the old text.
+// A third rebuilds the edited paragraph with the replacement intact but changes the text next to it.
 document.getElementById('rejecting').addEventListener('beforeinput', event => { if (event.inputType === 'insertText' && event.data !== ' ') event.preventDefault(); });
+{
+  const mangling = document.getElementById('mangling');
+  mangling.addEventListener('input', () => setTimeout(() => {
+    const old = mangling.lastElementChild; if (!old.textContent.includes('goes')) return;
+    const fresh = document.createElement('p'); fresh.textContent = old.textContent.replace('work.', 'work!'); old.replaceWith(fresh);
+    const range = document.createRange(); range.setStart(fresh.firstChild, fresh.textContent.length); range.collapse(true);
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+  }, 20));
+}
 {
   const reverting = document.getElementById('reverting'), original = reverting.innerHTML;
   reverting.addEventListener('input', () => { if (reverting.textContent.includes('goes')) setTimeout(() => { reverting.innerHTML = original; window.reverted = (window.reverted ?? 0) + 1; }, 100); });
