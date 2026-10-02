@@ -18,14 +18,15 @@ export async function betaGate(corpus, context, evidence, {directory = '.', read
   if (!Array.isArray(inputs) || !inputs.length || inputs.length > 8) fail('LIVE_QUALITY_REQUIRED');
   else for (const item of inputs) {
     try {
-      if (!exactKeys(item, ['responses', 'labels', 'judgments']) || !Object.values(item).every(p => validText(p, 500))) throw new Error();
-      const [run, labels, judgments] = await Promise.all([item.responses, item.labels, item.judgments].map(path => read(resolve(directory, path))));
-      const result = score(corpus, run, {labels, judgments});
+      if (!exactKeys(item, ['responses', 'labels', 'judgments', 'acceptance']) || !Object.values(item).every(p => validText(p, 500))) throw new Error();
+      const [run, labels, judgments, acceptance] = await Promise.all([item.responses, item.labels, item.judgments, item.acceptance].map(path => read(resolve(directory, path))));
+      const result = score(corpus, run, {labels, judgments, acceptance});
       if (!result.releaseEligible || run.configuration.packageHash !== context.packageHash || run.configuration.engineHash !== context.engineHash
           || run.configuration.seatlineRevision !== context.seatlineRevision) throw new Error();
       if (qualities.some(q => q.configurationHash === result.configurationHash)) throw new Error();
       qualities.push({configurationHash: result.configurationHash, model: result.configuration.model, providerVersion: result.configuration.providerVersion,
-        humanPrecision: result.metrics.proofread.humanPrecision, referenceRecall: result.metrics.proofread.referenceRecall});
+        humanPrecision: result.metrics.proofread.humanPrecision, referenceRecall: result.metrics.proofread.referenceRecall,
+        minimumReferenceRecall: result.minimumReferenceRecall});
     } catch { fail('LIVE_QUALITY_REQUIRED'); }
   }
   const r = evidence?.regression;

@@ -3,7 +3,7 @@
   "packageHash": null,
   "engineHash": null,
   "seatlineRevision": null,
-  "quality": [],
+  "quality": [{"responses": null, "labels": null, "judgments": null, "acceptance": null}],
   "regression": {
     "kind": "pending",
     "packageHash": null,

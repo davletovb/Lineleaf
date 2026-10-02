@@ -5,12 +5,13 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {sha256, validateCorpus, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
 import {parseData, readData} from '../tools/evaluation/json.mjs';
-import {evaluate} from '../tools/evaluate-writing.mjs';
+import {evaluate, plannedRun} from '../tools/evaluate-writing.mjs';
 import {betaGate, CI_CHECKS, COEXISTENCE_CHECKS, DEVICE_CHECKS} from '../tools/evaluation/beta-gate.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {nativePort} from '../tools/evaluation/native-port.mjs';
 import {candidates} from '../extension/lib/candidates.mjs';
 import {readPackage} from '../tools/evaluation/package.mjs';
+import {LineleafError} from '../extension/lib/policy.mjs';
 const corpus = validateCorpus(JSON.parse(await readFile(new URL('../evaluation/writing-corpus.json', import.meta.url), 'utf8')));
 const config = {provider: 'codex', model: 'test-model', providerVersion: 'test-cli-1', seatlineRevision: 'd'.repeat(40), engineHash: 'e'.repeat(64), packageHash: 'a'.repeat(64),
   runtime: {platform: 'linux', arch: 'x64', cpu: 'synthetic-test-host', memoryGB: 8}};
@@ -29,17 +30,31 @@ test('package evidence follows the built manifest version and refuses stale or m
   } finally { await rm(root, {recursive: true, force: true}); }
 });
 function data() {
-  const run = {schema: 1, id: 'test-run', kind: 'live', corpusHash: sha256(corpus), configuration: structuredClone(config), configurationHash: sha256(config), createdAt: '2026-10-02T00:00:00Z',
+  const run = {schema: 1, id: 'test-run', kind: 'live', corpusHash: sha256(corpus), configuration: structuredClone(config), configurationHash: sha256(config), createdAt: '2026-10-02T00:00:00Z', timingBoundary: 'fresh-native-ready-status-send-validation',
     rows: corpus.cases.map(c => ({id: c.id, inputHash: sha256(c.source), status: 'completed', response: JSON.stringify(c.proposal), elapsedMs: 12, code: null}))};
   const templates = reviewTemplates(corpus, run); templates.labels.review = {...human}; templates.judgments.review = {...human};
+  templates.labels.cases.forEach(c => { c.decision = 'approved'; });
+  templates.acceptance.review = {...human}; templates.acceptance.minimumReferenceRecall = .8;
   for (const row of templates.judgments.cases) { row.meaningPreserved = true; row.suggestions.forEach(x => { x.correct = x.explanationAccurate = true; }); }
   return {run, ...templates}; // In-memory test data, never an attestation of actual human/live results.
 }
-function reviewed(d) { d.judgments.runHash = sha256(d.run); return score(corpus, d.run, {labels: d.labels, judgments: d.judgments}); }
-test('corpus has 150 distinct proofreading cases, four rewrite modes and pending independent review', () => {
-  assert.equal(corpus.cases.filter(c => c.mode === 'proofread').length, 150);
+function reviewed(d) { d.judgments.runHash = sha256(d.run); return score(corpus, d.run, {labels: d.labels, judgments: d.judgments, acceptance: d.acceptance}); }
+test('corpus covers paragraph/multi-edit/variant/boundary inputs and distinct genuinely shorter rewrites', () => {
+  const proof = corpus.cases.filter(c => c.mode === 'proofread');
+  assert.equal(proof.length, 326);
+  const lengths = proof.map(c => c.source.length).sort((a,b) => a-b); assert.ok(lengths[Math.floor(lengths.length / 2)] >= 200);
+  assert.ok(proof.filter(c => c.proposal.corrections.length > 1).length >= 30);
+  assert.ok(proof.filter(c => c.source.length >= 1800).length >= 4);
+  for (let n=1;n<=6;n++) {
+    const rows = proof.filter(c => c.id.startsWith(`variant-${String(n).padStart(3,'0')}`));
+    assert.equal(rows.length,2); assert.equal(rows[0].source,rows[1].source);
+    assert.equal(rows.find(c=>c.variant==='US').proposal.corrections.length,0);
+    assert.equal(rows.find(c=>c.variant==='UK').proposal.corrections.length,1);
+  }
+  const rewrites = corpus.cases.filter(c => c.mode !== 'proofread'); assert.equal(new Set(rewrites.map(c => c.source)).size,24);
+  assert.ok(rewrites.filter(c => c.mode === 'shorter').every(c => c.proposal.rewrite.length < c.source.length));
   assert.deepEqual([...new Set(corpus.cases.filter(c => c.mode !== 'proofread').map(c => c.mode))].sort(), ['clearer', 'formal', 'friendly', 'shorter']);
-  assert.equal(new Set(corpus.cases.map(c => c.id)).size, 174);
+  assert.equal(new Set(corpus.cases.map(c => c.id)).size, 350);
   const d = data(), templates = reviewTemplates(corpus, d.run);
   assert.equal(templates.labels.review.kind, 'pending'); assert.equal(templates.judgments.cases[0].suggestions[0].correct, null);
   assert.throws(() => score(corpus, d.run, {labels: templates.labels}));
@@ -49,6 +64,7 @@ test('quality separates precision, exact-reference recall, style, explanations a
   assert.equal(s.metrics.proofread.humanPrecision, 1); assert.equal(s.metrics.proofread.referenceRecall, 1);
   assert.equal(s.metrics.style.cases, 24); assert.equal(s.metrics.style.humanApproved, 24);
   assert.equal(s.latency.kind, 'live'); assert.equal(s.latency.completionP95Ms, 12);
+  assert.equal(s.latency.boundary,'fresh-native-ready-status-send-validation'); assert.equal(s.latency.includesBrowserUI,false);
 });
 test('empty corrections cannot pass by hiding every error even with a human review marker', () => {
   const d = data();
@@ -61,19 +77,19 @@ test('empty corrections cannot pass by hiding every error even with a human revi
 test('a fully reviewed run still needs every advertised rewrite mode', () => {
   const reduced = structuredClone(corpus); reduced.cases = reduced.cases.filter(c => c.mode !== 'formal');
   const d = data(), ids = new Set(reduced.cases.map(c => c.id));
-  d.run.corpusHash = d.labels.corpusHash = sha256(reduced);
+  d.run.corpusHash = d.labels.corpusHash = d.acceptance.corpusHash = sha256(reduced);
   d.run.rows = d.run.rows.filter(r => ids.has(r.id)); d.labels.cases = d.labels.cases.filter(r => ids.has(r.id));
   d.judgments.cases = d.judgments.cases.filter(r => ids.has(r.id)); d.judgments.runHash = sha256(d.run);
-  const s = score(reduced, d.run, {labels: d.labels, judgments: d.judgments});
+  const s = score(reduced, d.run, {labels: d.labels, judgments: d.judgments, acceptance: d.acceptance});
   assert.equal(s.releaseEligible, false); assert.ok(s.reasons.includes('REWRITE_REVIEW_GATE_NOT_MET'));
 });
 test('human false positives trigger the 95 percent precision gate while recall remains separately visible', () => {
   const d = data();
-  for (const c of corpus.cases.filter(c => c.id.startsWith('already_correct-')).slice(0, 10)) {
+  for (const c of corpus.cases.filter(c => c.id.startsWith('already_correct-'))) {
     d.run.rows.find(r => r.id === c.id).response = JSON.stringify({corrections: [{before: c.source, after: 'Unnecessary replacement.', left: '', right: '', category: 'grammar', explanation: 'Synthetic false positive.'}]});
     d.judgments.cases.find(r => r.id === c.id).suggestions = [{correct: false, explanationAccurate: true}];
   }
-  const s = reviewed(d); assert.ok(s.metrics.proofread.humanPrecision < .95); assert.equal(s.metrics.proofread.falsePositives, 10);
+  const s = reviewed(d); assert.ok(s.metrics.proofread.humanPrecision < .95); assert.equal(s.metrics.proofread.falsePositives, 20);
   assert.equal(s.metrics.proofread.referenceRecall, 1); assert.ok(s.reasons.includes('PRECISION_GATE_NOT_MET'));
 });
 test('protected facts and human meaning/explanation judgments independently fail quality acceptance', () => {
@@ -102,14 +118,76 @@ test('malformed Unicode/overlaps/ambiguous model corrections fail through the pr
   const s = score(corpus, d.run); assert.deepEqual(s.invalidCaseIds, [d.run.rows[0].id]); assert.equal(s.releaseEligible, false);
   const bad = structuredClone(corpus); bad.cases[0].source = '\ud800'; assert.throws(() => validateCorpus(bad));
 });
-test('runner uses production turns, has no continuation/tools, stops after failure and reflects only fixed codes', async () => {
-  const calls = []; let closed = false;
-  const connection = {async request(method, turn) { calls.push({method, turn}); if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true}};
-    return '{"corrections":[],"corrections":[]}'; }, close() { closed = true; }};
-  const {run} = await evaluate(corpus, config, {connection}); assert.equal(run.rows.length, 1); assert.equal(run.rows[0].code, 'INVALID_OUTPUT');
-  assert.equal(closed, true); const send = calls.find(c => c.method === 'send').turn;
+test('runner records malformed answers, continues every remaining case with fresh connections and no retry/tools/continuation', async () => {
+  const calls = []; let opened=0, closed=0;
+  const connectionFactory=()=>{ const c=corpus.cases[opened++]; return {async request(method, turn) {
+    calls.push({method,turn}); if(method==='status') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true}};
+    return c.id===corpus.cases[3].id ? '```json\n{"corrections":[]}\n```' : JSON.stringify(c.proposal);
+  },close(){closed++;}}; };
+  const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,350); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
+  assert.equal(opened,350); assert.equal(closed,350); assert.equal(calls.filter(c=>c.method==='send').length,350);
+  const send = calls.find(c => c.method === 'send').turn;
   assert.equal(send.tools, 'none'); assert.equal(send.session, 'ephemeral'); assert.equal(send.continuation, null);
   assert.match(send.system, /Preserve facts, names, numbers, dates, negation/); assert.equal(JSON.parse(send.messages[0].text).text, corpus.cases[0].source);
+});
+test('one human-approved detection fails both quality and beta gates despite perfect emitted precision', async () => {
+  const d=data(); let kept=false;
+  for (const c of corpus.cases.filter(c=>c.mode==='proofread')) {
+    if(!kept && c.proposal.corrections.length) { d.run.rows.find(r=>r.id===c.id).response=JSON.stringify({corrections:[c.proposal.corrections[0]]}); d.judgments.cases.find(r=>r.id===c.id).suggestions=[{correct:true,explanationAccurate:true}]; kept=true; }
+    else { d.run.rows.find(r=>r.id===c.id).response='{"corrections":[]}'; d.judgments.cases.find(r=>r.id===c.id).suggestions=[]; }
+  }
+  const s=reviewed(d); assert.equal(s.metrics.proofread.humanPrecision,1); assert.ok(s.metrics.proofread.referenceRecall<.02);
+  assert.ok(s.reasons.includes('RECALL_GATE_NOT_MET')); assert.equal(s.releaseEligible,false);
+  assert.equal((await gate(d,acceptedEvidence(d))).releaseReady,false);
+  const complete=data(); assert.ok(score(corpus,complete.run,{labels:complete.labels,judgments:complete.judgments}).reasons.includes('APPROVED_RECALL_FLOOR_REQUIRED'));
+  for (const mutate of [p=>{p.review.independent=false;},p=>{p.review.reviewedAt='2026-10-03T00:00:00Z';},p=>{p.minimumReferenceRecall=null;},p=>{p.minimumReferenceRecall=0;},p=>{p.configurationHash='f'.repeat(64);},p=>{p.corpusHash='f'.repeat(64);}]) {
+    const bad=data(); mutate(bad.acceptance); assert.throws(()=>reviewed(bad));
+  }
+});
+test('policy preparation records no provider responses and cannot qualify as live evidence', () => {
+  const run=plannedRun(corpus,config), report=score(corpus,run), templates=reviewTemplates(corpus,run);
+  assert.equal(run.kind,'planned'); assert.deepEqual(run.rows,[]); assert.equal(report.releaseEligible,false);
+  assert.ok(report.reasons.includes('PLANNED_NOT_QUALITY_EVIDENCE')); assert.equal(templates.acceptance.minimumReferenceRecall,null);
+  assert.equal(templates.acceptance.configurationHash,sha256(config));
+});
+test('review headers alone cannot approve labels; corrected/rejected decisions require consistent references', () => {
+  const d=data(), templates=reviewTemplates(corpus,d.run); templates.labels.review={...human};
+  assert.throws(()=>score(corpus,d.run,{labels:templates.labels}));
+  d.labels.cases[0].decision='corrected'; assert.throws(()=>reviewed(d));
+  d.labels.cases[0].reference.corrections[0].explanation='An independently corrected test explanation.'; assert.equal(reviewed(d).releaseEligible,true);
+  d.labels.cases[0].decision='approved'; assert.throws(()=>reviewed(d));
+  d.labels.cases[0].decision='rejected'; d.labels.cases[0].reference=null;
+  const s=reviewed(d); assert.equal(s.releaseEligible,false); assert.ok(s.reasons.includes('LABEL_CASE_REJECTED'));
+});
+test('invalid and partial runs with reviews report outcome rates and missing cases without treating unavailable output as reviewed', () => {
+  for (const kind of ['invalid','partial']) {
+    const d=data(); if(kind==='invalid') Object.assign(d.run.rows[3],{status:'failed',code:'INVALID_OUTPUT',response:'not JSON'}); else d.run.rows=d.run.rows.slice(0,4);
+    d.judgments=reviewTemplates(corpus,d.run).judgments; d.judgments.review={...human};
+    for (const row of d.judgments.cases) if(d.run.rows.some(r=>r.id===row.id && r.status==='completed')) { row.meaningPreserved=true; row.suggestions.forEach(x=>{x.correct=x.explanationAccurate=true;}); }
+    const s=reviewed(d); assert.equal(s.releaseEligible,false); assert.ok(s.reasons.includes('INCOMPLETE_OR_INVALID_RESPONSES'));
+    assert.equal(s.invalidOutputRate,kind==='invalid'?1/350:0); assert.equal(s.missingCaseIds.length,kind==='partial'?346:0);
+    if(kind==='invalid') assert.deepEqual(s.invalidCaseIds,[d.run.rows[3].id]);
+  }
+});
+test('readiness, timeout, provider limits and transport failures stop rather than retry or exhaust the corpus', async () => {
+  for(const code of ['PROVIDER_TIMEOUT','PROVIDER_RATE_LIMITED','QUEUE_FULL','NATIVE_UNAVAILABLE','PROTOCOL_ERROR','LOGIN_REQUIRED','SUBSCRIPTION_REQUIRED','TOOL_ISOLATION_UNAVAILABLE']) {
+    let opened=0,closed=0,sends=0;
+    const connectionFactory=()=>{opened++;return{async request(method){ if(method==='status') return{availability:'available',authentication:code==='LOGIN_REQUIRED'?'unauthenticated':'authenticated',sign_in:code==='SUBSCRIPTION_REQUIRED'?'api_key':'subscription',capabilities:{tool_isolation:code!=='TOOL_ISOLATION_UNAVAILABLE'}};
+      if(method==='send') sends++; throw new LineleafError(code);},close(){closed++;}};};
+    const {run}=await evaluate(corpus,config,{connectionFactory}); assert.equal(run.rows.length,1); assert.equal(opened,1); assert.equal(closed,1); assert.ok(sends<=1);
+    assert.equal(run.rows[0].code,code);
+  }
+});
+test('shorter output length and paragraph coverage are quality gates, while overlaps remain production-invalid', () => {
+  const d=data(), row=d.run.rows.find(r=>r.id==='shorter-001'); row.response=JSON.stringify({rewrite:corpus.cases.find(c=>c.id===row.id).source+' Please.'});
+  assert.ok(reviewed(d).reasons.includes('SHORTER_REWRITE_LENGTH_GATE_NOT_MET'));
+  const bad=structuredClone(corpus); bad.cases.find(c=>c.id==='shorter-001').proposal={rewrite:bad.cases.find(c=>c.id==='shorter-001').source}; assert.throws(()=>validateCorpus(bad));
+  const overlapping=data(), c=corpus.cases.find(c=>c.id==='paragraph-001-multi');
+  const one=c.proposal.corrections[0]; overlapping.run.rows.find(r=>r.id===c.id).response=JSON.stringify({corrections:[one,one]});
+  assert.ok(score(corpus,overlapping.run).invalidCaseIds.includes(c.id));
+  const reduced=structuredClone(corpus); reduced.cases=reduced.cases.filter(c=>!c.strata.includes('paragraph'));
+  const run={...data().run,corpusHash:sha256(reduced),rows:data().run.rows.filter(r=>reduced.cases.some(c=>c.id===r.id))};
+  assert.ok(score(reduced,run).reasons.includes('CORPUS_COVERAGE_INCOMPLETE'));
 });
 test('bounded evaluation JSON rejects duplicate review fields, malformed numbers and excessive nesting', async () => {
   for (const text of ['{"human":false,"human":true}', '{"x":NaN}', '['.repeat(22) + '0' + ']'.repeat(22), '"\ud800']) assert.throws(() => parseData(text));
@@ -129,7 +207,7 @@ test('Node investigation port transports the real framed fixture through product
 function acceptedEvidence(d) {
   const checks = keys => Object.fromEntries(keys.map(k => [k, true]));
   return {schema: 1, packageHash: config.packageHash, engineHash: config.engineHash, seatlineRevision: config.seatlineRevision,
-    quality: [{responses: 'responses', labels: 'labels', judgments: 'judgments'}],
+    quality: [{responses: 'responses', labels: 'labels', judgments: 'judgments', acceptance:'acceptance'}],
     regression: {kind: 'installed-ci', packageHash: config.packageHash, engineHash: config.engineHash, commit: 'c'.repeat(40), run: 'https://github.com/davletovb/Lineleaf/actions/runs/1',
       platforms: checks(['linux', 'macos']), checks: checks(CI_CHECKS), review: human},
     coexistence: {kind: 'live', packageHash: config.packageHash, seatlineRevision: config.seatlineRevision, consumers: 2, checks: checks(COEXISTENCE_CHECKS), review: human},
@@ -139,7 +217,7 @@ function acceptedEvidence(d) {
     editors: {packageHash: config.packageHash, surfaces: {gmail: 'verified-copy-fallback', github: 'verified-replacement', linkedin: 'verified-copy-fallback', slack: 'verified-copy-fallback'}, review: human}};
 }
 async function gate(d, evidence) {
-  const files = {responses: d.run, labels: d.labels, judgments: d.judgments};
+  const files = {responses: d.run, labels: d.labels, judgments: d.judgments, acceptance:d.acceptance};
   return betaGate(corpus, config, evidence, {read: async path => files[path.split('/').at(-1)]});
 }
 test('beta gate recomputes quality and requires all exact-package live/device evidence', async () => {

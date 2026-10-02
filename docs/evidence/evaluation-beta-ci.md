@@ -1,5 +1,7 @@
 # E-01–E-03 — evaluation and review-candidate provenance
 
+The tables below archive the initial implementation. The PR review follow-up supersedes its 174-case corpus and reused-connection evaluator with a 350-case corpus, preapproved recall policy, per-case label decisions, malformed/partial-run accounting and fresh native connections. The baseline package hashes do not describe the updated candidate; current follow-up provenance is recorded separately after verification.
+
 [PR #5](https://github.com/davletovb/Lineleaf/pull/5) implements the evaluation/coexistence/packaging workflow. [Run 36954523129](https://github.com/davletovb/Lineleaf/actions/runs/36954523129) passed all three jobs on code revision [`6cc7e482903e93679a870b2779af3d32ead5ada8`](https://github.com/davletovb/Lineleaf/commit/6cc7e482903e93679a870b2779af3d32ead5ada8). This evidence is for that named code revision; later documentation commits archive it.
 
 | Boundary | Verified result | Job/artifact |
