@@ -1,0 +1,86 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Synthetic rich editors</title>
+<style>
+  body{font:16px system-ui;padding:30px}
+  [contenteditable=true],textarea{display:block;margin:12px 0;width:380px;min-height:28px;border:1px solid #bbb;padding:4px}
+  .public-DraftEditor-content,[data-lexical-editor],[data-slate-editor],.ql-editor,.ProseMirror,#controlled-editor{white-space:pre-wrap;word-wrap:break-word}
+  p{margin:0 0 6px}
+</style>
+<!-- Structures mirror each library's rendered DOM; none of their code is loaded. -->
+<div class="DraftEditor-root"><div class="public-DraftEditor-content" id="draft" contenteditable="true" role="textbox"><div data-contents="true"><div data-block="true" data-offset-key="a-0-0"><div data-offset-key="a-0-0" class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr"><span data-offset-key="a-0-0"><span data-text="true">Intro paragraph.</span></span></div></div><div data-block="true" data-offset-key="b-0-0"><div data-offset-key="b-0-0" class="public-DraftStyleDefault-block public-DraftStyleDefault-ltr"><span data-offset-key="b-0-0"><span data-text="true">He go to work.</span></span></div></div></div></div></div>
+<div id="lexical" contenteditable="true" data-lexical-editor="true" role="textbox"><p dir="ltr"><span data-lexical-text="true">Intro paragraph.</span></p><p dir="ltr"><span data-lexical-text="true">He go to work.</span></p></div>
+<div id="slate" data-slate-editor="true" contenteditable="true" role="textbox"><div data-slate-node="element"><span data-slate-node="text"><span data-slate-leaf="true"><span data-slate-string="true">Intro paragraph.</span></span></span></div><div data-slate-node="element"><span data-slate-node="text"><span data-slate-leaf="true"><span data-slate-string="true">He go to work.</span></span></span></div><div data-slate-node="element"><span data-slate-node="text"><span data-slate-leaf="true"><span data-slate-zero-width="n" data-slate-length="0">&#xFEFF;<br></span></span></span></div></div>
+<div id="prose" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.<br class="ProseMirror-trailingBreak"></p></div>
+<div id="quill" class="ql-editor" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
+<div id="gmail" contenteditable="true" role="textbox" aria-multiline="true"><div>Intro paragraph.</div><div><br></div><div>He go <b>to</b> work, and <i>they</i> was late.</div></div>
+<div id="brlines" contenteditable="true">First line.<br>He go to work.<br>Third line.</div>
+<div id="prewrap" contenteditable="true" style="white-space:pre-wrap"><p>First line.
+He go to work.
+Third line.</p></div>
+<div id="nbsp" contenteditable="true"><p>He&nbsp;go&nbsp;to&nbsp;work.&#x200B;&#xFEFF;</p></div>
+<div id="island" contenteditable="true"><p>He go to work with <span contenteditable="false" class="chip">@maya</span> today.</p></div>
+<div id="inlinews" contenteditable="true"><p>He go<b> </b>to work.</p></div>
+<div id="prettyspans" contenteditable="true"><p>Alpha
+      <span>beta</span>
+      <span>gamma</span> .</p></div>
+<div id="runs" contenteditable="true"><p>One   two
+      three</p></div>
+<div id="mixed" contenteditable="true"><p>Run <code>npm test</code> now.</p><p>He go to work.</p><pre>He go to work in a pre block.</pre></div>
+<div id="controlled-editor" contenteditable="true"></div>
+<textarea id="textarea">He go to work.</textarea>
+<div id="ignored" data-lineleaf-ignore><div id="ignored-field" contenteditable="true"><p>He go to work.</p></div></div>
+<div id="hidden" aria-hidden="true"><div id="hidden-field" contenteditable="true"><p>He go to work.</p></div></div>
+<div class="monaco-editor"><div id="monaco-field" contenteditable="true"><p>He go to work.</p></div></div>
+<div class="ace_editor"><div id="ace-field" contenteditable="true"><p>He go to work.</p></div></div>
+<div id="secret" contenteditable="true" autocomplete="cc-number"><p>He go to work.</p></div>
+<script>
+// A minimal state-owning editor in the style of Draft.js/Lexical/Slate: it cancels beforeinput, updates its own
+// model, and re-renders by replacing every text node. No native `input` event ever follows.
+window.nativeInputEvents = 0; document.addEventListener('input', () => { window.nativeInputEvents++; }, true);
+window.mini = (() => {
+  const host = document.getElementById('controlled-editor'), lines = ['Intro paragraph.', 'He go to work.'];
+  const render = () => {
+    while (host.children.length > lines.length) host.lastChild.remove();
+    while (host.children.length < lines.length) { const block = document.createElement('div'); block.setAttribute('data-block', 'true'); host.append(block); }
+    lines.forEach((line, i) => {
+      const block = host.children[i]; block.replaceChildren();
+      if (!line) { block.append(document.createElement('br')); return; }
+      const outer = document.createElement('span'), inner = document.createElement('span'); inner.setAttribute('data-text', 'true'); inner.textContent = line; outer.append(inner); block.append(outer);
+    });
+  };
+  const caret = () => {
+    const s = getSelection(); let node = s.focusNode, line = -1;
+    while (node && node.parentNode !== host) node = node.parentNode;
+    line = [...host.children].indexOf(node);
+    return {line: Math.max(0, line), offset: s.focusNode.nodeType === 3 ? s.focusOffset : 0};
+  };
+  const place = (line, offset) => {
+    const text = host.children[line].querySelector('[data-text]')?.firstChild, range = document.createRange();
+    if (text) range.setStart(text, offset); else range.setStart(host.children[line], 0);
+    range.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  };
+  host.addEventListener('beforeinput', event => {
+    const {line, offset} = caret();
+    if (event.inputType === 'insertText') {
+      event.preventDefault(); lines[line] = lines[line].slice(0, offset) + event.data + lines[line].slice(offset); render(); place(line, offset + event.data.length);
+    } else if (event.inputType === 'insertParagraph') {
+      event.preventDefault(); const rest = lines[line].slice(offset); lines[line] = lines[line].slice(0, offset); lines.splice(line + 1, 0, rest); render(); place(line + 1, 0);
+    } else if (event.inputType === 'deleteContentBackward' && offset > 0) {
+      event.preventDefault(); lines[line] = lines[line].slice(0, offset - 1) + lines[line].slice(offset); render(); place(line, offset - 1);
+    }
+  });
+  render();
+  return {host, lines, render, place};
+})();
+
+const event = () => ({listeners: [], addListener(listener) { this.listeners.push(listener); }, emit(...args) { for (const fn of this.listeners) fn(...args); }});
+window.fixture = {enabled: true, code: null, hold: false, checks: [], ports: [], runtimeMessages: event(), after: 'goes'};
+const runtime = {id: 'lnbkadelggojehiapgnhonicnfonobal', onMessage: fixture.runtimeMessages,
+  async sendMessage() { return fixture.code ? {ok: false, code: fixture.code} : {ok: fixture.enabled, value: {enabled: fixture.enabled}}; },
+  connect() {
+    const port = {onMessage: event(), onDisconnect: event(), sent: [], closed: false}; fixture.ports.push(port);
+    port.disconnect = () => { if (!port.closed) { port.closed = true; port.onDisconnect.emit(); } };
+    port.postMessage = request => { port.sent.push(request); if (request.type === 'start') fixture.checks.push(request); };
+    return port;
+  }};
+window.chrome = {runtime};
+</script><script src="/content.js"></script></html>

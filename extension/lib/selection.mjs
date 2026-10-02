@@ -66,5 +66,5 @@ export function captureParagraph(element, adapter) {
   const next = source.indexOf('\n', caret), end = next === -1 ? source.length : next;
   const text = source.slice(start, end);
   if (!validText(text) || !/\p{L}/u.test(text)) throw new LineleafError('INVALID_REQUEST');
-  return {text, offset: start, snapshot, adapter, field: element};
+  return {text, offset: start, snapshot, adapter, field: element, valid: () => adapter.current(snapshot)};
 }

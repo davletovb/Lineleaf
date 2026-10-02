@@ -1,5 +1,6 @@
-import {deepActive, eventElement, navigationToken, observeNavigation, embeddingAllowed} from './editor-context.mjs';
-import {EditorAdapter, validSpan} from '../../prototypes/editor/editor-adapter.mjs';
+import {deepActive, eventElement, navigationToken, observeNavigation, embeddingAllowed, previewAllowed, selectionFor} from './editor-context.mjs';
+import {EditorAdapter, validSpan, replacementSupported} from '../../prototypes/editor/editor-adapter.mjs';
+import {captureRichParagraph} from './rich-text.mjs';
 import {captureParagraph, editorOf, excluded} from './selection.mjs';
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
 import {AUTO_IDLE, AUTO_INTERVAL, categoryLabel, dictionaryWord} from './policy.mjs';
@@ -24,6 +25,7 @@ class InlineView {
     this.mirror = node('div', '', {class: 'mirror', 'aria-hidden': 'true'});
     this.layer.append(this.lines, this.badge, this.card, this.announcer); this.root.append(this.layer, this.mirror);
     document.documentElement.append(this.host);
+    this.track = () => this.remember(); document.addEventListener('selectionchange', this.track);
     this.badge.addEventListener('click', trusted(() => this.open()));
     this.root.addEventListener('keydown', trusted(event => { if (event.key === 'Escape') { event.preventDefault(); this.hide(); } }));
   }
@@ -39,7 +41,19 @@ class InlineView {
   button(label, fn, attrs = {}) {
     const button = node('button', label, attrs); button.addEventListener('click', trusted(fn)); return button;
   }
+  // Draft.js clears the DOM selection when it blurs, so a plain focus() would put the caret at the start of the document.
+  remember() {
+    if (this.field instanceof HTMLInputElement || this.field instanceof HTMLTextAreaElement) return;
+    const selection = selectionFor(this.field);
+    if (selection?.rangeCount && this.field.contains(selection.focusNode)) this.range = selection.getRangeAt(0).cloneRange();
+  }
+  restore() {
+    if (!this.range || !this.field.isConnected) return;
+    const selection = selectionFor(this.field);
+    try { selection.removeAllRanges(); selection.addRange(this.range); } catch { /* the editor replaced the nodes; keep its own caret */ }
+  }
   open(index = 0) {
+    this.remember();
     this.index = Math.min(index, Math.max(0, this.edits.length - 1)); this.card.replaceChildren(); this.card.hidden = false;
     const title = node('h2', 'Lineleaf', {id: 'card-title', tabindex: '-1'}), heading = node('div', '', {class: 'heading'});
     heading.append(title, this.button('✕', () => this.hide(), {'aria-label': 'Close suggestions'})); this.card.append(heading);
@@ -49,11 +63,14 @@ class InlineView {
       const change = node('p', '', {class: 'change'}); change.append(node('span', edit.before, {class: 'before'}), document.createTextNode(' → '), node('span', edit.after || '(remove)', {class: 'after'}));
       this.card.append(change);
       const explanation = node('details'); explanation.append(node('summary', 'Why this suggestion?'), node('p', edit.explanation, {class: 'explanation'})); this.card.append(explanation);
-      const controls = node('div', '', {class: 'row'});
-      const mapped = {...edit, start: edit.start + this.capture.offset, end: edit.end + this.capture.offset};
-      const accept = this.button('Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': `Accept suggestion: ${edit.after || 'remove text'}`});
-      accept.disabled = this.copyOnly || !this.capture.adapter.current(this.capture.snapshot) || !validSpan(this.capture.snapshot.source, mapped);
-      controls.append(accept, this.button('Dismiss', () => this.actions.dismiss(edit)), this.button('Copy', async () => {
+      const controls = node('div', '', {class: 'row'}), preview = Boolean(this.capture?.preview);
+      if (!preview) {
+        const mapped = {...edit, start: edit.start + this.capture.offset, end: edit.end + this.capture.offset};
+        const accept = this.button('Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': `Accept suggestion: ${edit.after || 'remove text'}`});
+        accept.disabled = this.copyOnly || !this.capture.valid() || !validSpan(this.capture.snapshot.source, mapped);
+        controls.append(accept);
+      }
+      controls.append(this.button('Dismiss', () => this.actions.dismiss(edit)), this.button('Copy', async () => {
         try { await navigator.clipboard.writeText(edit.after); this.status('Suggestion copied.'); }
         catch { const copy = node('textarea', '', {readonly: '', 'aria-label': 'Suggestion to copy'}); copy.value = edit.after; this.card.append(copy); copy.focus(); copy.select(); this.status('Clipboard unavailable. Copy the selected text with your keyboard.'); }
       }));
@@ -63,14 +80,18 @@ class InlineView {
         const navigation = node('div', '', {class: 'row'}); navigation.append(this.button('Previous', () => this.open((this.index + this.edits.length - 1) % this.edits.length)), node('span', `${this.index + 1} of ${this.edits.length}`), this.button('Next', () => this.open((this.index + 1) % this.edits.length))); this.card.append(navigation);
       }
     }
-    this.card.append(node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'}), node('p', 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'muted'}));
+    const preview = Boolean(this.capture?.preview);
+    if (preview) this.card.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
+    this.card.append(node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'}), node('p', preview
+      ? 'Codex via Seatline · model processing may be remote. Lineleaf does not change this editor.'
+      : 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'muted'}));
     const footer = node('div', '', {class: 'row'});
     if (this.undo) footer.append(this.button('Undo last edit', () => this.actions.undo()));
     footer.append(this.button('Check now', () => this.actions.check()), this.button('Cancel check', () => this.actions.cancel()), this.button('Pause Lineleaf', () => this.actions.pause()), this.button('Settings', () => this.actions.settings()));
     this.card.append(footer); this.draw(); title.focus({preventScroll: true});
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
-  hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); }
+  hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); this.restore(); }
   draw() {
     const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
     this.layer.hidden = !r; if (!r) { this.mirror.textContent = ''; return; }
@@ -83,21 +104,23 @@ class InlineView {
       this.card.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, r.right - width)) - origin.left}px`;
       this.card.style.top = `${Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8)) - origin.top}px`;
     }
-    if (!this.capture?.adapter.current(this.capture.snapshot)) { this.mirror.textContent = ''; return; }
+    if (!this.capture?.valid()) { this.mirror.textContent = ''; return; }
     for (let i = 0; i < this.edits.length; i++) {
       const edit = this.edits[i], start = this.capture.offset + edit.start, end = this.capture.offset + edit.end;
-      for (const rectangle of suggestionRects(field, this.capture.snapshot.source, start, end, this.mirror)) {
+      const rectangles = this.capture.rects ? this.capture.rects(edit) : suggestionRects(field, this.capture.snapshot.source, start, end, this.mirror);
+      for (const rectangle of rectangles) {
         const line = this.button('', () => this.open(i), {class: 'underline', tabindex: '-1', 'aria-hidden': 'true', 'data-category': edit.category});
         line.style.left = `${rectangle.left - origin.left}px`; line.style.top = `${rectangle.bottom - 3 - origin.top}px`; line.style.width = `${rectangle.right - rectangle.left}px`; this.lines.append(line);
       }
     }
   }
-  close() { this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
+  close() { document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
 }
 
 export function mountInline(api) {
   let field, adapter, view, capture, edits = [], port, timer, expiry, watchdog, frame, policy = null, epoch = 0, generation = 0;
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
+  let mode = 'edit', settling = 0, before; // 'preview' = rich editor: suggestions to copy, never an edit
   const compositions = new WeakSet();
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
   const active = () => deepActive() === field;
@@ -105,7 +128,7 @@ export function mountInline(api) {
     generation++; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
   };
-  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); field = adapter = view = capture = null; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
+  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
   function update(message) { view?.update(capture, edits, message, undo, copyOnly); }
   async function rpc(type, payload = null) {
     try { return await api.runtime.sendMessage({type, payload}); } catch { return {ok: false, code: 'UNAVAILABLE'}; }
@@ -117,27 +140,35 @@ export function mountInline(api) {
     choose(deepActive());
   }
   function eligibleDOM() {
-    return field?.isConnected && embeddingAllowed() && !excluded(field) && !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code')
-      && !field.disabled && !field.readOnly && visibleEditorRect(field) !== null;
+    if (!field?.isConnected || !embeddingAllowed() || excluded(field) || field.disabled || field.readOnly || visibleEditorRect(field) === null) return false;
+    // Rich editors legitimately contain inline code or islands elsewhere; their paragraph is checked at capture time.
+    return mode === 'preview' ? previewAllowed(field) : !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code');
   }
+  const capturePara = () => mode === 'preview' ? captureRichParagraph(field) : captureParagraph(field, adapter);
   function choose(target) {
     if (applying || target === view?.host) return;
     if (!permitted()) { drop(); return; }
     const next = editorOf(target);
     if (!next || excluded(next)) { drop(); return; }
     if (next !== field) {
-      drop(); field = next; composing = compositions.has(field); adapter = new EditorAdapter(field);
-      if (!adapter.snapshot() || !eligibleDOM()) { drop(); return; }
-      view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { edits = edits.filter(x => x !== edit); update(edits.length ? 'Review each suggestion before accepting.' : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); },
+      drop(); field = next; composing = compositions.has(field);
+      if (replacementSupported(field)) {
+        adapter = new EditorAdapter(field);
+        if (!adapter.snapshot() || !eligibleDOM()) { drop(); return; }
+      } else if (previewAllowed(field)) {
+        mode = 'preview';
+        if (!eligibleDOM()) { drop(); return; }
+      } else { drop(); return; }
+      view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { edits = edits.filter(x => x !== edit); update(edits.length ? (mode === 'preview' ? 'Review each suggestion. Copy one to use it.' : 'Review each suggestion before accepting.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
         check: () => { stop(); void run(false); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); },
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});
-      update('Lineleaf checks this paragraph after you pause typing. Alt Shift L opens controls.');
+      update(idleMessage());
     }
     queue();
   }
-  const keyFor = value => `${value.offset}:${value.text}`;
+  const keyFor = value => `${value.id ?? ''}:${value.offset}:${value.text}`;
   function queue(delay = AUTO_IDLE) {
     clearTimeout(timer); if (!dirty || !permitted() || !navigator.onLine || !active() || composing || blocked || !eligibleDOM()) return;
     timer = setTimeout(() => { timer = null; void run(true); }, Math.max(delay, nextAt - Date.now()));
@@ -147,13 +178,13 @@ export function mountInline(api) {
     if (automatic && (!permitted() || !active() || blocked)) return;
     if (!navigator.onLine) { blocked = true; update(messageFor('OFFLINE')); return; }
     // Explicit Check now restores the field focus before capturing its current paragraph.
-    if (!automatic) { field.focus({preventScroll: true}); blocked = false; }
+    if (!automatic) { field.focus({preventScroll: true}); view?.restore(); blocked = false; }
     let next;
-    try { next = captureParagraph(field, adapter); }
+    try { next = capturePara(); }
     catch { capture = null; edits = []; update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.'); return; }
     if (automatic && (!dirty || keyFor(next) !== pendingKey || keyFor(next) === lastKey)) return;
     const ticket = ++generation, selectedField = field, state = await rpc('site-state');
-    if (ticket !== generation || selectedField !== field || !eligibleDOM() || !next.adapter.current(next.snapshot)) return;
+    if (ticket !== generation || selectedField !== field || !eligibleDOM() || !next.valid()) return;
     if (!state.ok || (automatic && !state.value.automatic)) { blocked = true; update(messageFor(state.code ?? 'AUTOMATIC_DISABLED')); return; }
     policy = state.value; capture = next; edits = []; undo = false; copyOnly = false; lastKey = keyFor(next);
     clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
@@ -166,10 +197,10 @@ export function mountInline(api) {
       current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; blocked = true; clearTimeout(watchdog); update(messageFor('UNAVAILABLE')); } });
       current.onMessage.addListener(message => {
         if (port !== current || message.id !== id || ticket !== generation) return;
-        if (!eligibleDOM() || !capture?.adapter.current(capture.snapshot)) { stop(); capture = null; edits = []; queue(); update(messageFor('STALE')); return; }
+        if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; queue(); update(messageFor('STALE')); return; }
         if (message.type === 'result') {
           finish(); if (!Array.isArray(message.edits)) { blocked = true; update(messageFor('INVALID_OUTPUT')); return; }
-          edits = message.edits; update(edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}. Review before accepting.` : 'No corrections suggested.');
+          edits = message.edits; update(edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}. ${mode === 'preview' ? 'Review and copy; this editor is not changed.' : 'Review before accepting.'}` : 'No corrections suggested.');
           clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
         } else if (message.type === 'error') {
           finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED'].includes(message.code);
@@ -183,7 +214,7 @@ export function mountInline(api) {
     } catch { stop(); blocked = true; update(messageFor('UNAVAILABLE')); }
   }
   function accept(edit) {
-    if (!capture || !eligibleDOM()) return;
+    if (!capture || mode !== 'edit' || !eligibleDOM()) return;
     stop(); applying = true;
     const selected = capture, selectedView = view;
     let result;
@@ -204,17 +235,47 @@ export function mountInline(api) {
     undo = false; edits = []; capture = null; lastKey = null;
     update(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
   }
+  // Rich editors. A trusted typing event only arms a check when the caret paragraph really changed: an editor can cancel
+  // `beforeinput` (maxlength, read-only state, a handler) without re-rendering or emitting `input`. Draft.js, Lexical and
+  // Slate cancel it *and* re-render with no native `input`, so the result is read one task later. The pre-edit key comes
+  // only from `beforeinput`/`compositionstart`; `input` never overwrites it, or editors that apply the change and also
+  // emit `input` would never arm.
+  const paragraphKey = () => { try { return keyFor(capturePara()); } catch { return null; } };
+  const idleMessage = () => mode === 'preview'
+    ? 'Lineleaf checks this paragraph after you pause typing and shows suggestions to copy. It never edits this editor. Alt Shift L opens controls.'
+    : 'Lineleaf checks this paragraph after you pause typing. Alt Shift L opens controls.';
+  function settle() {
+    const ticket = ++settling;
+    setTimeout(() => {
+      if (ticket !== settling || mode !== 'preview' || !field) return;
+      const was = before, after = paragraphKey(); before = undefined;
+      if (after === was) return; // The editor rejected or ignored the edit: keep any check already armed.
+      stop(); capture = null; edits = []; undo = false; copyOnly = false; pendingKey = after; dirty = after !== null;
+      update(dirty ? 'Text changed. Checking after a pause.' : idleMessage()); queue();
+    }, 0);
+  }
+  function typed(event) {
+    const target = eventElement(event);
+    if (applying || !field || mode !== 'preview' || !(target === field || field.contains(target))) return;
+    if (event.type === 'compositionstart') { stop(); capture = null; edits = []; update('Text changed. Checking after a pause.'); }
+    // Keep the pre-edit key of the earliest edit that has not settled yet: on a busy page a later rejected keystroke could
+    // otherwise overwrite it with the already-changed key and hide the change.
+    if ((event.type === 'compositionstart' || (event.type === 'beforeinput' && !event.isComposing)) && before === undefined) before = paragraphKey();
+    settle();
+  }
   const changed = event => {
     const target = eventElement(event);
     if (applying || !field || !(target === field || field.contains(target))) return;
     stop(); capture = null; edits = []; undo = false; copyOnly = false; dirty = event.isTrusted === true;
-    try { pendingKey = dirty ? keyFor(captureParagraph(field, adapter)) : null; } catch { pendingKey = null; }
+    pendingKey = null;
+    if (dirty) { try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; } }
     update(dirty ? 'Text changed. Checking after a pause.' : 'The editor changed. Choose Check now to review the current text.'); queue();
   };
   document.addEventListener('focusin', event => { const target = eventElement(event); if (target !== view?.host) choose(target); }, true);
-  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); changed(event); }, true);
-  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; changed(event); } }, true);
-  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; changed(event); } }, true);
+  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); }, true);
+  document.addEventListener('beforeinput', event => { if (mode === 'preview' && field && event.isTrusted) typed(event); }, true);
+  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); } }, true);
+  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); } }, true);
   document.addEventListener('keydown', trusted(event => {
     if (event.altKey && event.shiftKey && event.code === 'KeyL' && view) { event.preventDefault(); view.open(); }
   }), true);
@@ -227,8 +288,8 @@ export function mountInline(api) {
   const poll = setInterval(() => {
     navigated(); if (!field || applying) return;
     if (!permitted() || !eligibleDOM() || !view?.host.isConnected) { drop(); return; }
-    if (capture && !adapter.current(capture.snapshot)) { changed({target: field}); }
-    const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft, adapter.layoutRevision].join(':');
+    if (capture && !capture.valid()) { changed({target: field}); }
+    const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft, adapter?.layoutRevision ?? 0, capture?.layout?.() ?? ''].join(':');
     if (position !== geometry) { geometry = position; paint(); }
   }, 250);
   api.runtime.onMessage.addListener((message, sender) => {

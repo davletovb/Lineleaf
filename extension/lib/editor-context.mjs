@@ -81,6 +81,13 @@ export function replacementAllowed(element) {
       || /(^|\.)slack\.com$/.test(host) || /(^|\.)notion\.(?:so|site)$/.test(host))) return false;
   return !ancestry(element).some(node => node instanceof Element && node.matches(COMPLEX)) && !element.querySelector(COMPLEX);
 }
+// Copy-only inline preview: Lineleaf may read the caret's paragraph and draw an overlay, but never writes.
+// Covers rich contenteditable editors (Draft.js, Lexical, Slate, ProseMirror, Quill, Gmail-style composers).
+export function previewAllowed(element) {
+  if (!(element instanceof Element) || element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return false;
+  if (!element.isContentEditable || excluded(element)) return false;
+  return location.hostname !== 'docs.google.com'; // Canvas-rendered: its input proxy is not the document.
+}
 export function selectionFor(element) {
   const root = element?.getRootNode();
   return root instanceof ShadowRoot && typeof root.getSelection === 'function' ? root.getSelection() : document.getSelection();
