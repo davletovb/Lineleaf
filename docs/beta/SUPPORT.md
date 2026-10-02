@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | Desktop Chrome on Linux/macOS | Installed MV3 tests in pinned Playwright Chromium on both CI operating systems | Actual Chrome install, update, uninstall, permission prompt, successful native turn and human accessibility checks pending per advertised device |
 | Codex through shared Seatline | Strict protocol, subscription/tool-isolation readiness, bounded ephemeral no-tools turns | Independently reviewed live quality and approved latency per exact model/CLI/runtime configuration pending |
+| Explicit rewrites (Improve it, Paraphrase, Clearer, Shorter, More formal, Friendlier) | Selection or caret paragraph; before/after preview; flags changed numbers, names and negation; Replace through the same paths as corrections (adapter fields, verified rich editors, else Copy); synthetic regressions, local runs against the real editor libraries | Independently reviewed live quality for improve and paraphrase pending; real-site checks pending |
 | Textarea/text/search input; simple inline contenteditable | Synthetic edit, caret, formatting, Unicode, stale response and native undo regressions | Actual device/editor checks pending |
 | Gmail, GitHub, LinkedIn, Slack | Synthetic priority-editor policy and safe copy fallback | Authenticated synthetic-draft matrix pending; no real-site replacement claim |
 | Same-origin frames and open shadow roots | Scoped synthetic frame/slot/privacy/geometry regressions | Live editor/device validation pending |

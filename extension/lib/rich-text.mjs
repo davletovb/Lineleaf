@@ -115,8 +115,11 @@ let counter = 0;
 
 // `editable` marks a capture from a verified editor family (see richReplacementAllowed): rich-edit.mjs may apply edits to it.
 // Without it the capture is copy-only and this module still writes nothing. `at` re-reads a block it already knows around a
-// text index, whatever the selection is doing; rich-edit.mjs uses it to verify an edit after the user may have moved on.
-export function captureRichParagraph(host, {editable = false, at = null} = {}) {
+// text index, whatever the selection is doing; rich-edit.mjs uses it to verify an edit after the user may have moved on. With
+// `at.length` it reads that span as a selection-scoped capture instead of the surrounding paragraph.
+// `selection` reads the user's selected text (inside one block, no line break) instead of the caret paragraph, for an explicit
+// rewrite; it throws when nothing is selected so the caller can fall back to the paragraph.
+export function captureRichParagraph(host, {editable = false, at = null, selection: wantSelection = false} = {}) {
   if (!host?.isConnected || !embeddingAllowed() || !previewAllowed(host) || host.textContent.length > MAX_BLOCK) throw invalid();
   let block, probe, selection;
   if (at) {
@@ -129,18 +132,29 @@ export function captureRichParagraph(host, {editable = false, at = null} = {}) {
     probe = focus.nodeType === Node.ELEMENT_NODE
       ? focus.childNodes[selection.focusOffset] ?? focus.childNodes[selection.focusOffset - 1] ?? focus : focus;
     block = blockFor(host, probe);
+    if (wantSelection && (selection.isCollapsed || !block.contains(selection.anchorNode))) throw invalid();
   }
   if (excluded(block) || block.querySelector(EXCLUDED) || block.textContent.length > MAX_BLOCK) throw invalid();
   let map, caret;
   try { map = textMap(block); caret = at ? Math.max(0, Math.min(at.index, map.text.length)) : caretIndex(map, selection.focusNode, selection.focusOffset); } catch { throw invalid(); }
-  const start = map.text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1, next = map.text.indexOf('\n', caret);
-  const text = map.text.slice(start, next === -1 ? map.text.length : next);
+  let start, text;
+  if (at?.length !== undefined) {
+    start = Math.max(0, Math.min(at.index, map.text.length)); text = map.text.slice(start, start + at.length);
+  } else if (wantSelection) {
+    let anchor; try { anchor = caretIndex(map, selection.anchorNode, selection.anchorOffset); } catch { throw invalid(); }
+    start = Math.min(anchor, caret); text = map.text.slice(start, Math.max(anchor, caret));
+    if (text.includes('\n')) throw invalid();
+  } else {
+    start = map.text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+    const next = map.text.indexOf('\n', caret);
+    text = map.text.slice(start, next === -1 ? map.text.length : next);
+  }
   if (!validText(text) || !/\p{L}/u.test(text)) throw invalid();
   if (!ids.has(block)) ids.set(block, ++counter);
   const context = contextFor(host), source = map.text;
   const valid = () => host.isConnected && block.isConnected && previewAllowed(host) && !excluded(block) && !block.querySelector(EXCLUDED)
     && contextCurrent(host, context) && textMap(block).text === source;
-  return {preview: !editable, editable, id: ids.get(block), text, offset: start, snapshot: null, adapter: null, field: host, valid, block, source,
+  return {preview: !editable, editable, scope: wantSelection || at?.length !== undefined ? 'selection' : 'paragraph', id: ids.get(block), text, offset: start, snapshot: null, adapter: null, field: host, valid, block, source,
     // Underlines are recomputed from the live nodes each time, so framework re-renders cannot leave detached ranges.
     rects(edit) {
       const visible = visibleEditorRect(host);

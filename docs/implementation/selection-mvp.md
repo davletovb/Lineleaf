@@ -1,6 +1,6 @@
 # B-01–B-05 — Explicit selection prototype
 
-This development extension adds selected-text proofreading and four deliberate rewrite modes through the existing shared Seatline companion. It has no automatic checking or inline underlines. Live provider quality/latency and actual Chrome/macOS companion setup remain acceptance gates. Codex is the candidate provider; use subscription sign-in and a runtime reporting tool isolation.
+This development extension adds selected-text proofreading and six deliberate rewrite modes (improve it, paraphrase, clearer, shorter, more formal, friendlier) through the existing shared Seatline companion. The panel is the only rewrite surface when the inline assistant is off; the inline card offers the same rewrites with automatic checking enabled. It has no automatic checking or inline underlines. Live provider quality/latency and actual Chrome/macOS companion setup remain acceptance gates. Codex is the candidate provider; use subscription sign-in and a runtime reporting tool isolation.
 
 ## Build and load
 

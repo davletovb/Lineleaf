@@ -2,7 +2,7 @@ import {deepActive, eventElement, navigationToken, observeNavigation} from './li
 import {captureSelection, editorOf} from './lib/selection.mjs';
 import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
-import {errorCode, validText} from './lib/policy.mjs';
+import {errorCode, validText, FLAG_LABELS} from './lib/policy.mjs';
 import styles from './panel.css';
 import {mountInline} from './lib/inline.mjs';
 import {categoryLabel, dictionaryWord} from './lib/policy.mjs';
@@ -40,6 +40,8 @@ export function mountContent(api) {
       const explanation = document.createElement('details'), summary = document.createElement('summary'), reason = document.createElement('p');
       summary.textContent = 'Why this suggestion?'; reason.className = 'explanation'; reason.textContent = edit.explanation; explanation.append(summary, reason);
       const controls = document.createElement('div'); controls.className = 'row';
+      const flags = document.createElement('p'); flags.className = 'explanation'; flags.hidden = !edit.flags?.length;
+      flags.textContent = edit.flags?.length ? `Check this version: it changes ${edit.flags.map(flag => FLAG_LABELS[flag]).join(', ')}.` : '';
       const fullEdit = {...edit, start: edit.start + (capture?.offset ?? 0), end: edit.end + (capture?.offset ?? 0)};
       const canApply = !stale && capture?.adapter?.current(capture.snapshot) && validSpan(capture.snapshot.source, fullEdit);
       const accept = document.createElement('button'); accept.textContent = 'Accept'; accept.className = 'primary'; accept.disabled = !canApply;
@@ -68,7 +70,7 @@ export function mountContent(api) {
         try { await navigator.clipboard.writeText(edit.after); status('Suggestion copied.'); }
         catch { manual.value = edit.after; manual.hidden = false; manual.focus(); manual.select(); status('Copy the selected suggestion with your keyboard.'); }
       });
-      controls.append(accept, dismiss, copy); card.append(category, change, explanation, controls, manual);
+      controls.append(accept, dismiss, copy); card.append(category, change, flags, explanation, controls, manual);
       if (edit.category === 'spelling' && dictionaryWord(edit.before)) {
         const add = document.createElement('button'); add.textContent = 'Add to dictionary';
         add.addEventListener('click', async event => {
@@ -97,7 +99,7 @@ export function mountContent(api) {
         node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
         node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'For editors that cannot expose a safe selection, copy text yourself and paste it here. Lineleaf will only offer a preview and Copy.', {class: 'muted'})]),
       node('label', 'What would you like to do?', {for: 'mode'}),
-      node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
+      node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['improve', 'Rewrite · improve it'], ['paraphrase', 'Rewrite · paraphrase'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
         ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
       node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''}), node('button', 'Pause Lineleaf', {id: 'pause'})]),
       node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('div', '', {id: 'results'})
@@ -180,7 +182,7 @@ export function mountContent(api) {
           stop();
           if (capture && !capture.valid()) { markStale(); return; }
           if (!Array.isArray(message.edits)) { status(messageFor('INVALID_OUTPUT')); return; }
-          edits = message.edits; render(); status(edits.length ? 'Review each suggestion before accepting.' : 'No corrections suggested.');
+          edits = message.edits; render(); status(edits.length ? 'Review each suggestion before accepting.' : query('#mode').value === 'proofread' ? 'No corrections suggested.' : 'No change suggested. This already reads well.');
         }
       });
       watchdog = setTimeout(() => { stop(); status(messageFor('PROVIDER_TIMEOUT')); }, 65000);

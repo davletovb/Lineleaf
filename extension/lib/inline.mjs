@@ -2,9 +2,9 @@ import {deepActive, eventElement, navigationToken, observeNavigation, embeddingA
 import {EditorAdapter, validSpan, replacementSupported} from '../../prototypes/editor/editor-adapter.mjs';
 import {captureRichParagraph} from './rich-text.mjs';
 import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
-import {captureParagraph, editorOf, excluded} from './selection.mjs';
+import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selection.mjs';
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
-import {AUTO_IDLE, AUTO_INTERVAL, categoryLabel, dictionaryWord} from './policy.mjs';
+import {AUTO_IDLE, AUTO_INTERVAL, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import styles from '../inline.css';
 
@@ -35,7 +35,7 @@ class InlineView {
   update(capture, edits, message, undo = false, copyOnly = false) {
     this.capture = capture; this.edits = edits; this.message = message; this.undo = undo; this.copyOnly = copyOnly; this.index = Math.min(this.index, Math.max(0, edits.length - 1));
     this.announce(message);
-    this.badge.textContent = edits.length ? `Lineleaf · ${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : message.startsWith('Checking') ? 'Lineleaf · checking…' : 'Lineleaf · review';
+    this.badge.textContent = edits.some(edit => edit.rewrite) ? 'Lineleaf · rewrite ready' : edits.length ? `Lineleaf · ${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : /^(Checking|Working)/.test(message) ? 'Lineleaf · working…' : 'Lineleaf · review';
     this.badge.setAttribute('aria-label', `${message} Alt Shift L opens Lineleaf.`);
     this.card.hidden = true; this.card.replaceChildren(); this.draw();
   }
@@ -59,28 +59,22 @@ class InlineView {
     const title = node('h2', 'Lineleaf', {id: 'card-title', tabindex: '-1'}), heading = node('div', '', {class: 'heading'});
     heading.append(title, this.button('✕', () => this.hide(), {'aria-label': 'Close suggestions'})); this.card.append(heading);
     const edit = this.edits[this.index];
-    if (edit) {
+    if (edit?.rewrite) this.rewritePreview(edit, title);
+    else if (edit) {
       this.card.append(node('p', categoryLabel(edit.category), {class: 'category'}));
       const change = node('p', '', {class: 'change'}); change.append(node('span', edit.before, {class: 'before'}), document.createTextNode(' → '), node('span', edit.after || '(remove)', {class: 'after'}));
       this.card.append(change);
       const explanation = node('details'); explanation.append(node('summary', 'Why this suggestion?'), node('p', edit.explanation, {class: 'explanation'})); this.card.append(explanation);
-      const controls = node('div', '', {class: 'row'}), preview = Boolean(this.capture?.preview);
-      if (!preview) {
-        const mapped = {...edit, start: edit.start + this.capture.offset, end: edit.end + this.capture.offset};
-        const accept = this.button('Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': `Accept suggestion: ${edit.after || 'remove text'}`});
-        accept.disabled = this.copyOnly || !this.capture.valid() || !(this.capture.editable ? canApplyRich(this.capture, edit) : validSpan(this.capture.snapshot.source, mapped));
-        controls.append(accept);
-      }
-      controls.append(this.button('Dismiss', () => this.actions.dismiss(edit)), this.button('Copy', async () => {
-        try { await navigator.clipboard.writeText(edit.after); this.status('Suggestion copied.'); }
-        catch { const copy = node('textarea', '', {readonly: '', 'aria-label': 'Suggestion to copy'}); copy.value = edit.after; this.card.append(copy); copy.focus(); copy.select(); this.status('Clipboard unavailable. Copy the selected text with your keyboard.'); }
-      }));
+      const controls = node('div', '', {class: 'row'});
+      if (!this.capture?.preview) controls.append(this.acceptButton(edit));
+      controls.append(this.button('Dismiss', () => this.actions.dismiss(edit)), this.copyButton(edit));
       if (edit.category === 'spelling' && dictionaryWord(edit.before)) controls.append(this.button('Add to dictionary', () => this.actions.addWord(edit.before)));
       this.card.append(controls);
       if (this.edits.length > 1) {
         const navigation = node('div', '', {class: 'row'}); navigation.append(this.button('Previous', () => this.open((this.index + this.edits.length - 1) % this.edits.length)), node('span', `${this.index + 1} of ${this.edits.length}`), this.button('Next', () => this.open((this.index + 1) % this.edits.length))); this.card.append(navigation);
       }
     }
+    this.card.append(this.rewriteRow());
     const preview = Boolean(this.capture?.preview);
     if (preview) this.card.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
     else if (this.capture?.editable && this.copyOnly) this.card.append(node('p', 'This editor did not take the change cleanly, so Lineleaf is copy-only here until the page reloads. Check your draft; the editor’s own undo (Ctrl/⌘ Z) reverses its changes.', {class: 'note'}));
@@ -92,6 +86,39 @@ class InlineView {
     if (this.undo) footer.append(this.button('Undo last edit', () => this.actions.undo()));
     footer.append(this.button('Check now', () => this.actions.check()), this.button('Cancel check', () => this.actions.cancel()), this.button('Pause Lineleaf', () => this.actions.pause()), this.button('Settings', () => this.actions.settings()));
     this.card.append(footer); this.draw(); title.focus({preventScroll: true});
+  }
+  acceptButton(edit) {
+    const mapped = {...edit, start: edit.start + this.capture.offset, end: edit.end + this.capture.offset};
+    const accept = this.button(edit.rewrite ? 'Replace' : 'Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': edit.rewrite ? 'Replace the text with the suggested rewrite' : `Accept suggestion: ${edit.after || 'remove text'}`});
+    accept.disabled = this.copyOnly || !this.capture.valid() || !(this.capture.editable ? canApplyRich(this.capture, edit) : validSpan(this.capture.snapshot.source, mapped));
+    return accept;
+  }
+  copyButton(edit) {
+    return this.button('Copy', async () => {
+      try { await navigator.clipboard.writeText(edit.after); this.status('Suggestion copied.'); }
+      catch { const copy = node('textarea', '', {readonly: '', 'aria-label': 'Suggestion to copy'}); copy.value = edit.after; this.card.append(copy); copy.focus(); copy.select(); this.status('Clipboard unavailable. Copy the selected text with your keyboard.'); }
+    });
+  }
+  // A rewrite replaces a whole selection or paragraph, so it is shown as before/after text rather than an underline.
+  rewritePreview(edit, title) {
+    title.textContent = REWRITE_LABELS[edit.rewrite] ?? 'Rewrite';
+    this.card.append(node('p', `${this.capture?.scope === 'selection' ? 'Selected text' : 'This paragraph'} · ${categoryLabel(edit.category)}`, {class: 'category'}));
+    this.card.append(node('p', 'Original', {class: 'label'}), node('p', edit.before, {class: 'text'}), node('p', 'Suggested', {class: 'label'}), node('p', edit.after, {class: 'text suggested'}));
+    if (edit.flags?.length) this.card.append(node('p', `Check this version: it changes ${edit.flags.map(flag => FLAG_LABELS[flag]).join(', ')}.`, {class: 'note warn'}));
+    const explanation = node('details'); explanation.append(node('summary', 'About this rewrite'), node('p', edit.explanation, {class: 'explanation'})); this.card.append(explanation);
+    const controls = node('div', '', {class: 'row'});
+    if (!this.capture?.preview) controls.append(this.acceptButton(edit));
+    controls.append(this.button('Try again', () => this.actions.rewrite(edit.rewrite)), this.copyButton(edit), this.button('Back', () => this.actions.dismiss(edit)));
+    this.card.append(controls);
+  }
+  // Explicit, optional rewrites of the selection, or of the caret paragraph when nothing is selected.
+  rewriteRow() {
+    const group = node('div', '', {class: 'rewrite', role: 'group', 'aria-label': 'Rewrite'});
+    group.append(node('p', 'Rewrite your selection, or this paragraph if nothing is selected.', {class: 'muted'}));
+    const main = node('div', '', {class: 'row'}), more = node('div', '', {class: 'row'});
+    for (const mode of ['improve', 'paraphrase']) main.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode}));
+    for (const mode of ['clearer', 'shorter', 'formal', 'friendly']) more.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {class: 'small', 'data-rewrite': mode}));
+    group.append(main, more); return group;
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
   hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); this.restore(); }
@@ -110,6 +137,7 @@ class InlineView {
     if (!this.capture?.valid()) { this.mirror.textContent = ''; return; }
     for (let i = 0; i < this.edits.length; i++) {
       const edit = this.edits[i], start = this.capture.offset + edit.start, end = this.capture.offset + edit.end;
+      if (edit.rewrite) continue;
       const rectangles = this.capture.rects ? this.capture.rects(edit) : suggestionRects(field, this.capture.snapshot.source, start, end, this.mirror);
       for (const rectangle of rectangles) {
         const line = this.button('', () => this.open(i), {class: 'underline', tabindex: '-1', 'aria-hidden': 'true', 'data-category': edit.category});
@@ -124,6 +152,7 @@ export function mountInline(api) {
   let field, adapter, view, capture, edits = [], port, timer, expiry, watchdog, frame, policy = null, epoch = 0, generation = 0;
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
   let mode = 'edit', settling = 0, before; // 'rich' = no adapter: caret-paragraph capture; Accept only in a verified editor family
+  let held = null; // proofreading suggestions set aside while an explicit rewrite is shown
   const compositions = new WeakSet();
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
   const active = () => deepActive() === field;
@@ -131,8 +160,14 @@ export function mountInline(api) {
     generation++; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
   };
-  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
+  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); held = null; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
   function update(message) { view?.update(capture, edits, message, undo, copyOnly); }
+  // Bring back the proofreading suggestions that were set aside for a rewrite, if their text is still the current text.
+  function restoreHeld(message) {
+    const previous = held; held = null;
+    if (!previous?.capture.valid()) return false;
+    capture = previous.capture; edits = previous.edits; update(message); return true;
+  }
   async function rpc(type, payload = null) {
     try { return await api.runtime.sendMessage({type, payload}); } catch { return {ok: false, code: 'UNAVAILABLE'}; }
   }
@@ -148,6 +183,12 @@ export function mountInline(api) {
     return mode === 'rich' ? previewAllowed(field) : !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code');
   }
   const capturePara = () => mode === 'rich' ? captureRichParagraph(field, {editable: richReplacementAllowed(field)}) : captureParagraph(field, adapter);
+  // Explicit rewrites: the selection when there is one, otherwise the caret paragraph.
+  function captureScope() {
+    if (mode !== 'rich') return captureRewriteScope(field, adapter);
+    const editable = richReplacementAllowed(field);
+    try { return captureRichParagraph(field, {editable, selection: true}); } catch { return captureRichParagraph(field, {editable}); }
+  }
   // Whether Accept can ever exist for this field: the adapter editors and the verified rich families, until one misbehaves.
   const replaceable = () => mode === 'edit' || (Boolean(field) && richReplacementAllowed(field));
   function choose(target) {
@@ -164,8 +205,8 @@ export function mountInline(api) {
         mode = 'rich';
         if (!eligibleDOM()) { drop(); return; }
       } else { drop(); return; }
-      view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { edits = edits.filter(x => x !== edit); update(edits.length ? (replaceable() ? 'Review each suggestion before accepting.' : 'Review each suggestion. Copy one to use it.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
-        check: () => { stop(); void run(false); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); },
+      view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { if (edit.rewrite && restoreHeld('Rewrite dismissed. Your text is unchanged.')) { view.open(); return; } edits = edits.filter(x => x !== edit); update(edits.length ? (replaceable() ? 'Review each suggestion before accepting.' : 'Review each suggestion. Copy one to use it.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
+        check: () => { stop(); void run(false); }, rewrite: rewriteMode => { stop(); void run(false, rewriteMode); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); },
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});
@@ -178,45 +219,57 @@ export function mountInline(api) {
     clearTimeout(timer); if (!dirty || !permitted() || !navigator.onLine || !active() || composing || blocked || !eligibleDOM()) return;
     timer = setTimeout(() => { timer = null; void run(true); }, Math.max(delay, nextAt - Date.now()));
   }
-  async function run(automatic) {
+  async function run(automatic, rewriteMode = null) {
     if (!field || port || composing || applying || !eligibleDOM() || document.visibilityState !== 'visible') return;
     if (automatic && (!permitted() || !active() || blocked)) return;
     if (!navigator.onLine) { blocked = true; update(messageFor('OFFLINE')); return; }
     // Explicit Check now restores the field focus before capturing its current paragraph.
     if (!automatic) { field.focus({preventScroll: true}); view?.restore(); blocked = false; }
     let next;
-    try { next = capturePara(); }
-    catch { capture = null; edits = []; update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.'); return; }
+    try { next = rewriteMode ? captureScope() : capturePara(); }
+    catch {
+      if (rewriteMode) { update('Rewrites need 1–2,000 characters of text with letters in one paragraph. Select some text, or put the caret in a paragraph.'); view?.open(); return; }
+      capture = null; edits = []; update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.'); return;
+    }
     if (automatic && (!dirty || keyFor(next) !== pendingKey || keyFor(next) === lastKey)) return;
     const ticket = ++generation, selectedField = field, state = await rpc('site-state');
     if (ticket !== generation || selectedField !== field || !eligibleDOM() || !next.valid()) return;
-    if (!state.ok || (automatic && !state.value.automatic)) { blocked = true; update(messageFor(state.code ?? 'AUTOMATIC_DISABLED')); return; }
-    policy = state.value; capture = next; edits = []; undo = false; copyOnly = false; lastKey = keyFor(next);
+    if (!state.ok || (automatic && !state.value.automatic)) { blocked = true; update(messageFor(state.code ?? 'AUTOMATIC_DISABLED')); if (rewriteMode) view?.open(); return; }
+    if (rewriteMode) held = capture && !edits.some(edit => edit.rewrite) ? {capture, edits} : held; // Set the suggestions aside; Back restores them.
+    policy = state.value; capture = next; edits = []; undo = false; copyOnly = false; if (!rewriteMode) lastKey = keyFor(next);
     clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
-    update('Checking with Codex… You can keep typing.');
+    update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with Codex… You can keep typing.` : 'Checking with Codex… You can keep typing.');
     const id = crypto.randomUUID();
     try {
       const current = api.runtime.connect({name: 'lineleaf-writing-v1'}); port = current;
       const finish = () => { clearTimeout(watchdog); if (port === current) port = null; try { current.disconnect(); } catch { /* document gone */ } };
-      current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; blocked = true; clearTimeout(watchdog); update(messageFor('UNAVAILABLE')); } });
+      current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; blocked = true; clearTimeout(watchdog); update(messageFor('UNAVAILABLE')); if (rewriteMode) view?.open(); } });
       current.onMessage.addListener(message => {
         if (port !== current || message.id !== id || ticket !== generation) return;
-        if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; queue(); update(messageFor('STALE')); return; }
+        if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; held = null; queue(); update(messageFor('STALE')); return; }
         if (message.type === 'result') {
-          finish(); if (!Array.isArray(message.edits)) { blocked = true; update(messageFor('INVALID_OUTPUT')); return; }
+          finish(); if (!Array.isArray(message.edits)) { blocked = true; update(messageFor('INVALID_OUTPUT')); if (rewriteMode) view?.open(); return; }
+          if (rewriteMode) {
+            edits = message.edits; clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
+            const label = REWRITE_LABELS[rewriteMode];
+            if (edits.length) update(`${label}: review the suggested text. ${replaceable() ? 'Replace it or try again.' : 'Copy it; this editor is not changed.'}`);
+            else if (!restoreHeld(`${label}: no change suggested. This already reads well.`)) update(`${label}: no change suggested. This already reads well.`);
+            view.open(); return;
+          }
           edits = message.edits; update(edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}. ${replaceable() ? 'Review before accepting.' : 'Review and copy; this editor is not changed.'}` : 'No corrections suggested.');
           clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
         } else if (message.type === 'error') {
           finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED'].includes(message.code);
           if (retryable && automatic) { lastKey = null; nextAt = Date.now() + Math.max(1000, Math.min(60000, message.retryAfterMs || (message.code === 'PROVIDER_RATE_LIMITED' ? 60000 : 5000))); queue(nextAt - Date.now()); }
-          else blocked = message.code !== 'CANCELLED';
-          update(messageFor(message.code));
+          else blocked = !rewriteMode && message.code !== 'CANCELLED';
+          if (rewriteMode) restoreHeld(messageFor(message.code));
+          update(messageFor(message.code)); if (rewriteMode) view?.open();
         }
       });
-      watchdog = setTimeout(() => { stop(); blocked = true; update(messageFor('PROVIDER_TIMEOUT')); }, 65000);
-      current.postMessage({type: 'start', id, text: capture.text, mode: 'proofread', kind: automatic ? 'automatic' : 'manual'});
-    } catch { stop(); blocked = true; update(messageFor('UNAVAILABLE')); }
+      watchdog = setTimeout(() => { stop(); blocked = true; update(messageFor('PROVIDER_TIMEOUT')); if (rewriteMode) view?.open(); }, 65000);
+      current.postMessage({type: 'start', id, text: capture.text, mode: rewriteMode ?? 'proofread', kind: automatic ? 'automatic' : 'manual'});
+    } catch { stop(); blocked = true; update(messageFor('UNAVAILABLE')); if (rewriteMode) view?.open(); }
   }
   const RICH_FAILURES = {
     stale_or_unavailable: 'The text changed before this could be applied. Choose Check now to review the current text.',
@@ -249,7 +302,8 @@ export function mountInline(api) {
       edits = edits.filter(x => x !== edit).map(x => x.start >= edit.end ? {...x, start: x.start + delta, end: x.end + delta} : x)
         .filter(x => (x.end <= edit.start || x.start >= edit.end + delta) && next.text.slice(x.start, x.end) === x.before);
       // Typing during the edit was not seen as typing (it happened while applying): check the paragraph again after a pause.
-      capture = next; undo = false; copyOnly = false; lastKey = result.typed ? null : keyFor(next); pendingKey = result.typed ? keyFor(next) : null; dirty = result.typed === true;
+      const recheck = result.typed === true || Boolean(edit.rewrite); // A rewrite's new text is proofread after a pause.
+      held = null; capture = next; undo = false; copyOnly = false; lastKey = recheck ? null : keyFor(next); pendingKey = recheck ? keyFor(next) : null; dirty = recheck;
       update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
       if (here) view.hide();
       queue(); return;
@@ -269,7 +323,7 @@ export function mountInline(api) {
     undo = result?.status === 'applied'; edits = undo ? [] : [edit]; copyOnly = !undo;
     update(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
     if (!undo) { blocked = true; view.open(); return; }
-    capture = null; view.capture = null;
+    held = null; capture = null; view.capture = null; if (edit.rewrite) dirty = true;
     try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; }
     queue(); view.open();
   }
@@ -277,7 +331,7 @@ export function mountInline(api) {
     applying = true; let result; const selectedView = view;
     try { result = adapter?.undo(); } finally { applying = false; }
     if (view !== selectedView) return;
-    undo = false; edits = []; capture = null; lastKey = null;
+    undo = false; edits = []; capture = null; held = null; lastKey = null;
     update(result?.contextChanged ? 'The editor changed context during undo. Review its draft; safe restoration is unavailable.' : result?.status === 'undone' ? 'Undone. Your original text is restored.' : result?.restored ? 'Original text restored. Further edits use Copy.' : 'Undo unavailable after other edits. Use the editor’s undo control.');
   }
   // Rich editors. A trusted typing event only arms a check when the caret paragraph really changed: an editor can cancel
@@ -295,7 +349,7 @@ export function mountInline(api) {
       if (ticket !== settling || mode !== 'rich' || !field) return;
       const was = before, after = paragraphKey(); before = undefined;
       if (after === was) return; // The editor rejected or ignored the edit: keep any check already armed.
-      stop(); capture = null; edits = []; undo = false; copyOnly = false; pendingKey = after; dirty = after !== null;
+      stop(); capture = null; edits = []; held = null; undo = false; copyOnly = false; pendingKey = after; dirty = after !== null;
       update(dirty ? 'Text changed. Checking after a pause.' : idleMessage()); queue();
     }, 0);
   }
@@ -311,7 +365,7 @@ export function mountInline(api) {
   const changed = event => {
     const target = eventElement(event);
     if (applying || !field || !(target === field || field.contains(target))) return;
-    stop(); capture = null; edits = []; undo = false; copyOnly = false; dirty = event.isTrusted === true;
+    stop(); capture = null; edits = []; held = null; undo = false; copyOnly = false; dirty = event.isTrusted === true;
     pendingKey = null;
     if (dirty) { try { pendingKey = keyFor(captureParagraph(field, adapter)); } catch { pendingKey = null; } }
     update(dirty ? 'Text changed. Checking after a pause.' : 'The editor changed. Choose Check now to review the current text.'); queue();

@@ -68,3 +68,20 @@ export function captureParagraph(element, adapter) {
   if (!validText(text) || !/\p{L}/u.test(text)) throw new LineleafError('INVALID_REQUEST');
   return {text, offset: start, snapshot, adapter, field: element, valid: () => adapter.current(snapshot)};
 }
+// Explicit rewrite scope for text fields and flat editors: the selected text when there is any, otherwise the caret paragraph.
+export function captureRewriteScope(element, adapter) {
+  if (!element || !embeddingAllowed() || excluded(element) || element.querySelector(EXCLUDED) || !element.isConnected
+      || element.disabled || element.readOnly || (element.value ?? element.textContent).length > 100000) throw new LineleafError('INVALID_REQUEST');
+  let start = element.selectionStart, end = element.selectionEnd;
+  if (!Number.isInteger(start)) {
+    const selection = selectionFor(element);
+    if (!selection?.rangeCount || !element.contains(selection.anchorNode) || !element.contains(selection.focusNode)) throw new LineleafError('INVALID_REQUEST');
+    const offset = (node, at) => { const prefix = document.createRange(); prefix.selectNodeContents(element); prefix.setEnd(node, at); return prefix.toString().length; };
+    [start, end] = [offset(selection.anchorNode, selection.anchorOffset), offset(selection.focusNode, selection.focusOffset)].sort((a, b) => a - b);
+  }
+  if (start === end) return {...captureParagraph(element, adapter), scope: 'paragraph'};
+  const snapshot = adapter.snapshot(); if (!snapshot) throw new LineleafError('INVALID_REQUEST');
+  const text = snapshot.source.slice(start, end), points = boundaries(snapshot.source);
+  if (!validText(text) || !/\p{L}/u.test(text) || !points.has(start) || !points.has(end)) throw new LineleafError('INVALID_REQUEST');
+  return {text, offset: start, snapshot, adapter, field: element, scope: 'selection', valid: () => adapter.current(snapshot)};
+}

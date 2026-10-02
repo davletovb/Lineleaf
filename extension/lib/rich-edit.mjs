@@ -76,19 +76,22 @@ async function restore(fresh, saved, edit, capture) {
   if (a && b) await select(fresh.field, a[0], a[1], b[0], b[1]);
 }
 
-// Reads the checked paragraph again: from its own block when the editor kept it, so a moved caret cannot change what is
-// verified, otherwise from the paragraph the caret is in.
-function reread(host, capture, index) {
-  for (const options of [{editable: true, at: {block: capture.block, index}}, {editable: true}]) {
+// Reads the checked text again: from its own block when the editor kept it, so a moved caret cannot change what is verified,
+// otherwise from the paragraph the caret is in. A selection-scoped capture reads the same span of its block (`length`).
+function reread(host, capture, index, length) {
+  const spans = capture.scope === 'selection' ? {length} : {};
+  for (const options of [{editable: true, at: {block: capture.block, index, ...spans}}, ...(capture.scope === 'selection' ? [] : [{editable: true}])]) {
     try { return captureRichParagraph(host, options); } catch { /* try the caret paragraph */ }
   }
   return null;
 }
-// The edit counts as applied when the paragraph is exactly the expected text. If the user kept typing while it settled the
-// text legitimately differs, so then the replacement and its left context must still be there and the original wording
-// (with its surroundings) must not have come back: that is the signature of an editor restoring its old state.
+// The edit counts as applied when the text is exactly the expected text. If the user kept typing while it settled the text
+// legitimately differs, so then the replacement and its left context must still be there and the original wording (with its
+// surroundings) must not have come back: that is the signature of an editor restoring its old state.
 function check(host, capture, edit, expected, typed) {
-  const fresh = reread(host, capture, capture.offset + edit.start + edit.after.length);
+  const fresh = capture.scope === 'selection'
+    ? reread(host, capture, capture.offset + edit.start, edit.after.length)
+    : reread(host, capture, capture.offset + edit.start + edit.after.length);
   if (!fresh) return null;
   if (fresh.text === expected && fresh.offset === capture.offset) return fresh;
   if (!typed) return null;
@@ -97,7 +100,7 @@ function check(host, capture, edit, expected, typed) {
 }
 const failed = (host, capture, edit, reason = null) => {
   markRichUnsafe(host);
-  const again = reread(host, capture, capture.offset + edit.start), changed = again?.text !== capture.text;
+  const again = reread(host, capture, capture.offset + edit.start, capture.text.length), changed = again?.text !== capture.text;
   return copy(reason ?? (changed ? 'native_edit_not_confirmed' : 'editor_rejected'), changed);
 };
 const focusedOn = host => { const active = deepActive(); return active === host || host.contains(active); };
@@ -126,6 +129,8 @@ export async function applyRichEdit(capture, edit, remembered = null) {
 async function apply(capture, edit, remembered, user) {
   const host = capture.field;
   if (!capture.valid()) return copy('stale_or_unavailable');
+  // A selection is replaced as a whole; a partial edit inside it cannot be re-read as the same span.
+  if (capture.scope === 'selection' && !(edit.start === 0 && edit.end === capture.text.length)) return copy('invalid_span');
   if (!canApplyRich(capture, edit)) return copy(validSpan(capture.text, edit) ? 'crosses_format_boundary' : 'invalid_span');
   host.focus({preventScroll: true}); await tick();
   if (!capture.valid()) return copy('changed_on_focus');

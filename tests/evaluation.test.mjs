@@ -51,10 +51,10 @@ test('corpus covers paragraph/multi-edit/variant/boundary inputs and distinct ge
     assert.equal(rows.find(c=>c.variant==='US').proposal.corrections.length,0);
     assert.equal(rows.find(c=>c.variant==='UK').proposal.corrections.length,1);
   }
-  const rewrites = corpus.cases.filter(c => c.mode !== 'proofread'); assert.equal(new Set(rewrites.map(c => c.source)).size,24);
+  const rewrites = corpus.cases.filter(c => c.mode !== 'proofread'); assert.equal(new Set(rewrites.map(c => c.source)).size,36);
   assert.ok(rewrites.filter(c => c.mode === 'shorter').every(c => c.proposal.rewrite.length < c.source.length));
-  assert.deepEqual([...new Set(corpus.cases.filter(c => c.mode !== 'proofread').map(c => c.mode))].sort(), ['clearer', 'formal', 'friendly', 'shorter']);
-  assert.equal(new Set(corpus.cases.map(c => c.id)).size, 350);
+  assert.deepEqual([...new Set(corpus.cases.filter(c => c.mode !== 'proofread').map(c => c.mode))].sort(), ['clearer', 'formal', 'friendly', 'improve', 'paraphrase', 'shorter']);
+  assert.equal(new Set(corpus.cases.map(c => c.id)).size, 362);
   const d = data(), templates = reviewTemplates(corpus, d.run);
   assert.equal(templates.labels.review.kind, 'pending'); assert.equal(templates.judgments.cases[0].suggestions[0].correct, null);
   assert.throws(() => score(corpus, d.run, {labels: templates.labels}));
@@ -62,7 +62,7 @@ test('corpus covers paragraph/multi-edit/variant/boundary inputs and distinct ge
 test('quality separates precision, exact-reference recall, style, explanations and latency provenance', () => {
   const s = reviewed(data()); assert.equal(s.releaseEligible, true);
   assert.equal(s.metrics.proofread.humanPrecision, 1); assert.equal(s.metrics.proofread.referenceRecall, 1);
-  assert.equal(s.metrics.style.cases, 24); assert.equal(s.metrics.style.humanApproved, 24);
+  assert.equal(s.metrics.style.cases, 36); assert.equal(s.metrics.style.humanApproved, 36);
   assert.equal(s.latency.kind, 'live'); assert.equal(s.latency.completionP95Ms, 12);
   assert.equal(s.latency.boundary,'fresh-native-ready-status-send-validation'); assert.equal(s.latency.includesBrowserUI,false);
 });
@@ -74,8 +74,8 @@ test('empty corrections cannot pass by hiding every error even with a human revi
   const s = reviewed(d); assert.equal(s.releaseEligible, false); assert.equal(s.metrics.proofread.humanPrecision, null);
   assert.ok(s.reasons.includes('NO_VERIFIED_ERROR_DETECTION')); assert.equal(s.metrics.proofread.referenceRecall, 0);
 });
-test('a fully reviewed run still needs every advertised rewrite mode', () => {
-  const reduced = structuredClone(corpus); reduced.cases = reduced.cases.filter(c => c.mode !== 'formal');
+for (const missing of ['formal', 'improve', 'paraphrase']) test(`a fully reviewed run still needs every advertised rewrite mode (${missing})`, () => {
+  const reduced = structuredClone(corpus); reduced.cases = reduced.cases.filter(c => c.mode !== missing);
   const d = data(), ids = new Set(reduced.cases.map(c => c.id));
   d.run.corpusHash = d.labels.corpusHash = d.acceptance.corpusHash = sha256(reduced);
   d.run.rows = d.run.rows.filter(r => ids.has(r.id)); d.labels.cases = d.labels.cases.filter(r => ids.has(r.id));
@@ -124,8 +124,8 @@ test('runner records malformed answers, continues every remaining case with fres
     calls.push({method,turn}); if(method==='status') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true}};
     return c.id===corpus.cases[3].id ? '```json\n{"corrections":[]}\n```' : JSON.stringify(c.proposal);
   },close(){closed++;}}; };
-  const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,350); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
-  assert.equal(opened,350); assert.equal(closed,350); assert.equal(calls.filter(c=>c.method==='send').length,350);
+  const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,362); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
+  assert.equal(opened,362); assert.equal(closed,362); assert.equal(calls.filter(c=>c.method==='send').length,362);
   const send = calls.find(c => c.method === 'send').turn;
   assert.equal(send.tools, 'none'); assert.equal(send.session, 'ephemeral'); assert.equal(send.continuation, null);
   assert.match(send.system, /Preserve facts, names, numbers, dates, negation/); assert.equal(JSON.parse(send.messages[0].text).text, corpus.cases[0].source);
@@ -165,7 +165,7 @@ test('invalid and partial runs with reviews report outcome rates and missing cas
     d.judgments=reviewTemplates(corpus,d.run).judgments; d.judgments.review={...human};
     for (const row of d.judgments.cases) if(d.run.rows.some(r=>r.id===row.id && r.status==='completed')) { row.meaningPreserved=true; row.suggestions.forEach(x=>{x.correct=x.explanationAccurate=true;}); }
     const s=reviewed(d); assert.equal(s.releaseEligible,false); assert.ok(s.reasons.includes('INCOMPLETE_OR_INVALID_RESPONSES'));
-    assert.equal(s.invalidOutputRate,kind==='invalid'?1/350:0); assert.equal(s.missingCaseIds.length,kind==='partial'?346:0);
+    assert.equal(s.invalidOutputRate,kind==='invalid'?1/362:0); assert.equal(s.missingCaseIds.length,kind==='partial'?358:0);
     if(kind==='invalid') assert.deepEqual(s.invalidCaseIds,[d.run.rows[3].id]);
   }
 });

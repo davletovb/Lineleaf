@@ -39,9 +39,8 @@ function fixtureConnection(corpus) {
         if (request.method === 'status') emit({id: request.id, event: {type: 'status', status: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true}}}});
         else {
           const source = JSON.parse(request.params.messages[0].text).text;
-          const c = corpus.cases.find(c => c.source === source
-            && request.params.system.includes(c.variant === 'UK' ? 'British' : 'American')
-            && request.params.system.includes(c.mode === 'proofread' ? 'Proofread conservatively' : `be ${c.mode}.`));
+          // The case whose exact production prompt this is, so every mode (including future ones) is matched the same way.
+          const c = corpus.cases.find(c => c.source === source && request.params.system === writingTurn(c.source, c.mode, preferences({variant: c.variant})).system);
           emit({id: request.id, event: {type: 'delta', text: JSON.stringify(c.proposal)}});
         }
         emit({id: request.id, event: {type: 'completed'}});
