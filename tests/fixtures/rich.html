@@ -32,6 +32,13 @@ Third line.</p></div>
 <div class="monaco-editor"><div id="monaco-field" contenteditable="true"><p>He go to work.</p></div></div>
 <div class="ace_editor"><div id="ace-field" contenteditable="true"><p>He go to work.</p></div></div>
 <div id="secret" contenteditable="true" autocomplete="cc-number"><p>He go to work.</p></div>
+<!-- Replacement fixtures. Slate-like and Draft-like editors own their text; the others misbehave on purpose. -->
+<div id="model-slate" data-slate-editor="true" contenteditable="true" role="textbox"></div>
+<div id="model-draft" class="public-DraftEditor-content" contenteditable="true" role="textbox"></div>
+<div id="rejecting" class="ql-editor" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
+<div id="reverting" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
+<div id="spans" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He <b>go</b> to work.</p></div>
+<div id="multi" class="ql-editor" contenteditable="true"><p>Intro paragraph.</p><p>He go to work and they was late.</p></div>
 <script>
 // A minimal state-owning editor in the style of Draft.js/Lexical/Slate: it cancels beforeinput, updates its own
 // model, and re-renders by replacing every text node. No native `input` event ever follows.
@@ -71,6 +78,62 @@ window.mini = (() => {
   render();
   return {host, lines, render, place};
 })();
+
+// Editors that own their text. `slate` only trusts `beforeinput` and discards any native edit it did not make; `draft` lets the
+// browser edit the DOM, then reads the block back into its model and re-renders it (replacing the text nodes). Both keep a log
+// and an undo stack so a test can see that Lineleaf's edit arrived as one ordinary edit in the editor's own history.
+function modelEditor(host, kind, initial) {
+  const state = {lines: [...initial], log: [], past: []};
+  const render = () => host.replaceChildren(...state.lines.map(line => {
+    const block = document.createElement('div'); block.setAttribute('data-block', 'true');
+    if (!line) { block.append(document.createElement('br')); return block; }
+    const outer = document.createElement('span'), inner = document.createElement('span'); inner.setAttribute('data-text', 'true'); inner.textContent = line; outer.append(inner); block.append(outer); return block;
+  }));
+  const point = (node, offset) => {
+    let block = node; while (block && block.parentNode !== host) block = block.parentNode;
+    const line = [...host.children].indexOf(block);
+    return line < 0 ? null : {line, offset: node.nodeType === 3 ? offset : (offset > 0 ? state.lines[line].length : 0)};
+  };
+  const place = (line, offset) => {
+    const text = host.children[line].querySelector('[data-text]')?.firstChild, range = document.createRange();
+    if (text) range.setStart(text, offset); else range.setStart(host.children[line], 0);
+    range.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+  };
+  const change = (lines, entry) => { state.past.push([...state.lines]); state.lines = lines; state.log.push(entry); };
+  if (kind === 'slate') {
+    host.addEventListener('beforeinput', event => {
+      const s = getSelection(), a = point(s.anchorNode, s.anchorOffset), f = point(s.focusNode, s.focusOffset);
+      if (!a || !f || a.line !== f.line) return;
+      const from = Math.min(a.offset, f.offset), to = Math.max(a.offset, f.offset), line = state.lines[a.line];
+      const next = [...state.lines]; let at = from;
+      if (event.inputType === 'insertText') { next[a.line] = line.slice(0, from) + event.data + line.slice(to); at = from + event.data.length; }
+      else if (event.inputType === 'deleteContentBackward') { const start = from === to ? Math.max(0, from - 1) : from; next[a.line] = line.slice(0, start) + line.slice(to); at = start; }
+      else return;
+      event.preventDefault(); change(next, `${event.inputType}${event.isTrusted ? '' : ':synthetic'}`); render(); place(a.line, at);
+    });
+    host.addEventListener('input', () => { const s = getSelection(), f = point(s.focusNode, s.focusOffset); state.log.push('native-discarded'); render(); if (f) place(f.line, Math.min(f.offset, state.lines[f.line].length)); });
+  } else {
+    host.addEventListener('input', event => {
+      const s = getSelection(), f = point(s.focusNode, s.focusOffset); if (!f) return;
+      const next = [...state.lines]; next[f.line] = host.children[f.line].textContent;
+      change(next, event.inputType); render(); place(f.line, f.offset);
+    });
+  }
+  host.addEventListener('keydown', event => {
+    if (!(event.ctrlKey && event.key === 'z') || !state.past.length) return;
+    event.preventDefault(); state.lines = state.past.pop(); state.log.push('undo'); render(); place(state.lines.length - 1, state.lines.at(-1).length);
+  });
+  render();
+  return state;
+}
+window.modelSlate = modelEditor(document.getElementById('model-slate'), 'slate', ['Intro paragraph.', 'He go to work.']);
+window.modelDraft = modelEditor(document.getElementById('model-draft'), 'draft', ['Intro paragraph.', 'He go to work.']);
+// An editor that cancels every edit (a maxlength or read-only state), and one that accepts the edit and then re-renders the old text.
+document.getElementById('rejecting').addEventListener('beforeinput', event => { if (event.inputType === 'insertText' && event.data !== ' ') event.preventDefault(); });
+{
+  const reverting = document.getElementById('reverting'), original = reverting.innerHTML;
+  reverting.addEventListener('input', () => { if (reverting.textContent.includes('goes')) setTimeout(() => { reverting.innerHTML = original; }, 100); });
+}
 
 const event = () => ({listeners: [], addListener(listener) { this.listeners.push(listener); }, emit(...args) { for (const fn of this.listeners) fn(...args); }});
 window.fixture = {enabled: true, code: null, hold: false, checks: [], ports: [], runtimeMessages: event(), after: 'goes'};
