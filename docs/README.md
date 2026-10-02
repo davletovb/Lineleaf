@@ -20,6 +20,7 @@
 | [Candidate support](beta/SUPPORT.md) | Tested development boundaries and pending advertised-device targets |
 | [Candidate privacy](beta/PRIVACY.md) | Processing, storage, controls and evaluation artifact handling |
 | [Beta acceptance](beta/ACCEPTANCE.md) | Independent human/live/device release checklist |
+| [Evaluation and candidate evidence](evidence/evaluation-beta-ci.md) | Linux/macOS regression, native concurrency, fixture timing and reproducible package provenance |
 
 The product is named **Lineleaf**. The preservation principle is that the user's intent, authorship, and control remain theirs, including when they deliberately request a different tone.
 
