@@ -10,6 +10,7 @@ import {writingTurn, preferences, requireReady, errorCode} from '../extension/li
 import {nativePort} from './evaluation/native-port.mjs';
 import {sha256, validateCorpus, score, reviewTemplates} from './evaluation/quality.mjs';
 import {readData} from './evaluation/json.mjs';
+import {readPackage} from './evaluation/package.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const CORPUS = join(ROOT, 'evaluation/writing-corpus.json');
@@ -22,7 +23,7 @@ export async function privateJSON(path, value) {
 export async function configuration({model, providerVersion, fixture}) {
   const contract = JSON.parse(await readFile(join(ROOT, 'config/seatline-contract.json'), 'utf8'));
   return {provider: 'codex', model: fixture ? 'fixture-reference' : model, providerVersion: fixture ? 'fixture' : providerVersion,
-    seatlineRevision: contract.revision, engineHash: await engineHash(), packageHash: sha256(await readFile(join(ROOT, 'dist/lineleaf-0.1.0.zip'))),
+    seatlineRevision: contract.revision, engineHash: await engineHash(), packageHash: (await readPackage(ROOT)).packageHash,
     runtime: {platform: os.platform(), arch: os.arch(), cpu: os.cpus()[0]?.model ?? 'unknown', memoryGB: Math.round(os.totalmem() / 1073741824 * 100) / 100}};
 }
 function fixtureConnection(corpus) {

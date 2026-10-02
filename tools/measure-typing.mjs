@@ -4,20 +4,20 @@ import {join, resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import os from 'node:os';
 import {ROOT, privateJSON, engineHash} from './evaluate-writing.mjs';
-import {sha256} from './evaluation/quality.mjs';
+import {readPackage} from './evaluation/package.mjs';
 export async function measureTyping() {
   const browser = await chromium.launch({executablePath: process.env.LINELEAF_CHROMIUM_PATH || undefined,
     args: process.env.LINELEAF_CHROMIUM_SINGLE_PROCESS === '1' ? ['--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote', '--single-process'] : []});
   try {
     const scenarios = [], page = await browser.newPage();
-      await page.route('https://typing.lineleaf.test/**', async route => {
-        const path = new URL(route.request().url()).pathname;
-        const files = new Map([['/content.js', 'dist/lineleaf/content.js'], ['/controller-bridge.mjs', 'tests/fixtures/controller-bridge.mjs'], ['/test-api.mjs', 'tests/fixtures/extension-api.mjs']]);
-        const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs'].includes(path.split('/').at(-1)) ? `dist/lineleaf${path}` : 'tests/fixtures/selection.html');
-        let body = await readFile(join(ROOT, file), 'utf8');
-        if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
-        await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
-      });
+    await page.route('https://typing.lineleaf.test/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      const files = new Map([['/content.js', 'dist/lineleaf/content.js'], ['/controller-bridge.mjs', 'tests/fixtures/controller-bridge.mjs'], ['/test-api.mjs', 'tests/fixtures/extension-api.mjs']]);
+      const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs'].includes(path.split('/').at(-1)) ? `dist/lineleaf${path}` : 'tests/fixtures/selection.html');
+      let body = await readFile(join(ROOT, file), 'utf8');
+      if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
+      await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
+    });
     for (const automatic of [false, true]) {
       await page.goto(`https://typing.lineleaf.test/compose${automatic ? '?automatic' : ''}`); await page.waitForFunction(() => window.__lineleafMounted);
       await page.locator('#textarea').evaluate(el => {
@@ -34,7 +34,7 @@ export async function measureTyping() {
       const percentile = p => sample.times[Math.ceil(sample.times.length * p) - 1];
       scenarios.push({automatic, trustedInputs: sample.times.length, providerSubmissions: sample.sends, inputDispatchP50Ms: percentile(.5), inputDispatchP95Ms: percentile(.95), maxMs: sample.times.at(-1)});
     }
-    return {schema: 1, kind: 'fixture-browser', engineHash: await engineHash(), packageHash: sha256(await readFile(join(ROOT, 'dist/lineleaf-0.1.0.zip'))),
+    return {schema: 1, kind: 'fixture-browser', engineHash: await engineHash(), packageHash: (await readPackage(ROOT)).packageHash,
       browser: browser.version(), platform: os.platform(), arch: os.arch(), cpu: os.cpus()[0]?.model ?? 'unknown', scenarios,
       incrementalInputDispatchP95Ms: scenarios[1].inputDispatchP95Ms - scenarios[0].inputDispatchP95Ms,
       releaseEligible: false, boundary: 'Trusted beforeinput through the end of input dispatch; synthetic provider, test hardware, no paint/remote-latency or actual-device acceptance claim.'};

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile, mkdtemp, writeFile, rm} from 'node:fs/promises';
+import {readFile, mkdtemp, writeFile, rm, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {sha256, validateCorpus, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
@@ -10,10 +10,24 @@ import {betaGate, CI_CHECKS, COEXISTENCE_CHECKS, DEVICE_CHECKS} from '../tools/e
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {nativePort} from '../tools/evaluation/native-port.mjs';
 import {candidates} from '../extension/lib/candidates.mjs';
+import {readPackage} from '../tools/evaluation/package.mjs';
 const corpus = validateCorpus(JSON.parse(await readFile(new URL('../evaluation/writing-corpus.json', import.meta.url), 'utf8')));
 const config = {provider: 'codex', model: 'test-model', providerVersion: 'test-cli-1', seatlineRevision: 'd'.repeat(40), engineHash: 'e'.repeat(64), packageHash: 'a'.repeat(64),
   runtime: {platform: 'linux', arch: 'x64', cpu: 'synthetic-test-host', memoryGB: 8}};
 const human = {kind: 'human', reviewer: 'test-reviewer', independent: true, reviewedAt: '2026-10-02T00:00:00Z'};
+test('package evidence follows the built manifest version and refuses stale or missing archives', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'lineleaf-version-'));
+  try {
+    await mkdir(join(root, 'dist/lineleaf'), {recursive: true});
+    const manifest = join(root, 'dist/lineleaf/manifest.json');
+    await writeFile(manifest, '{"version":"0.2.0"}'); await writeFile(join(root, 'dist/lineleaf-0.1.0.zip'), 'stale');
+    await assert.rejects(readPackage(root));
+    await writeFile(join(root, 'dist/lineleaf-0.2.0.zip'), 'current');
+    const pack = await readPackage(root); assert.equal(pack.version, '0.2.0'); assert.equal(pack.packageHash, sha256('current'));
+    assert.equal(pack.path, join(root, 'dist/lineleaf-0.2.0.zip'));
+    await writeFile(manifest, '{"version":"../../stale"}'); await assert.rejects(readPackage(root));
+  } finally { await rm(root, {recursive: true, force: true}); }
+});
 function data() {
   const run = {schema: 1, id: 'test-run', kind: 'live', corpusHash: sha256(corpus), configuration: structuredClone(config), configurationHash: sha256(config), createdAt: '2026-10-02T00:00:00Z',
     rows: corpus.cases.map(c => ({id: c.id, inputHash: sha256(c.source), status: 'completed', response: JSON.stringify(c.proposal), elapsedMs: 12, code: null}))};

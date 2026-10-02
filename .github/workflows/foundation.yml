@@ -31,7 +31,11 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm test
       - run: npm run test:extension
-      - run: npm run package
+      - name: Package the manifest version
+        id: package
+        run: |
+          npm run package
+          node --input-type=module -e "import {appendFileSync, readFileSync} from 'node:fs'; const v = JSON.parse(readFileSync('dist/lineleaf/manifest.json')).version; appendFileSync(process.env.GITHUB_OUTPUT, 'extension=dist/lineleaf-' + v + '.zip\nreview=dist/lineleaf-' + v + '-beta-review.zip\n');"
       - name: Exercise evaluation and blocked beta-review packaging
         run: |
           mkdir -p test-results
@@ -42,14 +46,14 @@ jobs:
         with:
           name: lineleaf-beta-review-${{ runner.os }}
           path: |
-            dist/lineleaf-0.1.0-beta-review.zip
+            ${{ steps.package.outputs.review }}
             test-results/quality-fixture-summary.json
             test-results/typing-summary.json
             test-results/beta-review-summary.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: lineleaf-extension-${{ runner.os }}
-          path: dist/lineleaf-0.1.0.zip
+          path: ${{ steps.package.outputs.extension }}
       - name: Record synthetic harness evidence
         run: |
           mkdir -p test-results
