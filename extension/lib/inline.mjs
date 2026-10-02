@@ -1,6 +1,7 @@
-import {deepActive, eventElement, navigationToken, observeNavigation, embeddingAllowed, previewAllowed, selectionFor} from './editor-context.mjs';
+import {deepActive, eventElement, navigationToken, observeNavigation, embeddingAllowed, previewAllowed, richReplacementAllowed, selectionFor} from './editor-context.mjs';
 import {EditorAdapter, validSpan, replacementSupported} from '../../prototypes/editor/editor-adapter.mjs';
 import {captureRichParagraph} from './rich-text.mjs';
+import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
 import {captureParagraph, editorOf, excluded} from './selection.mjs';
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
 import {AUTO_IDLE, AUTO_INTERVAL, categoryLabel, dictionaryWord} from './policy.mjs';
@@ -67,7 +68,7 @@ class InlineView {
       if (!preview) {
         const mapped = {...edit, start: edit.start + this.capture.offset, end: edit.end + this.capture.offset};
         const accept = this.button('Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': `Accept suggestion: ${edit.after || 'remove text'}`});
-        accept.disabled = this.copyOnly || !this.capture.valid() || !validSpan(this.capture.snapshot.source, mapped);
+        accept.disabled = this.copyOnly || !this.capture.valid() || !(this.capture.editable ? canApplyRich(this.capture, edit) : validSpan(this.capture.snapshot.source, mapped));
         controls.append(accept);
       }
       controls.append(this.button('Dismiss', () => this.actions.dismiss(edit)), this.button('Copy', async () => {
@@ -82,6 +83,8 @@ class InlineView {
     }
     const preview = Boolean(this.capture?.preview);
     if (preview) this.card.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
+    else if (this.capture?.editable && this.copyOnly) this.card.append(node('p', 'This editor did not take the change cleanly, so Lineleaf is copy-only here until the page reloads. Check your draft; the editor’s own undo (Ctrl/⌘ Z) reverses its changes.', {class: 'note'}));
+    else if (this.capture?.editable && edit && !canApplyRich(this.capture, edit)) this.card.append(node('p', 'This change spans formatting or a mention, so Lineleaf can only copy it.', {class: 'note'}));
     this.card.append(node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'}), node('p', preview
       ? 'Codex via Seatline · model processing may be remote. Lineleaf does not change this editor.'
       : 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'muted'}));
@@ -120,7 +123,7 @@ class InlineView {
 export function mountInline(api) {
   let field, adapter, view, capture, edits = [], port, timer, expiry, watchdog, frame, policy = null, epoch = 0, generation = 0;
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
-  let mode = 'edit', settling = 0, before; // 'preview' = rich editor: suggestions to copy, never an edit
+  let mode = 'edit', settling = 0, before; // 'rich' = no adapter: caret-paragraph capture; Accept only in a verified editor family
   const compositions = new WeakSet();
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
   const active = () => deepActive() === field;
@@ -142,9 +145,11 @@ export function mountInline(api) {
   function eligibleDOM() {
     if (!field?.isConnected || !embeddingAllowed() || excluded(field) || field.disabled || field.readOnly || visibleEditorRect(field) === null) return false;
     // Rich editors legitimately contain inline code or islands elsewhere; their paragraph is checked at capture time.
-    return mode === 'preview' ? previewAllowed(field) : !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code');
+    return mode === 'rich' ? previewAllowed(field) : !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code');
   }
-  const capturePara = () => mode === 'preview' ? captureRichParagraph(field) : captureParagraph(field, adapter);
+  const capturePara = () => mode === 'rich' ? captureRichParagraph(field, {editable: richReplacementAllowed(field)}) : captureParagraph(field, adapter);
+  // Whether Accept can ever exist for this field: the adapter editors and the verified rich families, until one misbehaves.
+  const replaceable = () => mode === 'edit' || (Boolean(field) && richReplacementAllowed(field));
   function choose(target) {
     if (applying || target === view?.host) return;
     if (!permitted()) { drop(); return; }
@@ -156,10 +161,10 @@ export function mountInline(api) {
         adapter = new EditorAdapter(field);
         if (!adapter.snapshot() || !eligibleDOM()) { drop(); return; }
       } else if (previewAllowed(field)) {
-        mode = 'preview';
+        mode = 'rich';
         if (!eligibleDOM()) { drop(); return; }
       } else { drop(); return; }
-      view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { edits = edits.filter(x => x !== edit); update(edits.length ? (mode === 'preview' ? 'Review each suggestion. Copy one to use it.' : 'Review each suggestion before accepting.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
+      view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { edits = edits.filter(x => x !== edit); update(edits.length ? (replaceable() ? 'Review each suggestion before accepting.' : 'Review each suggestion. Copy one to use it.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
         check: () => { stop(); void run(false); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); },
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
@@ -200,7 +205,7 @@ export function mountInline(api) {
         if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; queue(); update(messageFor('STALE')); return; }
         if (message.type === 'result') {
           finish(); if (!Array.isArray(message.edits)) { blocked = true; update(messageFor('INVALID_OUTPUT')); return; }
-          edits = message.edits; update(edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}. ${mode === 'preview' ? 'Review and copy; this editor is not changed.' : 'Review before accepting.'}` : 'No corrections suggested.');
+          edits = message.edits; update(edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}. ${replaceable() ? 'Review before accepting.' : 'Review and copy; this editor is not changed.'}` : 'No corrections suggested.');
           clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
         } else if (message.type === 'error') {
           finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED'].includes(message.code);
@@ -213,8 +218,48 @@ export function mountInline(api) {
       current.postMessage({type: 'start', id, text: capture.text, mode: 'proofread', kind: automatic ? 'automatic' : 'manual'});
     } catch { stop(); blocked = true; update(messageFor('UNAVAILABLE')); }
   }
+  const RICH_FAILURES = {
+    stale_or_unavailable: 'The text changed before this could be applied. Choose Check now to review the current text.',
+    changed_on_focus: 'The text changed before this could be applied. Choose Check now to review the current text.',
+    focus_moved: 'Nothing was changed because you moved elsewhere. Choose Accept again when you are back in the editor.',
+    selection_unavailable: 'The editor would not select that text, so nothing was changed. Use Copy.',
+    crosses_format_boundary: 'This change spans formatting or a mention, so Lineleaf can only copy it.',
+    invalid_span: 'This suggestion no longer matches the text. Choose Check now to review the current text.',
+    editor_rejected: 'The editor did not apply the change. Lineleaf is copy-only here. Use Copy.',
+    native_edit_not_confirmed: 'The editor’s text is not what Lineleaf expected. Check your draft; its own undo (Ctrl/⌘ Z) reverses its changes. Use Copy.',
+    editor_reverted: 'The editor reverted the change. Lineleaf is copy-only here. Use Copy.'
+  };
+  // Verified rich editors: the edit goes through the editor's own input pipeline, so its history owns the undo.
+  async function acceptRich(edit) {
+    if (applying || !capture?.editable || composing || !capture.valid()) return;
+    stop(); applying = true;
+    const selected = capture, selectedView = view;
+    view.status('Applying…');
+    let result;
+    try { result = await applyRichEdit(selected, edit, view.range); }
+    catch { result = {status: 'copy', reason: 'native_edit_not_confirmed', changed: true}; }
+    finally { applying = false; }
+    if (capture !== selected || view !== selectedView) return;
+    // The user went to another field while the edit settled: hand off to it and never pull focus back to this editor.
+    const active = deepActive(), here = active === field || field.contains(active) || active === view.host;
+    if (!here && active && active !== document.body && active !== document.documentElement) { drop(); choose(active); return; }
+    if (result.status === 'applied') {
+      // Keep the other suggestions that still point at the same words, moved by the length change.
+      const next = result.capture, delta = edit.after.length - (edit.end - edit.start);
+      edits = edits.filter(x => x !== edit).map(x => x.start >= edit.end ? {...x, start: x.start + delta, end: x.end + delta} : x)
+        .filter(x => (x.end <= edit.start || x.start >= edit.end + delta) && next.text.slice(x.start, x.end) === x.before);
+      // Typing during the edit was not seen as typing (it happened while applying): check the paragraph again after a pause.
+      capture = next; undo = false; copyOnly = false; lastKey = result.typed ? null : keyFor(next); pendingKey = result.typed ? keyFor(next) : null; dirty = result.typed === true;
+      update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
+      if (here) view.hide();
+      queue(); return;
+    }
+    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable', 'focus_moved'].includes(result.reason);
+    update(RICH_FAILURES[result.reason] ?? 'Safe replacement is unavailable. Use Copy.'); if (here) view.open();
+  }
   function accept(edit) {
-    if (!capture || mode !== 'edit' || !eligibleDOM()) return;
+    if (!capture || !eligibleDOM()) return;
+    if (mode !== 'edit') { void acceptRich(edit); return; }
     stop(); applying = true;
     const selected = capture, selectedView = view;
     let result;
@@ -241,13 +286,13 @@ export function mountInline(api) {
   // only from `beforeinput`/`compositionstart`; `input` never overwrites it, or editors that apply the change and also
   // emit `input` would never arm.
   const paragraphKey = () => { try { return keyFor(capturePara()); } catch { return null; } };
-  const idleMessage = () => mode === 'preview'
-    ? 'Lineleaf checks this paragraph after you pause typing and shows suggestions to copy. It never edits this editor. Alt Shift L opens controls.'
-    : 'Lineleaf checks this paragraph after you pause typing. Alt Shift L opens controls.';
+  const idleMessage = () => replaceable()
+    ? 'Lineleaf checks this paragraph after you pause typing. Alt Shift L opens controls.'
+    : 'Lineleaf checks this paragraph after you pause typing and shows suggestions to copy. It never edits this editor. Alt Shift L opens controls.';
   function settle() {
     const ticket = ++settling;
     setTimeout(() => {
-      if (ticket !== settling || mode !== 'preview' || !field) return;
+      if (ticket !== settling || mode !== 'rich' || !field) return;
       const was = before, after = paragraphKey(); before = undefined;
       if (after === was) return; // The editor rejected or ignored the edit: keep any check already armed.
       stop(); capture = null; edits = []; undo = false; copyOnly = false; pendingKey = after; dirty = after !== null;
@@ -256,7 +301,7 @@ export function mountInline(api) {
   }
   function typed(event) {
     const target = eventElement(event);
-    if (applying || !field || mode !== 'preview' || !(target === field || field.contains(target))) return;
+    if (applying || !field || mode !== 'rich' || !(target === field || field.contains(target))) return;
     if (event.type === 'compositionstart') { stop(); capture = null; edits = []; update('Text changed. Checking after a pause.'); }
     // Keep the pre-edit key of the earliest edit that has not settled yet: on a busy page a later rejected keystroke could
     // otherwise overwrite it with the already-changed key and hide the change.
@@ -272,10 +317,10 @@ export function mountInline(api) {
     update(dirty ? 'Text changed. Checking after a pause.' : 'The editor changed. Choose Check now to review the current text.'); queue();
   };
   document.addEventListener('focusin', event => { const target = eventElement(event); if (target !== view?.host) choose(target); }, true);
-  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); }, true);
-  document.addEventListener('beforeinput', event => { if (mode === 'preview' && field && event.isTrusted) typed(event); }, true);
-  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); } }, true);
-  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; if (mode === 'preview' && event.isTrusted) typed(event); else changed(event); } }, true);
+  document.addEventListener('input', event => { if (!field) choose(eventElement(event)); if (mode === 'rich' && event.isTrusted) typed(event); else changed(event); }, true);
+  document.addEventListener('beforeinput', event => { if (mode === 'rich' && field && event.isTrusted) typed(event); }, true);
+  document.addEventListener('compositionstart', event => { const target = eventElement(event); compositions.add(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = true; if (mode === 'rich' && event.isTrusted) typed(event); else changed(event); } }, true);
+  document.addEventListener('compositionend', event => { const target = eventElement(event); compositions.delete(editorOf(target) ?? target); if (field && (target === field || field.contains(target))) { composing = false; if (mode === 'rich' && event.isTrusted) typed(event); else changed(event); } }, true);
   document.addEventListener('keydown', trusted(event => {
     if (event.altKey && event.shiftKey && event.code === 'KeyL' && view) { event.preventDefault(); view.open(); }
   }), true);

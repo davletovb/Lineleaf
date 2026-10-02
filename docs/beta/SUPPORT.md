@@ -9,7 +9,8 @@
 | Textarea/text/search input; simple inline contenteditable | Synthetic edit, caret, formatting, Unicode, stale response and native undo regressions | Actual device/editor checks pending |
 | Gmail, GitHub, LinkedIn, Slack | Synthetic priority-editor policy and safe copy fallback | Authenticated synthetic-draft matrix pending; no real-site replacement claim |
 | Same-origin frames and open shadow roots | Scoped synthetic frame/slot/privacy/geometry regressions | Live editor/device validation pending |
-| Rich editors (Draft.js such as X, Lexical, Slate, ProseMirror, Quill, Gmail, LinkedIn, Slack, Notion) | Explicit preview/Copy; with the automatic opt-in, a copy-only inline preview of the caret paragraph (synthetic fixtures; local runs against the real libraries) | Authenticated real-site check pending; no replacement support |
+| Rich editors in verified families (Draft.js such as X, Lexical, Slate, ProseMirror, Quill) | With the automatic opt-in, inline underlines of the caret paragraph and Accept applied through the editor's own input path; the editor's undo reverses it; the editor becomes copy-only if it rejects or reverts an edit (synthetic fixtures; local runs against the real libraries) | Real X and other live composers, IME and collaboration pending |
+| Other rich editors; Gmail, LinkedIn, Slack, Notion | Explicit preview/Copy; with the automatic opt-in, a copy-only inline preview of the caret paragraph | Authenticated real-site check pending; no replacement support |
 | Google Docs and canvas/code editors | Explicit pasted-text/manual preview and Copy when eligible | No replacement and no automatic checking |
 | Windows, Firefox, Edge, mobile; closed/cross-origin/opaque frames | Outside current acceptance targets | Not advertised |
 

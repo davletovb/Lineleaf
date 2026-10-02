@@ -28,7 +28,7 @@ function whitespaceOf(element) {
 // become '\n'. Collapsible whitespace is reduced the way CSS renders it (one space; none at the start or end of a
 // line), zero-width editor placeholders are skipped and NBSP is normalised to a space so model-supplied context
 // matches. Skipped characters simply have no entry. Nothing here changes the DOM.
-function textMap(root) {
+export function textMap(root) {
   const runs = [], inline = new Map();
   const isInline = element => {
     if (!inline.has(element)) inline.set(element, INLINE.test(getComputedStyle(element).display));
@@ -84,7 +84,7 @@ function textMap(root) {
   return {text, runs};
 }
 
-function locate(runs, index, end) {
+export function locate(runs, index, end) {
   for (const run of runs) {
     if (!run.node) continue;
     const stop = run.start + run.length;
@@ -93,7 +93,7 @@ function locate(runs, index, end) {
   return null;
 }
 
-function caretIndex(map, node, offset) {
+export function caretIndex(map, node, offset) {
   if (node.nodeType === Node.TEXT_NODE) {
     let found = null;
     for (const run of map.runs) if (run.node === node && offset >= run.nodeStart) found = run;
@@ -113,16 +113,26 @@ function caretIndex(map, node, offset) {
 const ids = new WeakMap();
 let counter = 0;
 
-export function captureRichParagraph(host) {
+// `editable` marks a capture from a verified editor family (see richReplacementAllowed): rich-edit.mjs may apply edits to it.
+// Without it the capture is copy-only and this module still writes nothing. `at` re-reads a block it already knows around a
+// text index, whatever the selection is doing; rich-edit.mjs uses it to verify an edit after the user may have moved on.
+export function captureRichParagraph(host, {editable = false, at = null} = {}) {
   if (!host?.isConnected || !embeddingAllowed() || !previewAllowed(host) || host.textContent.length > MAX_BLOCK) throw invalid();
-  const selection = selectionFor(host), focus = selection?.focusNode;
-  if (!focus || !host.contains(focus)) throw invalid();
-  const probe = focus.nodeType === Node.ELEMENT_NODE
-    ? focus.childNodes[selection.focusOffset] ?? focus.childNodes[selection.focusOffset - 1] ?? focus : focus;
-  const block = blockFor(host, probe);
+  let block, probe, selection;
+  if (at) {
+    if (!at.block.isConnected || !host.contains(at.block)) throw invalid();
+    block = at.block;
+  } else {
+    selection = selectionFor(host);
+    const focus = selection?.focusNode;
+    if (!focus || !host.contains(focus)) throw invalid();
+    probe = focus.nodeType === Node.ELEMENT_NODE
+      ? focus.childNodes[selection.focusOffset] ?? focus.childNodes[selection.focusOffset - 1] ?? focus : focus;
+    block = blockFor(host, probe);
+  }
   if (excluded(block) || block.querySelector(EXCLUDED) || block.textContent.length > MAX_BLOCK) throw invalid();
   let map, caret;
-  try { map = textMap(block); caret = caretIndex(map, focus, selection.focusOffset); } catch { throw invalid(); }
+  try { map = textMap(block); caret = at ? Math.max(0, Math.min(at.index, map.text.length)) : caretIndex(map, selection.focusNode, selection.focusOffset); } catch { throw invalid(); }
   const start = map.text.lastIndexOf('\n', Math.max(0, caret - 1)) + 1, next = map.text.indexOf('\n', caret);
   const text = map.text.slice(start, next === -1 ? map.text.length : next);
   if (!validText(text) || !/\p{L}/u.test(text)) throw invalid();
@@ -130,7 +140,7 @@ export function captureRichParagraph(host) {
   const context = contextFor(host), source = map.text;
   const valid = () => host.isConnected && block.isConnected && previewAllowed(host) && !excluded(block) && !block.querySelector(EXCLUDED)
     && contextCurrent(host, context) && textMap(block).text === source;
-  return {preview: true, id: ids.get(block), text, offset: start, snapshot: null, adapter: null, field: host, valid,
+  return {preview: !editable, editable, id: ids.get(block), text, offset: start, snapshot: null, adapter: null, field: host, valid, block, source,
     // Underlines are recomputed from the live nodes each time, so framework re-renders cannot leave detached ranges.
     rects(edit) {
       const visible = visibleEditorRect(host);

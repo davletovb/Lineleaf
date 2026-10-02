@@ -4,8 +4,9 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {panelFor} from './fixtures/panel-driver.mjs';
-// Copy-only inline preview for rich editors. Fixtures mirror the rendered DOM of Draft.js (X/Twitter), Lexical, Slate,
-// ProseMirror, Quill and Gmail-style composers; none of those libraries is loaded.
+// Automatic inline checking in rich editors. Fixtures mirror the rendered DOM of Draft.js (X/Twitter), Lexical, Slate,
+// ProseMirror, Quill and Gmail-style composers; none of those libraries is loaded. Editors in a verified family also get Accept
+// (tests/rich-edit.test.mjs); every other rich editor stays copy-only, which is what the `replaceable: false` rows pin.
 let browser, page, inline;
 before(async () => {
   browser = await chromium.launch({executablePath: process.env.LINELEAF_CHROMIUM_PATH || undefined,
@@ -60,13 +61,13 @@ const close = (a, b, tolerance = 1.5) => Math.abs(a - b) <= tolerance;
 async function press(name) { await inline.button(name).evaluate(el => el.focus()); await page.keyboard.press('Enter'); }
 
 const FAMILIES = [
-  {name: 'Draft.js (X/Twitter)', host: '#draft', needle: 'work.', context: 'He go to work.', expected: 'He go to work.'},
-  {name: 'Lexical', host: '#lexical', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.'},
-  {name: 'Slate', host: '#slate', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.'},
-  {name: 'ProseMirror', host: '#prose', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.'},
-  {name: 'Quill (Slack/LinkedIn)', host: '#quill', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.'},
-  {name: '<br>-separated lines', host: '#brlines', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.'},
-  {name: 'raw newlines in pre-wrap text', host: '#prewrap', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.'}
+  {name: 'Draft.js (X/Twitter)', host: '#draft', needle: 'work.', context: 'He go to work.', expected: 'He go to work.', replaceable: true},
+  {name: 'Lexical', host: '#lexical', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.', replaceable: true},
+  {name: 'Slate', host: '#slate', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.', replaceable: true},
+  {name: 'ProseMirror', host: '#prose', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.', replaceable: true},
+  {name: 'Quill (Slack/LinkedIn)', host: '#quill', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.', replaceable: true},
+  {name: '<br>-separated lines', host: '#brlines', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.', replaceable: false},
+  {name: 'raw newlines in pre-wrap text', host: '#prewrap', needle: 'He go to work.', context: 'He go to work.', expected: 'He go to work.', replaceable: false}
 ];
 for (const family of FAMILIES) {
   test(`${family.name}: automatic check sends only the caret paragraph and previews without touching the editor`, async () => {
@@ -82,8 +83,9 @@ for (const family of FAMILIES) {
     await page.evaluate(host => { window.__records = []; window.__observer = new MutationObserver(r => window.__records.push(...r));
       window.__observer.observe(document.querySelector(host), {subtree: true, childList: true, characterData: true, attributes: true}); }, family.host);
     await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
-    assert.equal(await inline.button('Accept').count(), 0); assert.equal(await inline.button('Undo last edit').count(), 0);
-    assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
+    assert.equal(await inline.button('Accept').count(), family.replaceable ? 1 : 0); assert.equal(await inline.button('Undo last edit').count(), 0);
+    assert.equal(await inline.locator('.note').count(), family.replaceable ? 0 : 1);
+    if (!family.replaceable) assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
     await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
     await press('Copy'); await inline.locator('#status').waitFor(el => el.textContent === 'Suggestion copied.');
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'goes');
@@ -193,17 +195,17 @@ test('IME composition in a rich editor defers the check until the composition en
   await page.keyboard.type(' '); // The synthetic event cannot authorise a check; final trusted typing restarts the window.
   await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000}); assert.equal((await sends()).length, 1);
 });
-test('plain text controls keep Accept while rich editors in the same page get copy-only previews', async () => {
+test('plain text controls keep Accept while unlisted rich editors in the same page get copy-only previews', async () => {
   await load();
   await checked('#textarea', 'work.');
   await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
   assert.equal(await inline.button('Accept').count(), 1); await page.keyboard.press('Escape');
   // The shared ten-second automatic interval applies, so use the explicit check for the second editor.
-  await caretAfter('#prose', 'work.'); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
+  await caretAfter('#brlines', 'work.'); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
   await inline.button('Check now').click(); await inline.locator('.underline').waitFor();
   await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
   assert.equal(await inline.button('Accept').count(), 0); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work. ');
-  assert.equal(await page.locator('#prose').innerHTML(), '<p>Intro paragraph.</p><p>He go to work.<br class="ProseMirror-trailingBreak"></p>');
+  assert.equal(await page.locator('#brlines').innerHTML(), 'First line.<br>He go to work.<br>Third line.');
 });
 test('underlines follow a scrolling ancestor and keep the editor unchanged', async () => {
   await load();
