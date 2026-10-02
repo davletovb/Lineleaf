@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {candidates} from '../../extension/lib/candidates.mjs';
-import {validText, exactKeys, MODES} from '../../extension/lib/policy.mjs';
+import {validText, exactKeys, MODES, REWRITE_MODES} from '../../extension/lib/policy.mjs';
 
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 const fail = () => { throw new Error('INVALID_EVALUATION_DATA'); };
@@ -160,7 +160,7 @@ export function score(corpus, run, {labels = null, judgments = null, acceptance 
   if (judgments && unreviewed.length) reasons.push('INDEPENDENT_OUTPUT_REVIEW_INCOMPLETE');
   if (p.humanPrecision === null || p.humanPrecision < .95) reasons.push('PRECISION_GATE_NOT_MET');
   if (!p.expected || !p.referenceMatches) reasons.push('NO_VERIFIED_ERROR_DETECTION');
-  if (['clearer', 'shorter', 'formal', 'friendly'].some(mode => !corpus.cases.some(c => c.mode === mode))
+  if (REWRITE_MODES.some(mode => !corpus.cases.some(c => c.mode === mode))
       || metrics.style.humanApproved !== metrics.style.cases) reasons.push('REWRITE_REVIEW_GATE_NOT_MET');
   if (metrics.protectedViolations || metrics.meaningViolations) reasons.push('MEANING_PRESERVATION_GATE_NOT_MET');
   if (metrics.explanationErrors) reasons.push('EXPLANATION_REVIEW_GATE_NOT_MET');

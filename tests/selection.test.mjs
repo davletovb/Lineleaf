@@ -123,6 +123,22 @@ test('bundled panel exchanges a complete check/result with the production worker
   await panel.button('Undo last edit').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
   assert.equal(await page.evaluate(() => JSON.stringify(fixture.worker.data).includes('He go')), false);
 });
+test('the panel offers Improve it and Paraphrase through the production worker, flags silent changes and reports "no change"', async () => {
+  await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
+  await page.locator('#textarea').fill('Maya paid $1,250 on Monday.');
+  const modes = await open('textarea', 0, 27).then(() => panel.locator('#mode').evaluate(el => [...el.options].map(option => option.value)));
+  assert.deepEqual(modes, ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
+  await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Maya settled $2,500 on Monday.'}); });
+  await panel.locator('#mode').selectOption('paraphrase'); await check();
+  assert.equal(await panel.locator('.category').textContent(), 'Optional style');
+  assert.match(await panel.locator('.explanation').evaluate((_, __, all) => all.map(el => el.textContent).join('|')), /Check this version: it changes a number or date\./);
+  const sends = await page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+  assert.match(sends.at(-1).params.system, /different words/); assert.equal(await page.locator('#textarea').inputValue(), 'Maya paid $1,250 on Monday.');
+  await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Maya paid $1,250 on Monday.'}); });
+  await panel.locator('#mode').selectOption('improve'); await panel.button('Check selection').click();
+  await panel.locator('#status').waitFor(el => /No change suggested/.test(el.textContent));
+  assert.equal(await panel.button('Accept').count(), 0);
+});
 test('typing and ABA changes cancel work and discard a late response', async () => {
   await page.evaluate(() => { fixture.hold = true; }); await open();
   await panel.button('Check selection').click();

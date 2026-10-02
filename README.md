@@ -7,7 +7,7 @@ Lineleaf is a browser writing assistant designed to help with grammar, spelling,
 ## Planned experience
 
 - Inline corrections with brief explanations.
-- Selected-text rewrites for clarity, concision, or a requested tone.
+- Rewrites of a selection or paragraph: improve it, paraphrase, or change clarity, length or tone.
 - Explicit acceptance, dismissal, and undo.
 - A personal dictionary, English variants, and controls for each site.
 - Conservative edits that preserve your intent and authorship.

@@ -16,3 +16,9 @@ button:disabled { opacity: .5; cursor: default; } .primary { background: #285c3f
 #status { overflow-wrap: anywhere; } textarea { width: 100%; font: inherit; min-height: 80px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .note { margin: 10px 0 0; padding: 7px 9px; border-left: 3px solid #a6c395; background: #f0f5ed; font-size: 12px; color: #3f5646; }
+.rewrite { margin-top: 12px; padding-top: 10px; border-top: 1px solid #e1e8df; } .rewrite .muted { margin: 0; }
+.small { padding: 4px 9px; font-size: 12px; }
+.label { margin: 10px 0 2px; font-size: 11px; font-weight: 700; color: #567c45; }
+.text { margin: 0; max-height: 9em; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 6px 8px; border-radius: 8px; background: #f0f3ec; }
+.suggested { background: #e7f1e2; color: #1f4a32; font-weight: 600; }
+.warn { border-left-color: #c28a1d; background: #fbf2dc; color: #5f4510; }

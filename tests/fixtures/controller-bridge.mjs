@@ -9,13 +9,18 @@ worker.api.scripting.executeScript = async ({target}) => (target.documentIds ?? 
 worker.api.tabs.sendMessage = async (_, message) => fixture.runtimeMessages.emit(message, {id: chrome.runtime.id});
 installController(worker.api);
 chrome.runtime.sendMessage = message => new Promise(resolve => worker.api.runtime.onMessage.emit(message, {...worker.sender, url: location.href}, resolve));
+// One-shot faults for tests: the next connection cannot be made (`connect`), or the worker goes away after the next explicit
+// rewrite request arrives (`drop`).
+fixture.faults = {connect: false, drop: false};
 chrome.runtime.connect = () => {
+  if (fixture.faults.connect) { fixture.faults.connect = false; throw new Error('worker unavailable'); }
   const server = worker.connect({url: location.href}), client = {onMessage: new Event(), onDisconnect: new Event()};
   server.postMessage = message => queueMicrotask(() => client.onMessage.emit(structuredClone(message)));
   server.onDisconnect.addListener(() => client.onDisconnect.emit());
   client.disconnect = () => server.disconnect();
   client.postMessage = message => {
     if (message.type === 'start') fixture.checks.push(structuredClone(message));
+    if (message.type === 'start' && fixture.faults.drop && message.mode !== 'proofread') { fixture.faults.drop = false; queueMicrotask(() => server.disconnect()); return; }
     const copy = structuredClone(message); queueMicrotask(() => server.onMessage.emit(copy));
   };
   return client;
