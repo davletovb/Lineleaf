@@ -1,5 +1,19 @@
 # C-01–C-05 inline prototype evidence
 
+## Rich-editor in-place Accept
+
+Code revision: [`173478d4c9a308f884f9244142441507541b2964`](https://github.com/davletovb/Lineleaf/commit/173478d4c9a308f884f9244142441507541b2964), in [PR #7](https://github.com/davletovb/Lineleaf/pull/7). [CI run 36998759516](https://github.com/davletovb/Lineleaf/actions/runs/36998759516) passed all three jobs. `npm test` includes `tests/rich.test.mjs` and `tests/rich-edit.test.mjs` (134 browser tests locally).
+
+| Job | ID | Result |
+| --- | --- | --- |
+| Linux | `110815758852` | Passed |
+| macOS | `110815756889` | Passed on re-run (attempt 2) |
+| Shared companion | `110815758371` | Passed |
+
+The first macOS attempt failed in the Python step with `test_investigations.ConnectionTests.test_fixture_benchmark_labels_and_no_draft_content_in_report` (the cancellation probe in `tools/benchmark_provider.py` sends a cancel 0.1 s after a request and expected a `stopped` terminal). The change touches no Python file, the same test passed on the previous commit's macOS job, and `npm test` stops at its first failing step, so that attempt did not reach the browser suite. The re-run executed it and passed. The timing race in that probe is unfixed and is outside this change.
+
+The real Draft.js, Slate, Quill, ProseMirror and Lexical runs behind the claims in the inline guide were local and uncommitted. Real X and other live composers, IME, collaboration and screen readers are not verified; C-02, D-01 and D-03 remain IMPLEMENTED — VERIFY.
+
 ## Rich-editor copy-only preview
 
 Code revision: [`7b80ba54b4d473f0c7b7e5872dbb0e984e458c5a`](https://github.com/davletovb/Lineleaf/commit/7b80ba54b4d473f0c7b7e5872dbb0e984e458c5a), in [PR #6](https://github.com/davletovb/Lineleaf/pull/6). [CI run 36969011135](https://github.com/davletovb/Lineleaf/actions/runs/36969011135) passed all three jobs. `npm test` includes `tests/rich.test.mjs`.
