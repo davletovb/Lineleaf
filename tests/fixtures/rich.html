@@ -142,13 +142,14 @@ window.modelDraft = modelEditor(document.getElementById('model-draft'), 'draft',
   const caretAt = index => { if (!text.isConnected) return; const range = document.createRange(); range.setStart(text, Math.min(index, text.data.length)); range.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(range); };
   host.addEventListener('input', () => { model.text = block.textContent; render(); }); // a native edit is read back into the model
   host.addEventListener('focus', () => caretAt(0)); // like Draft.js, it puts the caret back at its own start when it regains focus
+  host.addEventListener('beforeinput', event => { if (ownedDraft.refuseDeletes > 0 && event.inputType === 'deleteContentBackward') { ownedDraft.refuseDeletes--; event.preventDefault(); } }); // a test can make it refuse deletions
   host.addEventListener('keydown', event => { // Backspace is the editor's own: it changes the model, then updates its node
     if (event.key !== 'Backspace') return;
     const s = getSelection(); if (!s.rangeCount || !block.contains(s.anchorNode)) return;
     const a = offset(s.anchorNode, s.anchorOffset), f = offset(s.focusNode, s.focusOffset), from = Math.min(a, f), to = Math.max(a, f), start = from === to ? Math.max(0, from - 1) : from;
     event.preventDefault(); model.text = model.text.slice(0, start) + model.text.slice(to); render(); caretAt(start);
   });
-  window.ownedDraft = {model, leaf, alive: () => text.isConnected && leaf.isConnected};
+  window.ownedDraft = {model, leaf, refuseDeletes: 0, alive: () => text.isConnected && leaf.isConnected};
 }
 // An editor that cancels every edit (a maxlength or read-only state), and one that accepts the edit and then re-renders the old text.
 // A third rebuilds the edited paragraph with the replacement intact but changes the text next to it.

@@ -385,6 +385,7 @@ export function mountInline(api) {
     selection_unavailable: 'The editor would not select that text, so nothing was changed. Use Copy.',
     crosses_format_boundary: 'This change spans formatting or a mention, so Lineleaf can only copy it.',
     invalid_span: 'This suggestion no longer matches the text. Choose Check now to review the current text.',
+    spacing_collapses: 'This text has spacing the editor would collapse, so Lineleaf can only copy it. Use Copy.',
     editor_rejected: 'The editor did not apply the change. Lineleaf is copy-only here. Use Copy.',
     native_edit_not_confirmed: 'The editor’s text is not what Lineleaf expected. Check your draft; its own undo (Ctrl/⌘ Z) reverses its changes. Use Copy.',
     editor_reverted: 'The editor reverted the change. Lineleaf is copy-only here. Use Copy.'
@@ -417,7 +418,7 @@ export function mountInline(api) {
       if (here) view.hide();
       queue(); return;
     }
-    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable', 'focus_moved'].includes(result.reason);
+    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable', 'focus_moved', 'spacing_collapses'].includes(result.reason);
     update(RICH_FAILURES[result.reason] ?? 'Safe replacement is unavailable. Use Copy.'); if (here) view.open();
   }
   function accept(edit) {

@@ -171,6 +171,25 @@ for (const [how, prepare] of [['the caret paragraph', () => caretAfter('#owned-d
   });
 }
 
+// A whole-text rewrite is two edits. If the second cannot happen the draft must not be left as original + rewrite.
+test('a rewrite with spacing the editor would collapse is refused before anything changes', async () => {
+  await load(); await rewriteAnswer('He goes to work  and they were late.'); // two spaces
+  await page.evaluate(() => { ownedDraft.leaf.style.whiteSpace = 'normal'; }); // this editor collapses them: it renders (and the text map reads) one
+  await caretAfter('#owned-draft', 'late.'); await openCard(); await press('Paraphrase'); await suggested();
+  await press('Replace'); await inline.locator('#status').waitFor(el => /only copy/.test(el.textContent));
+  assert.equal(await text('#owned-draft'), 'He go to work and they was late.'); assert.equal(await page.evaluate(() => ownedDraft.model.text), 'He go to work and they was late.');
+  assert.equal(await page.evaluate(() => ownedDraft.alive()), true);
+  assert.equal(await inline.button('Copy').count(), 1); // The suggestion can still be copied.
+});
+test('when the second step of a whole-text rewrite is refused, the first is taken back out', async () => {
+  await load(); await rewriteAnswer('He goes to work and they were late.');
+  await caretAfter('#owned-draft', 'late.'); await openCard(); await press('Paraphrase'); await suggested();
+  await page.evaluate(() => { ownedDraft.refuseDeletes = 1; }); // the deletion of the old text is refused once; taking the new text back out is not
+  await press('Replace'); await inline.locator('#status').waitFor(el => /copy-only|did not apply/.test(el.textContent));
+  assert.equal(await text('#owned-draft'), 'He go to work and they was late.'); assert.equal(await page.evaluate(() => ownedDraft.model.text), 'He go to work and they was late.');
+  assert.equal(await page.evaluate(() => ownedDraft.alive()), true);
+});
+
 test('a Slate-like editor that only trusts beforeinput takes a whole-paragraph rewrite itself', async () => {
   await load(); await rewriteAnswer('He goes to work.');
   await caretAfter('#model-slate', 'work.'); await openCard(); await press('Improve it'); await suggested();

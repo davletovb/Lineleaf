@@ -13,7 +13,7 @@
 // `span[data-text]` leaf React owns); the editor's model keeps working but no longer reaches what is on screen, so the text can
 // be neither typed over nor deleted. Keeping the node non-empty throughout leaves the editor's own nodes in place.
 import {deepActive, eventElement, selectionFor, richReplacementAllowed, markRichUnsafe} from './editor-context.mjs';
-import {captureRichParagraph, textMap, locate, caretIndex} from './rich-text.mjs';
+import {captureRichParagraph, textMap, locate, caretIndex, whitespaceOf} from './rich-text.mjs';
 import {validSpan} from '../../prototypes/editor/editor-adapter.mjs';
 
 const STABLE_MS = 250;
@@ -139,24 +139,50 @@ function deliver(host, user, inputType, data) {
   } catch { return false; } finally { user.issuing = false; }
 }
 
+const same = (a, b) => a.replace(/\u00a0/g, ' ') === b;
+
+// Text the page's text map would not read back as typed: spacing a collapsing editor renders as one space (or drops at the edges of a
+// line), tabs and line breaks, and characters the map skips or normalises. Such an edit could not be verified, so it is refused
+// before anything changes.
+function readsBackAsTyped(node, text) {
+  if (/[\u00a0\u200b\ufeff]/.test(text)) return false;
+  return whitespaceOf(node.parentElement).spaces || !/\s\s|^\s|\s$|[\t\r\f\n]/.test(text);
+}
+
+// The paragraph that holds the edit now: the block it was in, or the one the caret is in when the editor re-rendered.
+function paragraphOf(host, capture, index) {
+  for (const attempt of [() => captureRichParagraph(host, {editable: true, at: {block: capture.block, index}}), () => captureRichParagraph(host, {editable: true})]) {
+    try { return attempt().block; } catch { /* try the paragraph the caret is in */ }
+  }
+  return null;
+}
+
+// Where the old text is now, as one range inside one text node, or null when it is not there as captured.
+function oldText(host, capture, edit) {
+  const block = paragraphOf(host, capture, capture.offset + edit.end); if (!block) return null;
+  const map = textMap(block), a = locate(map.runs, capture.offset + edit.start, false), b = locate(map.runs, capture.offset + edit.end, true);
+  return a && b && a[0] === b[0] && same(a[0].data.slice(a[1], b[1]), edit.before) ? {node: a[0], from: a[1], to: b[1]} : null;
+}
+const followedBy = (range, text) => same(range.node.data.slice(range.to, range.to + text.length), text);
+const takeOut = async (host, user, node, from, to) => node.isConnected && await select(host, node, from, node, to) && deliver(host, user, 'deleteContentBackward', null);
+
 // Replaces all the text of one node without ever emptying it: insert after the old text, then select the old text and delete it.
-// Returns true when both steps were issued, or a reason string when it could not start (nothing has changed then).
-async function replaceWhole(host, user, capture, edit, found) {
+// Returns true when both steps took and the paragraph reads as expected, a reason string when it could not start (nothing has changed
+// then), or false when it did not complete. After a first step that has taken, anything unexpected puts the draft back by taking the
+// inserted text out again, so the draft is not left as old text followed by new text.
+async function replaceWhole(host, user, capture, edit, found, expected) {
   if (!(await select(host, found.node, found.to, found.node, found.to)) || !capture.valid()) return 'selection_unavailable';
   if (!deliver(host, user, 'insertText', edit.after)) return false;
   await tick();
-  // The editor may have re-rendered while it took the insertion: find the old text again in the paragraph that holds it.
-  let block = null;
-  for (const attempt of [() => captureRichParagraph(host, {editable: true, at: {block: capture.block, index: capture.offset + edit.end}}), () => captureRichParagraph(host, {editable: true})]) {
-    try { block = attempt().block; break; } catch { /* try the paragraph the caret is in */ }
+  // The old text should still be where it was, with the new text right after it. The editor may have re-rendered meanwhile.
+  const old = oldText(host, capture, edit);
+  if (old && followedBy(old, edit.after) && await takeOut(host, user, old.node, old.from, old.to)) {
+    await tick();
+    if (check(host, capture, edit, expected, user.typed)) return true;
   }
-  if (!block) return false;
-  const map = textMap(block);
-  const a = locate(map.runs, capture.offset + edit.start, false), b = locate(map.runs, capture.offset + edit.end, true);
-  if (map.text.length !== capture.source.length + edit.after.length || !a || !b || a[0] !== b[0] || a[0].data.slice(a[1], b[1]).replace(/\u00a0/g, ' ') !== edit.before) return false;
-  // The capture is stale now by design (the paragraph holds both texts), so only the selection is required to hold.
-  if (!(await select(host, a[0], a[1], b[0], b[1]))) return false;
-  return deliver(host, user, 'deleteContentBackward', null);
+  const again = oldText(host, capture, edit); // Still there means the second step did not happen: take the first back out.
+  if (again && followedBy(again, edit.after)) { await takeOut(host, user, again.node, again.to, again.to + edit.after.length); await tick(); }
+  return false;
 }
 
 // Applies `edit` (relative to capture.text). Returns {status: 'applied', capture, typed, moved, steps} with a fresh capture of the same
@@ -187,10 +213,11 @@ async function apply(capture, edit, remembered, user) {
   }
   if (!found) return copy('selection_unavailable');
   const remove = edit.after === '', expected = capture.text.slice(0, edit.start) + edit.after + capture.text.slice(edit.end);
+  if (!remove && !readsBackAsTyped(found.node, edit.after)) return copy('spacing_collapses');
   const whole = !remove && found.from === 0 && found.to === found.node.data.length;
   let ok;
   if (whole) {
-    const done = await replaceWhole(host, user, capture, edit, found);
+    const done = await replaceWhole(host, user, capture, edit, found, expected);
     if (typeof done === 'string') return copy(done);
     ok = done;
   } else ok = deliver(host, user, remove ? 'deleteContentBackward' : 'insertText', remove ? null : edit.after);
