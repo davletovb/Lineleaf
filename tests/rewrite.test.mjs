@@ -29,6 +29,7 @@ const requests = () => page.evaluate(() => fixture.checks.map(x => ({mode: x.mod
 async function press(name) { await inline.button(name).evaluate(el => el.focus()); await page.keyboard.press('Enter'); }
 const openCard = async () => { await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor(); };
 const suggested = () => inline.locator('.suggested').waitFor();
+const label = () => inline.locator('.badge').evaluate(el => el.getAttribute('aria-label'));
 const text = host => page.locator(host).innerText().then(value => value.replace(/ /g, ' '));
 // The paragraph under test, without the spacing and trailing break an editor's markup adds to innerText.
 const line = host => text(host).then(value => value.split('\n').find(row => row.startsWith('He ')));
@@ -149,6 +150,26 @@ test('a verified rich editor replaces the rewritten paragraph or selection throu
   await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
   assert.equal(await line('#prose'), 'He goes to work.'); assert.ok((await text('#prose')).startsWith('Intro paragraph.'));
 });
+
+// X's composer is Draft.js: React owns the text leaf and later updates only that node. Replacing all of a leaf's text in one command
+// makes the browser remove it, and the editor then edits a model the page no longer shows (text that cannot be typed over or deleted).
+for (const [how, prepare] of [['the caret paragraph', () => caretAfter('#owned-draft', 'late.')], ['a select-all selection', async () => { await placeSelection('#owned-draft', 'He go to work and they was late.'); await inline.locator('.badge').waitFor(); }]]) {
+  test(`a whole-text rewrite (${how}) leaves an editor's own text node in place, so typing and deleting still reach the page`, async () => {
+    await load(); await rewriteAnswer('He goes to work and they were late.');
+    await prepare(); await openCard(); await press('Paraphrase'); await suggested();
+    await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
+    assert.match(await label(), /two presses/); // The edit is two steps in the editor's history.
+    const shown = () => text('#owned-draft'), model = () => page.evaluate(() => ownedDraft.model.text);
+    assert.equal(await shown(), 'He goes to work and they were late.'); assert.equal(await model(), await shown());
+    assert.equal(await page.evaluate(() => ownedDraft.alive()), true, "the editor's leaf is still in the page");
+    if (how === 'the caret paragraph') {
+      await page.keyboard.type('!'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
+      assert.equal(await shown(), 'He goes to work and they were late'); assert.equal(await model(), await shown()); // Typing and deleting land where the caret was.
+    }
+    await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace');
+    assert.equal(await shown(), ''); assert.equal(await model(), ''); // Deleting everything empties the page as well as the model.
+  });
+}
 
 test('a Slate-like editor that only trusts beforeinput takes a whole-paragraph rewrite itself', async () => {
   await load(); await rewriteAnswer('He goes to work.');

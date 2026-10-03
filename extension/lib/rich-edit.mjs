@@ -7,6 +7,11 @@
 // ownership of it and update their model. If nobody cancels it, the same edit runs as a native `insertText`/`delete` command,
 // which Draft.js, ProseMirror, Quill and Lexical (for insertions) reconcile from the DOM. A native command alone leaves Slate's
 // model unchanged while its DOM shows the new text, so the offer comes first.
+//
+// An edit that replaces the whole text of a node is delivered as two edits: the new text is inserted after the old, then the old
+// is deleted. Replacing everything in one command makes the browser remove the emptied node (with Draft.js, X's composer, the
+// `span[data-text]` leaf React owns); the editor's model keeps working but no longer reaches what is on screen, so the text can
+// be neither typed over nor deleted. Keeping the node non-empty throughout leaves the editor's own nodes in place.
 import {deepActive, eventElement, selectionFor, richReplacementAllowed, markRichUnsafe} from './editor-context.mjs';
 import {captureRichParagraph, textMap, locate, caretIndex} from './rich-text.mjs';
 import {validSpan} from '../../prototypes/editor/editor-adapter.mjs';
@@ -51,15 +56,16 @@ async function select(host, anchor, anchorOffset, focus, focusOffset) {
   return held();
 }
 
-// Where the user's selection sits in the block's text, from the live selection or, when the editor cleared it on blur
-// (Draft.js does), the range the overlay remembered.
+// Where the user's caret sits in the block's text. The range the overlay remembered comes first: it was taken before this code
+// moved focus, whereas the live selection has by then been reset by the focus change (to the start of the text in Draft.js).
+// The live selection is the fallback, for when nothing usable was remembered.
 function carets(capture, remembered) {
   const map = textMap(capture.block), selection = selectionFor(capture.field), inside = node => node && capture.block.contains(node);
   let anchor, focus;
-  if (selection?.rangeCount && inside(selection.anchorNode) && inside(selection.focusNode)) {
-    anchor = [selection.anchorNode, selection.anchorOffset]; focus = [selection.focusNode, selection.focusOffset];
-  } else if (remembered && inside(remembered.startContainer) && inside(remembered.endContainer)) {
+  if (remembered && inside(remembered.startContainer) && inside(remembered.endContainer)) {
     anchor = [remembered.startContainer, remembered.startOffset]; focus = [remembered.endContainer, remembered.endOffset];
+  } else if (selection?.rangeCount && inside(selection.anchorNode) && inside(selection.focusNode)) {
+    anchor = [selection.anchorNode, selection.anchorOffset]; focus = [selection.focusNode, selection.focusOffset];
   } else return null;
   try { return {anchor: caretIndex(map, ...anchor), focus: caretIndex(map, ...focus)}; } catch { return null; }
 }
@@ -123,7 +129,37 @@ function watchUser(host) {
   return state;
 }
 
-// Applies `edit` (relative to capture.text). Returns {status: 'applied', capture, typed, moved} with a fresh capture of the same
+// Offers one edit as a cancelable `beforeinput`, then runs it as a native command if nobody took it. Our own events are flagged
+// as ours so they are not mistaken for the user's typing.
+function deliver(host, user, inputType, data) {
+  user.issuing = true;
+  try {
+    const taken = !host.dispatchEvent(new InputEvent('beforeinput', {bubbles: true, cancelable: true, composed: true, inputType, data}));
+    return taken || (inputType === 'insertText' ? document.execCommand('insertText', false, data) : document.execCommand('delete'));
+  } catch { return false; } finally { user.issuing = false; }
+}
+
+// Replaces all the text of one node without ever emptying it: insert after the old text, then select the old text and delete it.
+// Returns true when both steps were issued, or a reason string when it could not start (nothing has changed then).
+async function replaceWhole(host, user, capture, edit, found) {
+  if (!(await select(host, found.node, found.to, found.node, found.to)) || !capture.valid()) return 'selection_unavailable';
+  if (!deliver(host, user, 'insertText', edit.after)) return false;
+  await tick();
+  // The editor may have re-rendered while it took the insertion: find the old text again in the paragraph that holds it.
+  let block = null;
+  for (const attempt of [() => captureRichParagraph(host, {editable: true, at: {block: capture.block, index: capture.offset + edit.end}}), () => captureRichParagraph(host, {editable: true})]) {
+    try { block = attempt().block; break; } catch { /* try the paragraph the caret is in */ }
+  }
+  if (!block) return false;
+  const map = textMap(block);
+  const a = locate(map.runs, capture.offset + edit.start, false), b = locate(map.runs, capture.offset + edit.end, true);
+  if (map.text.length !== capture.source.length + edit.after.length || !a || !b || a[0] !== b[0] || a[0].data.slice(a[1], b[1]).replace(/\u00a0/g, ' ') !== edit.before) return false;
+  // The capture is stale now by design (the paragraph holds both texts), so only the selection is required to hold.
+  if (!(await select(host, a[0], a[1], b[0], b[1]))) return false;
+  return deliver(host, user, 'deleteContentBackward', null);
+}
+
+// Applies `edit` (relative to capture.text). Returns {status: 'applied', capture, typed, moved, steps} with a fresh capture of the same
 // paragraph, or {status: 'copy', reason, changed}. `changed` is true when the paragraph no longer matches what it was.
 // `typed`: the user typed while the edit settled. `moved`: focus is no longer in the editor, so nothing may pull it back.
 export async function applyRichEdit(capture, edit, remembered = null) {
@@ -151,13 +187,13 @@ async function apply(capture, edit, remembered, user) {
   }
   if (!found) return copy('selection_unavailable');
   const remove = edit.after === '', expected = capture.text.slice(0, edit.start) + edit.after + capture.text.slice(edit.end);
-  let handled = false, ok = false;
-  user.issuing = true;
-  try {
-    handled = !host.dispatchEvent(new InputEvent('beforeinput', {bubbles: true, cancelable: true, composed: true,
-      inputType: remove ? 'deleteContentBackward' : 'insertText', data: remove ? null : edit.after}));
-    ok = handled || (remove ? document.execCommand('delete') : document.execCommand('insertText', false, edit.after));
-  } catch { ok = false; } finally { user.issuing = false; }
+  const whole = !remove && found.from === 0 && found.to === found.node.data.length;
+  let ok;
+  if (whole) {
+    const done = await replaceWhole(host, user, capture, edit, found);
+    if (typeof done === 'string') return copy(done);
+    ok = done;
+  } else ok = deliver(host, user, remove ? 'deleteContentBackward' : 'insertText', remove ? null : edit.after);
   await tick();
   let fresh = ok ? check(host, capture, edit, expected, user.typed) : null;
   if (!fresh) return failed(host, capture, edit);
@@ -166,5 +202,5 @@ async function apply(capture, edit, remembered, user) {
   // Editors that own their state can re-render the old text a moment later.
   await wait(STABLE_MS);
   fresh = check(host, capture, edit, expected, user.typed);
-  return fresh ? {status: 'applied', capture: fresh, typed: user.typed, moved: !focusedOn(host)} : failed(host, capture, edit, 'editor_reverted');
+  return fresh ? {status: 'applied', capture: fresh, typed: user.typed, moved: !focusedOn(host), steps: whole ? 2 : 1} : failed(host, capture, edit, 'editor_reverted');
 }

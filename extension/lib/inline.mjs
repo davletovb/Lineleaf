@@ -413,7 +413,7 @@ export function mountInline(api) {
       // The automatic check reads the whole caret paragraph, so its key (not the key of a rewritten selection) is what must match.
       held = null; capture = next; undo = false; copyOnly = false; lastKey = recheck ? null : keyFor(next); pendingKey = recheck ? paragraphKey() : null; dirty = recheck;
       if (clarityDue) clarityFor = keyFor(next);
-      update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
+      update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo${result.steps === 2 ? ' (it takes two presses here)' : ''}.`);
       if (here) view.hide();
       queue(); return;
     }
