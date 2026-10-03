@@ -166,7 +166,7 @@ for (const [how, prepare] of [['the caret paragraph', () => caretAfter('#owned-d
       await page.keyboard.type('!'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
       assert.equal(await shown(), 'He goes to work and they were late'); assert.equal(await model(), await shown()); // Typing and deleting land where the caret was.
     }
-    await page.keyboard.press('Control+a'); await page.keyboard.press('Backspace');
+    await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('Backspace'); // Select all is Cmd+A on macOS, where Ctrl+A moves to the line start.
     assert.equal(await shown(), ''); assert.equal(await model(), ''); // Deleting everything empties the page as well as the model.
   });
 }
