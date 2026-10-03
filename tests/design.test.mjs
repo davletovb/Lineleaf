@@ -108,6 +108,10 @@ test('settings: every control is named, the side navigation follows the section,
   await page.waitForFunction(() => document.querySelector('.nav a[aria-current="true"]')?.textContent === 'Privacy & data');
   assert.equal(await page.getByRole('button', {name: 'Disable https://x.com'}).count(), 1);
   const bar = await page.locator('.savebar').boundingBox(); assert.equal(Math.round(bar.y + bar.height), 700); // Save stays in reach.
+  // The Save bar never covers the end of the page: something added after it (the installed-extension tests add a button there) stays clickable.
+  await page.evaluate(() => { const probe = document.createElement('button'); probe.textContent = 'End of page probe'; probe.onclick = () => { window.probed = true; }; document.body.append(probe); });
+  await page.getByRole('button', {name: 'End of page probe'}).click(); assert.equal(await page.evaluate(() => window.probed), true);
+  await page.evaluate(() => scrollTo(0, 0));
   assert.equal(await page.locator('#clarity').isDisabled(), true); await page.locator('#automatic').check(); assert.equal(await page.locator('#clarity').isDisabled(), false);
   await page.getByRole('button', {name: 'Check Seatline'}).click(); await page.waitForFunction(() => /Codex: available/.test(document.querySelector('#status').textContent));
   await page.setViewportSize({width: 420, height: 800});

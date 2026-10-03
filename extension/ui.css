@@ -44,7 +44,7 @@ button.wide { width: 100%; min-height: 40px; font-size: 14px; }
 
 /* ---------- Settings ---------- */
 body.settings { background: var(--ll-surface); }
-.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; max-width: 980px; margin: 0 auto; padding: 40px 24px 120px; }
+.shell { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; max-width: 980px; margin: 0 auto; padding: 40px 24px; }
 .side { position: sticky; top: 40px; align-self: start; display: flex; flex-direction: column; gap: 24px; }
 .side .brand h1 { font-size: 20px; }
 .nav { display: flex; flex-direction: column; gap: 2px; }
@@ -73,14 +73,15 @@ body.settings { background: var(--ll-surface); }
 .actions-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 button.danger { color: var(--ll-fix-ink); border-color: var(--ll-fix); }
 button.danger:hover:not(:disabled) { background: var(--ll-fix-soft); border-color: var(--ll-fix-ink); }
-.savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; border-top: 1px solid var(--ll-line); background: var(--ll-bg); box-shadow: 0 -4px 16px rgba(20, 35, 27, .06); }
+/* In the page flow and pinned to the bottom of the window while there is more to scroll, so it never covers the end of the page. */
+.savebar { position: sticky; bottom: 0; z-index: 5; border-top: 1px solid var(--ll-line); background: var(--ll-bg); box-shadow: 0 -4px 16px rgba(20, 35, 27, .06); }
 .savebar > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 980px; margin: 0 auto; padding: 12px 24px; }
 .savebar #status { flex: 1; margin: 0; font-size: 13px; }
 .savebar #status:empty { display: block; }
 .savebar #status:empty::before { content: "Changes to preferences are saved when you press Save."; color: var(--ll-ink-3); }
 
 @media (max-width: 760px) {
-  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px 16px 120px; }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px 16px; }
   .side { position: static; }
   .nav { flex-direction: row; flex-wrap: wrap; }
   .card-section { padding: 18px; }
