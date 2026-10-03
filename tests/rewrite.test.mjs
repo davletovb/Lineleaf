@@ -29,6 +29,7 @@ const requests = () => page.evaluate(() => fixture.checks.map(x => ({mode: x.mod
 async function press(name) { await inline.button(name).evaluate(el => el.focus()); await page.keyboard.press('Enter'); }
 const openCard = async () => { await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor(); };
 const suggested = () => inline.locator('.suggested').waitFor();
+const label = () => inline.locator('.badge').evaluate(el => el.getAttribute('aria-label'));
 const text = host => page.locator(host).innerText().then(value => value.replace(/ /g, ' '));
 // The paragraph under test, without the spacing and trailing break an editor's markup adds to innerText.
 const line = host => text(host).then(value => value.split('\n').find(row => row.startsWith('He ')));
@@ -148,6 +149,57 @@ test('a verified rich editor replaces the rewritten paragraph or selection throu
   assert.deepEqual((await requests()).at(-1), {mode: 'paraphrase', kind: 'manual', text: 'go to work'});
   await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
   assert.equal(await line('#prose'), 'He goes to work.'); assert.ok((await text('#prose')).startsWith('Intro paragraph.'));
+});
+
+// X's composer is Draft.js: React owns the text leaf and later updates only that node. Replacing all of a leaf's text in one command
+// makes the browser remove it, and the editor then edits a model the page no longer shows (text that cannot be typed over or deleted).
+for (const [how, prepare] of [['the caret paragraph', () => caretAfter('#owned-draft', 'late.')], ['a select-all selection', async () => { await placeSelection('#owned-draft', 'He go to work and they was late.'); await inline.locator('.badge').waitFor(); }]]) {
+  test(`a whole-text rewrite (${how}) leaves an editor's own text node in place, so typing and deleting still reach the page`, async () => {
+    await load(); await rewriteAnswer('He goes to work and they were late.');
+    await prepare(); await openCard(); await press('Paraphrase'); await suggested();
+    await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
+    assert.match(await label(), /two presses/); // The edit is two steps in the editor's history.
+    const shown = () => text('#owned-draft'), model = () => page.evaluate(() => ownedDraft.model.text);
+    assert.equal(await shown(), 'He goes to work and they were late.'); assert.equal(await model(), await shown());
+    assert.equal(await page.evaluate(() => ownedDraft.alive()), true, "the editor's leaf is still in the page");
+    if (how === 'the caret paragraph') {
+      await page.keyboard.type('!'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
+      assert.equal(await shown(), 'He goes to work and they were late'); assert.equal(await model(), await shown()); // Typing and deleting land where the caret was.
+    }
+    await page.keyboard.press('ControlOrMeta+a'); await page.keyboard.press('Backspace'); // Select all is Cmd+A on macOS, where Ctrl+A moves to the line start.
+    assert.equal(await shown(), ''); assert.equal(await model(), ''); // Deleting everything empties the page as well as the model.
+  });
+}
+
+// A whole-text rewrite is two edits. If the second cannot happen the draft must not be left as original + rewrite.
+test('a rewrite with spacing the editor would collapse is refused before anything changes', async () => {
+  await load(); await rewriteAnswer('He goes to work  and they were late.'); // two spaces
+  await page.evaluate(() => { ownedDraft.leaf.style.whiteSpace = 'normal'; }); // this editor collapses them: it renders (and the text map reads) one
+  await caretAfter('#owned-draft', 'late.'); await openCard(); await press('Paraphrase'); await suggested();
+  await press('Replace'); await inline.locator('#status').waitFor(el => /only copy/.test(el.textContent));
+  assert.equal(await text('#owned-draft'), 'He go to work and they was late.'); assert.equal(await page.evaluate(() => ownedDraft.model.text), 'He go to work and they was late.');
+  assert.equal(await page.evaluate(() => ownedDraft.alive()), true);
+  assert.equal(await inline.button('Copy').count(), 1); // The suggestion can still be copied.
+});
+test('when the second step of a whole-text rewrite is refused, the first is taken back out', async () => {
+  await load(); await rewriteAnswer('He goes to work and they were late.');
+  await caretAfter('#owned-draft', 'late.'); await openCard(); await press('Paraphrase'); await suggested();
+  await page.evaluate(() => { ownedDraft.refuseDeletes = 1; }); // the deletion of the old text is refused once; taking the new text back out is not
+  await press('Replace'); await inline.locator('#status').waitFor(el => /copy-only|did not apply/.test(el.textContent));
+  assert.equal(await text('#owned-draft'), 'He go to work and they was late.'); assert.equal(await page.evaluate(() => ownedDraft.model.text), 'He go to work and they was late.');
+  assert.equal(await page.evaluate(() => ownedDraft.alive()), true);
+});
+
+test('a rewrite the field refuses is rolled back and its preview stays available to copy after the next poll', async () => {
+  await load(); await rewriteAnswer('He goes to work and they were late.');
+  await useTextarea('He go to work.'); await page.locator('#textarea').evaluate(el => { el.maxLength = 15; el.setSelectionRange(14, 14); });
+  await openCard(); await press('Improve it'); await suggested(); await press('Replace');
+  await inline.locator('#status').waitFor(el => /Original text restored/.test(el.textContent));
+  assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
+  await page.waitForTimeout(700); // The poll used to clear the card about 250 ms after a refused edit.
+  assert.match(await inline.locator('#status').textContent(), /Original text restored/);
+  assert.equal(await inline.locator('.suggested').textContent(), 'He goes to work and they were late.');
+  assert.equal(await inline.button('Copy').count(), 1); assert.equal(await inline.button('Replace').isDisabled(), true);
 });
 
 test('a Slate-like editor that only trusts beforeinput takes a whole-paragraph rewrite itself', async () => {

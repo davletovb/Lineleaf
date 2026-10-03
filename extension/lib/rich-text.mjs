@@ -17,7 +17,7 @@ function blockFor(host, node) {
 }
 
 // How CSS treats whitespace inside `element`: spaces are kept (pre, pre-wrap, break-spaces) and/or newlines are line breaks.
-function whitespaceOf(element) {
+export function whitespaceOf(element) {
   const style = getComputedStyle(element);
   const collapse = style.whiteSpaceCollapse || {normal: 'collapse', nowrap: 'collapse', pre: 'preserve', 'pre-wrap': 'preserve',
     'pre-line': 'preserve-breaks', 'break-spaces': 'break-spaces'}[style.whiteSpace] || 'collapse';

@@ -385,6 +385,7 @@ export function mountInline(api) {
     selection_unavailable: 'The editor would not select that text, so nothing was changed. Use Copy.',
     crosses_format_boundary: 'This change spans formatting or a mention, so Lineleaf can only copy it.',
     invalid_span: 'This suggestion no longer matches the text. Choose Check now to review the current text.',
+    spacing_collapses: 'This text has spacing the editor would collapse, so Lineleaf can only copy it. Use Copy.',
     editor_rejected: 'The editor did not apply the change. Lineleaf is copy-only here. Use Copy.',
     native_edit_not_confirmed: 'The editor’s text is not what Lineleaf expected. Check your draft; its own undo (Ctrl/⌘ Z) reverses its changes. Use Copy.',
     editor_reverted: 'The editor reverted the change. Lineleaf is copy-only here. Use Copy.'
@@ -413,11 +414,11 @@ export function mountInline(api) {
       // The automatic check reads the whole caret paragraph, so its key (not the key of a rewritten selection) is what must match.
       held = null; capture = next; undo = false; copyOnly = false; lastKey = recheck ? null : keyFor(next); pendingKey = recheck ? paragraphKey() : null; dirty = recheck;
       if (clarityDue) clarityFor = keyFor(next);
-      update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo.`);
+      update(`Applied. ${edits.length ? `${edits.length} more suggestion${edits.length === 1 ? '' : 's'}. ` : ''}Press Ctrl/⌘ Z to undo${result.steps === 2 ? ' (it takes two presses here)' : ''}.`);
       if (here) view.hide();
       queue(); return;
     }
-    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable', 'focus_moved'].includes(result.reason);
+    undo = false; edits = [edit]; copyOnly = !['stale_or_unavailable', 'changed_on_focus', 'invalid_span', 'crosses_format_boundary', 'selection_unavailable', 'focus_moved', 'spacing_collapses'].includes(result.reason);
     update(RICH_FAILURES[result.reason] ?? 'Safe replacement is unavailable. Use Copy.'); if (here) view.open();
   }
   function accept(edit) {
@@ -429,6 +430,13 @@ export function mountInline(api) {
     try { result = capture.adapter.apply(capture.snapshot, {...edit, start: capture.offset + edit.start, end: capture.offset + edit.end}); }
     finally { applying = false; }
     if (capture !== selected || view !== selectedView) return;
+    // A refused edit that was rolled back leaves the same text, but the capture is stale for good: the rollback raises the adapter's
+    // revision with its own `input` event, and the field is no longer replaceable. Without a new capture the next poll would clear the
+    // suggestion Copy still offers. A copy-mode snapshot stays valid until the text really changes.
+    if (result?.status !== 'applied' && result?.restored) {
+      const fresh = adapter.snapshot({copy: true});
+      if (fresh && fresh.source === selected.snapshot.source) capture = {...selected, snapshot: fresh, valid: () => adapter.currentCapture(fresh)};
+    }
     undo = result?.status === 'applied'; edits = undo ? [] : [edit]; copyOnly = !undo;
     update(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
     if (!undo) { blocked = true; view.open(); return; }

@@ -35,6 +35,7 @@ Third line.</p></div>
 <!-- Replacement fixtures. Slate-like and Draft-like editors own their text; the others misbehave on purpose. -->
 <div id="model-slate" data-slate-editor="true" contenteditable="true" role="textbox"></div>
 <div id="model-draft" class="public-DraftEditor-content" contenteditable="true" role="textbox"></div>
+<div id="owned-draft" class="public-DraftEditor-content" contenteditable="true" role="textbox"></div>
 <div id="rejecting" class="ql-editor" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
 <div id="reverting" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He go to work.</p></div>
 <div id="spans" class="ProseMirror" contenteditable="true"><p>Intro paragraph.</p><p>He <b>go</b> to work.</p></div>
@@ -129,6 +130,27 @@ function modelEditor(host, kind, initial) {
 }
 window.modelSlate = modelEditor(document.getElementById('model-slate'), 'slate', ['Intro paragraph.', 'He go to work.']);
 window.modelDraft = modelEditor(document.getElementById('model-draft'), 'draft', ['Intro paragraph.', 'He go to work.']);
+// A Draft.js-like editor that owns the nodes it rendered: it creates its text leaf once and afterwards only updates that node, as
+// React does. If the browser removes the leaf (typing over all of its text in one command does), the model keeps changing but the
+// page no longer shows it, so the text can be neither typed over nor deleted: the failure seen in X's composer.
+{
+  const host = document.getElementById('owned-draft'), model = {text: 'He go to work and they was late.'};
+  const block = document.createElement('div'), outer = document.createElement('span'), leaf = document.createElement('span'), text = document.createTextNode(model.text);
+  block.setAttribute('data-block', 'true'); leaf.setAttribute('data-text', 'true'); leaf.append(text); outer.append(leaf); block.append(outer); host.append(block);
+  const render = () => { if (text.data !== model.text) text.data = model.text; }; // only the node it owns
+  const offset = (node, at) => { const range = document.createRange(); range.setStart(block, 0); range.setEnd(node, at); return range.toString().length; };
+  const caretAt = index => { if (!text.isConnected) return; const range = document.createRange(); range.setStart(text, Math.min(index, text.data.length)); range.collapse(true); const s = getSelection(); s.removeAllRanges(); s.addRange(range); };
+  host.addEventListener('input', () => { model.text = block.textContent; render(); }); // a native edit is read back into the model
+  host.addEventListener('focus', () => caretAt(0)); // like Draft.js, it puts the caret back at its own start when it regains focus
+  host.addEventListener('beforeinput', event => { if (ownedDraft.refuseDeletes > 0 && event.inputType === 'deleteContentBackward') { ownedDraft.refuseDeletes--; event.preventDefault(); } }); // a test can make it refuse deletions
+  host.addEventListener('keydown', event => { // Backspace is the editor's own: it changes the model, then updates its node
+    if (event.key !== 'Backspace') return;
+    const s = getSelection(); if (!s.rangeCount || !block.contains(s.anchorNode)) return;
+    const a = offset(s.anchorNode, s.anchorOffset), f = offset(s.focusNode, s.focusOffset), from = Math.min(a, f), to = Math.max(a, f), start = from === to ? Math.max(0, from - 1) : from;
+    event.preventDefault(); model.text = model.text.slice(0, start) + model.text.slice(to); render(); caretAt(start);
+  });
+  window.ownedDraft = {model, leaf, refuseDeletes: 0, alive: () => text.isConnected && leaf.isConnected};
+}
 // An editor that cancels every edit (a maxlength or read-only state), and one that accepts the edit and then re-renders the old text.
 // A third rebuilds the edited paragraph with the replacement intact but changes the text next to it.
 document.getElementById('rejecting').addEventListener('beforeinput', event => { if (event.inputType === 'insertText' && event.data !== ' ') event.preventDefault(); });
