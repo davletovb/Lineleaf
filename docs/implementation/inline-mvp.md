@@ -2,6 +2,8 @@
 
 This slice adds automatic paragraph proofreading to the [selection prototype](selection-mvp.md). It uses the same shared Seatline companion, stable extension identity, optional site grants, Codex subscription/tool-isolation gates, ephemeral turns, and validated editor adapter. No companion or native protocol changes are required. This is development behavior; live quality/latency, device setup, real editor compatibility, and human screen-reader acceptance remain open.
 
+> **Interface.** The badge, underlines, card, panel, popup and settings page were redesigned on 2026-10-03; see [Interface design](interface-design.md) for how they look and behave now. The behaviour described below is unchanged except where that page says otherwise (the Tab order inside a suggestion now reaches Accept first).
+
 ## Try the flow
 
 Run `npm ci --ignore-scripts`, `npm run package`, and load `dist/lineleaf` unpacked in desktop Chrome. The ZIP is `dist/lineleaf-0.1.0.zip`. Existing load/setup instructions and Seatline authorization are in the selection guide.

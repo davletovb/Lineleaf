@@ -11,12 +11,14 @@ async function load() {
   query('#authorize').textContent = `seatline-companion authorize lineleaf codex chrome-extension://${chrome.runtime.id}/`;
   query('#sites').replaceChildren();
   for (const origin of settings.sites) {
-    const item = document.createElement('li'); item.append(document.createTextNode(origin));
-    const disable = document.createElement('button'); disable.textContent = 'Disable'; disable.setAttribute('aria-label', `Disable ${origin}`);
+    const item = document.createElement('li'), avatar = document.createElement('span'), name = document.createElement('span');
+    avatar.className = 'avatar'; avatar.setAttribute('aria-hidden', 'true'); avatar.textContent = new URL(origin).hostname.replace(/^www\./u, '').charAt(0) || '·';
+    name.className = 'origin'; name.textContent = origin; item.append(avatar, name);
+    const disable = document.createElement('button'); disable.textContent = 'Disable'; disable.className = 'small'; disable.setAttribute('aria-label', `Disable ${origin}`);
     disable.addEventListener('click', async () => { try { await command('set-site', {origin, enabled: false}); await load(); show('Site disabled.'); } catch (error) { show(messageFor(errorCode(error))); } });
     item.append(disable); query('#sites').append(item);
   }
-  if (!settings.sites.length) { const item = document.createElement('li'); item.textContent = 'No sites enabled.'; query('#sites').append(item); }
+  if (!settings.sites.length) { const item = document.createElement('li'); item.className = 'empty'; item.textContent = 'No sites enabled yet. Open the Lineleaf popup on a page and turn on “Check my writing here”.'; query('#sites').append(item); }
 }
 query('#preferences').addEventListener('submit', async event => {
   event.preventDefault();
@@ -50,4 +52,18 @@ query('#connection').addEventListener('click', async () => {
   finally { query('#connection').disabled = false; }
 });
 query('#reset').addEventListener('click', async () => { try { await command('reset'); await load(); show('Preferences and site access reset.'); } catch (error) { show(messageFor(errorCode(error))); } });
+query('#copy-command').addEventListener('click', async () => {
+  const command = query('#authorize').textContent;
+  try { await navigator.clipboard.writeText(command); show('Command copied.'); }
+  catch { const range = document.createRange(); range.selectNodeContents(query('#authorize')); getSelection().removeAllRanges(); getSelection().addRange(range); show('Press Ctrl/⌘ C to copy the selected command.'); }
+});
+// The side navigation marks the section being read.
+const links = [...document.querySelectorAll('.nav a')], sections = links.map(link => document.querySelector(link.getAttribute('href')));
+const mark = () => {
+  // At the very bottom the last section is the one being read, even when it is too short to reach the reading line.
+  const atEnd = innerHeight + scrollY >= document.documentElement.scrollHeight - 2;
+  const current = atEnd ? sections.at(-1) : sections.filter(section => section.getBoundingClientRect().top <= innerHeight * 0.35).pop() ?? sections[0];
+  links.forEach((link, index) => link.setAttribute('aria-current', String(sections[index] === current)));
+};
+addEventListener('scroll', mark, {passive: true}); mark();
 load().catch(() => show(messageFor('UNAVAILABLE')));

@@ -1,0 +1,38 @@
+/* Lineleaf design tokens. Linked by the extension pages and bundled into the in-page shadow roots, so every surface shares one look.
+   Light and dark follow the system setting. Pairs below are checked against WCAG AA by tests/design.test.mjs. */
+:root, :host {
+  --ll-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --ll-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --ll-bg: #ffffff; --ll-surface: #f5f7f4; --ll-surface-2: #e9efe8; --ll-line: #cfd9cf; --ll-line-soft: #e3eae2;
+  --ll-ink: #14231b; --ll-ink-2: #455a4d; --ll-ink-3: #5b6d61;
+
+  --ll-brand: #17704a; --ll-brand-hover: #125a3b; --ll-brand-ink: #0f4d32; --ll-brand-soft: #e4f2ea; --ll-on-brand: #ffffff;
+  --ll-fix: #d13a2e; --ll-fix-ink: #a8221a; --ll-fix-soft: #fdecea;
+  --ll-clear: #2a6fd0; --ll-clear-ink: #1a56ad; --ll-clear-soft: #e8f0fc;
+  --ll-style: #6a4cc0; --ll-style-ink: #53399c; --ll-style-soft: #f0ebfb;
+  --ll-warn-ink: #7a4f00; --ll-warn-soft: #fff3d6; --ll-warn: #c28a1d;
+  --ll-on-accent: #ffffff;
+
+  --ll-r-sm: 6px; --ll-r: 10px; --ll-r-lg: 16px; --ll-pill: 999px;
+  --ll-shadow-1: 0 1px 2px rgba(20, 35, 27, .08);
+  --ll-shadow-pop: 0 1px 2px rgba(20, 35, 27, .10), 0 10px 32px rgba(20, 35, 27, .18);
+  --ll-ring: 0 0 0 2px var(--ll-bg), 0 0 0 4px var(--ll-brand);
+  --ll-ease: cubic-bezier(.2, .7, .2, 1); --ll-fast: 120ms; --ll-slow: 180ms;
+}
+@media (prefers-color-scheme: dark) {
+  :root, :host {
+    --ll-bg: #141d18; --ll-surface: #1b2720; --ll-surface-2: #243329; --ll-line: #41574a; --ll-line-soft: #2e4034;
+    --ll-ink: #e8f1ea; --ll-ink-2: #b3c5b8; --ll-ink-3: #97ab9d;
+
+    --ll-brand: #58c28b; --ll-brand-hover: #74d0a1; --ll-brand-ink: #8fdcb2; --ll-brand-soft: #1f3a2c; --ll-on-brand: #07281a;
+    --ll-fix: #ff7b6e; --ll-fix-ink: #ffa79d; --ll-fix-soft: #3d2220;
+    --ll-clear: #6aa2ff; --ll-clear-ink: #9bc0ff; --ll-clear-soft: #1f2f4a;
+    --ll-style: #a58cf0; --ll-style-ink: #c2b2f7; --ll-style-soft: #2d2745;
+    --ll-warn-ink: #f2c566; --ll-warn-soft: #3a2f14; --ll-warn: #f2c566;
+    --ll-on-accent: #0d1410;
+
+    --ll-shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+    --ll-shadow-pop: 0 1px 2px rgba(0, 0, 0, .5), 0 10px 32px rgba(0, 0, 0, .55);
+  }
+}

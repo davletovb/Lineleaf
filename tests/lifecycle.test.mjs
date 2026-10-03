@@ -10,7 +10,15 @@ test('installed profile restart/update preserves identity, preferences, grants a
   const root = await mkdtemp(join(tmpdir(), 'lineleaf-lifecycle-')), source = join(root, 'extension'), profile = join(root, 'profile'); let context;
   const launch = () => chromium.launchPersistentContext(profile, {channel: 'chromium', headless: true, executablePath: process.env.LINELEAF_CHROMIUM_PATH || undefined,
     args: [`--disable-extensions-except=${source}`, `--load-extension=${source}`], ignoreDefaultArgs: ['--disable-extensions']});
-  const workerFor = async context => context.serviceWorkers()[0] ?? context.waitForEvent('serviceworker', {timeout: 15000});
+  // After a restart the worker target can exist before Chromium has bound the extension APIs to it (chrome.runtime or chrome.storage is
+  // briefly undefined), so wait for them before the test evaluates anything in it.
+  const workerFor = async context => {
+    const worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', {timeout: 15000});
+    for (const deadline = Date.now() + 15000; Date.now() < deadline; await new Promise(resolve => setTimeout(resolve, 50))) {
+      try { if (await worker.evaluate(() => Boolean(chrome.runtime?.id && chrome.storage?.local && chrome.permissions && chrome.scripting))) return worker; } catch { /* not ready yet */ }
+    }
+    throw new Error('The extension service worker did not expose its APIs');
+  };
   try {
     await cp(fileURLToPath(new URL('../dist/lineleaf', import.meta.url)), source, {recursive: true});
     context = await launch(); let worker = await workerFor(context);

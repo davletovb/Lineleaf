@@ -1,1 +1,51 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lineleaf</title><link rel="stylesheet" href="ui.css"></head><body class="popup"><main><h1>Lineleaf ❧</h1><p class="tagline">Clearer writing. Still your words.</p><span id="site" class="site">Loading current site…</span><label class="check"><input type="checkbox" id="enabled" disabled> Enable on this site</label><label class="check"><input type="checkbox" id="paused"> Pause Lineleaf on all sites</label><p class="small">Select text, then open the writing panel. Manual checks send your selection through Seatline to Codex. Automatic paragraph checks require a separate opt-in in Settings. Model processing may be remote; drafts are not saved.</p><button id="open" class="primary" disabled>Open writing panel</button><p id="status" role="status" aria-live="polite"></p><div class="row"><button id="connection">Check Seatline</button><button id="settings">Settings</button></div><p class="small">Development prototype · optional inline checks</p></main><script type="module" src="popup.mjs"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lineleaf</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="popup">
+  <main>
+    <header class="brand">
+      <span class="tile" aria-hidden="true"><svg class="ll-icon" viewBox="0 0 24 24" width="22" height="22"><path class="solid" d="M5 19C5 10.5 10.2 5 19 5c0 8.8-5.5 14-14 14z"/><path class="vein" d="M6.5 17.5 14 10"/></svg></span>
+      <div class="titles">
+        <h1>Lineleaf</h1>
+        <p class="tagline">Clearer writing. Still your words.</p>
+      </div>
+    </header>
+
+    <section class="site-card" aria-labelledby="site">
+      <span id="avatar" class="avatar" aria-hidden="true">?</span>
+      <div class="site-text">
+        <div class="site-top"><p class="muted label-line">This site</p><span id="state" class="pill" data-state="loading">Loading</span></div>
+        <p id="site" class="site">Loading current site…</p>
+      </div>
+    </section>
+    <label class="switch-row" for="enabled">
+      <span class="switch-text"><strong>Check my writing here</strong><span class="muted">Lineleaf stays off until you turn it on for this site.</span></span>
+      <input type="checkbox" id="enabled" role="switch" disabled>
+    </label>
+
+    <button id="open" class="primary wide" disabled>Open writing panel</button>
+    <p class="hint">Select text, then open the panel to proofread or rewrite it. Press Alt+Shift+L in a text box for the inline card.</p>
+
+    <label class="switch-row quiet-row" for="paused">
+      <span class="switch-text"><strong>Pause on all sites</strong><span class="muted">Stops checks and hides suggestions everywhere.</span></span>
+      <input type="checkbox" id="paused" role="switch">
+    </label>
+
+    <p id="status" role="status" aria-live="polite"></p>
+
+    <footer class="foot-row">
+      <button id="connection" class="quiet small">Check Seatline</button>
+      <button id="settings" class="quiet small">Settings</button>
+    </footer>
+    <p class="fine">Manual checks send only your selection through Seatline to Codex; model processing may be remote. Automatic paragraph checks are a separate opt-in in Settings. Drafts are not saved.</p>
+  </main>
+  <script type="module" src="popup.mjs"></script>
+</body>
+</html>

@@ -1,1 +1,129 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Lineleaf settings</title><link rel="stylesheet" href="ui.css"></head><body><main><h1>Lineleaf ❧</h1><p class="tagline">Clearer writing. Still your words.</p><form id="preferences"><h2>Writing preferences</h2><label for="variant">English variant</label><select id="variant"><option value="US">English · US</option><option value="UK">English · UK</option></select><label for="model">Codex model (optional)</label><input id="model" type="text" maxlength="128" autocomplete="off" spellcheck="false" placeholder="Leave empty for the provider default"><p class="small">Use a model supported by your installed Codex runtime. Sign in with your subscription; Lineleaf stores no provider credentials.</p><label class="check"><input id="paused" type="checkbox"> Pause Lineleaf on all sites</label><label class="check"><input id="automatic" type="checkbox"> Automatically check after typing pauses (experimental)</label><p class="small">When enabled, the active paragraph (up to 2,000 characters) on sites you enable goes through Seatline to Codex. Model processing may be remote. Checks wait 1.5 seconds after typing, with a shared ten-second interval and six-attempts-per-minute cap. A background check that gets no answer in 30 seconds (90 for something you ask for) is cancelled, and background checks then pause for five minutes. In rich editors such as X, automatic checking sends only the paragraph you are typing in and underlines suggestions; Accept changes the text only after you press it, through the editor’s own editing, and the editor’s undo reverses it. Gmail, LinkedIn, Slack, Notion and editors Lineleaf has not verified show suggestions for you to copy; Lineleaf never edits those. Live speed and quality are still being evaluated.</p><label class="check"><input id="clarity" type="checkbox" disabled> Also suggest clearer wording (experimental)</label><p class="small">Needs automatic checking, and is off by default. After each automatic correction check, Lineleaf sends the same paragraph once more and asks for wording that could be clearer or shorter. These show as separate, dashed blue underlines labelled “Clearer wording · Optional style”, are never corrections, change nothing until you press Accept, and are never offered when they would change a name, number, date or negation. It adds one more provider request per checked paragraph, shares the same ten-second interval and six-attempts-per-minute cap, so checks come more slowly. Its precision is measured separately and has not been verified on a live provider.</p><label for="dictionary">Personal dictionary · one word per line</label><textarea id="dictionary" rows="6" maxlength="32500" spellcheck="false"></textarea><p class="small">Up to 500 words. Dictionary words are stored intentionally and sent with checks; spelling suggestions for these words are filtered.</p><div class="row"><button type="submit" class="primary">Save preferences</button><button id="connection" type="button">Check Seatline</button></div></form><p id="status" role="status" aria-live="polite"></p><h2>Enabled sites</h2><p class="small">Enable a site from the extension popup. Disabling it cancels its requests and removes its access when no other enabled origin needs that permission.</p><ul id="sites"></ul><div class="box"><h2>Seatline setup</h2><p>Use your existing shared companion. Authorize this extension ID for Codex:</p><code id="authorize"></code><p class="small">Manual checks send only your selection. Rewrites (Improve it, Paraphrase and tone options) run only when you press them. The writing panel sends your selection; the inline card, which you can open with Alt+Shift+L even when automatic checking is off, sends your selection or the active paragraph if nothing is selected. Opt-in automatic checks send only the active bounded paragraph. The companion connects to Codex; model processing may be remote. Automatic checking stays off until you enable it above.</p></div><h2>Stored data</h2><p class="small">Lineleaf saves preferences, dictionary words, and enabled site origins. Only automatic-request and provider-backoff timestamps are kept in session storage to preserve the shared cap across worker restarts. Check field snapshots expire after five minutes or when focus/site state changes. No draft history, provider credentials, or telemetry is stored.</p><button id="reset">Reset preferences and site access</button></main><script type="module" src="options.mjs"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lineleaf settings</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="ui.css">
+</head>
+<body class="settings">
+  <div class="shell">
+    <aside class="side">
+      <div class="brand">
+        <span class="tile" aria-hidden="true"><svg class="ll-icon" viewBox="0 0 24 24" width="22" height="22"><path class="solid" d="M5 19C5 10.5 10.2 5 19 5c0 8.8-5.5 14-14 14z"/><path class="vein" d="M6.5 17.5 14 10"/></svg></span>
+        <div class="titles"><h1>Lineleaf</h1><p class="tagline">Clearer writing. Still your words.</p></div>
+      </div>
+      <nav class="nav" aria-label="Settings sections">
+        <a href="#writing">Writing</a>
+        <a href="#automatic-checks">Automatic checks</a>
+        <a href="#dictionary-section">Dictionary</a>
+        <a href="#sites-section">Sites</a>
+        <a href="#seatline">Seatline</a>
+        <a href="#privacy">Privacy &amp; data</a>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <form id="preferences">
+        <div class="content">
+          <section class="card-section" id="writing" aria-labelledby="writing-title">
+            <h2 id="writing-title">Writing</h2>
+            <p class="lede">How Lineleaf spells, and which Codex model answers.</p>
+            <label class="switch-row setting" for="paused">
+              <span class="switch-text"><strong>Pause Lineleaf on all sites</strong><span class="muted">Stops checks and hides suggestions until you turn it back on. Applies immediately.</span></span>
+              <input id="paused" type="checkbox" role="switch">
+            </label>
+            <div class="grid2">
+              <div class="field">
+                <label for="variant">English variant</label>
+                <select id="variant"><option value="US">English · US</option><option value="UK">English · UK</option></select>
+              </div>
+              <div class="field">
+                <label for="model">Codex model <span class="muted">(optional)</span></label>
+                <input id="model" type="text" maxlength="128" autocomplete="off" spellcheck="false" placeholder="Leave empty for the provider default">
+              </div>
+            </div>
+            <p class="muted" style="margin-top:8px">Use a model supported by your installed Codex runtime. Sign in with your subscription; Lineleaf stores no provider credentials.</p>
+          </section>
+
+          <section class="card-section" id="automatic-checks" aria-labelledby="automatic-title">
+            <h2 id="automatic-title">Automatic checks <span class="tag">Experimental</span></h2>
+            <p class="lede">Underline mistakes as you type, the way a proofreader would. Off until you turn it on.</p>
+            <label class="switch-row setting" for="automatic">
+              <span class="switch-text"><strong>Check automatically after typing pauses</strong><span class="muted">Only on sites you enable.</span></span>
+              <input id="automatic" type="checkbox" role="switch">
+            </label>
+            <ul class="facts">
+              <li>The active paragraph (up to 2,000 characters) goes through Seatline to Codex. Model processing may be remote.</li>
+              <li>Checks wait 1.5 seconds after typing, with a shared ten-second interval and a cap of six attempts per minute.</li>
+              <li>A background check that gets no answer in 30 seconds (90 for something you ask for) is cancelled, and background checks then pause for five minutes.</li>
+              <li>In rich editors such as X, only the paragraph you are typing in is sent and suggestions are underlined. Accept changes the text only after you press it, through the editor’s own editing, and the editor’s undo reverses it.</li>
+              <li>Gmail, LinkedIn, Slack, Notion and editors Lineleaf has not verified show suggestions for you to copy; Lineleaf never edits those.</li>
+              <li>Live speed and quality are still being evaluated.</li>
+            </ul>
+            <label class="switch-row setting nested" for="clarity">
+              <span class="switch-text"><strong>Also suggest clearer wording <span class="tag">Experimental</span></strong><span class="muted">Needs automatic checking. Off by default.</span></span>
+              <input id="clarity" type="checkbox" role="switch" disabled>
+            </label>
+            <ul class="facts" style="margin-left:20px">
+              <li>After each automatic correction check, Lineleaf sends the same paragraph once more and asks for wording that could be clearer or shorter.</li>
+              <li>These show as separate, dashed blue underlines labelled “Clearer wording · Optional style”, are never corrections, change nothing until you press Accept, and are never offered when they would change a name, number, date or negation.</li>
+              <li>It adds one more provider request per checked paragraph and shares the same ten-second interval and six-attempts-per-minute cap, so checks come more slowly.</li>
+              <li>Its precision is measured separately and has not been verified on a live provider.</li>
+            </ul>
+          </section>
+
+          <section class="card-section" id="dictionary-section" aria-labelledby="dictionary-title">
+            <h2 id="dictionary-title">Personal dictionary</h2>
+            <p class="lede">Words Lineleaf should accept as correctly spelled.</p>
+            <div class="field">
+              <label for="dictionary">One word per line</label>
+              <textarea id="dictionary" rows="6" maxlength="32500" spellcheck="false"></textarea>
+            </div>
+            <p class="muted" style="margin-top:8px">Up to 500 words. Dictionary words are stored intentionally and sent with checks; spelling suggestions for these words are filtered.</p>
+          </section>
+        </div>
+      </form>
+
+      <section class="card-section" id="sites-section" aria-labelledby="sites-title">
+        <h2 id="sites-title">Enabled sites</h2>
+        <p class="lede">Lineleaf only works where you have turned it on.</p>
+        <ul id="sites" class="sites"></ul>
+        <p class="muted" style="margin-top:12px">Enable a site from the extension popup. Disabling it cancels its requests and removes its access when no other enabled origin needs that permission.</p>
+      </section>
+
+      <section class="card-section" id="seatline" aria-labelledby="seatline-title">
+        <h2 id="seatline-title">Seatline connection</h2>
+        <p class="lede">Lineleaf uses your existing shared Seatline companion. Authorize this extension ID for Codex:</p>
+        <div class="command"><code id="authorize"></code><button id="copy-command" type="button" class="small">Copy</button></div>
+        <div class="actions-row"><button id="connection" type="button">Check Seatline</button></div>
+        <ul class="facts">
+          <li>Manual checks send only your selection. Rewrites (Improve it, Paraphrase and tone options) run only when you press them.</li>
+          <li>The writing panel sends your selection. The inline card, which you can open with Alt+Shift+L even when automatic checking is off, sends your selection or the active paragraph if nothing is selected.</li>
+          <li>Opt-in automatic checks send only the active bounded paragraph. The companion connects to Codex; model processing may be remote. Automatic checking stays off until you enable it above.</li>
+        </ul>
+      </section>
+
+      <section class="card-section" id="privacy" aria-labelledby="privacy-title">
+        <h2 id="privacy-title">Privacy &amp; stored data</h2>
+        <p class="lede">What Lineleaf keeps on this browser.</p>
+        <ul class="facts">
+          <li>Lineleaf saves preferences, dictionary words, and enabled site origins.</li>
+          <li>Only automatic-request and provider-backoff timestamps are kept in session storage, to preserve the shared cap across worker restarts.</li>
+          <li>Check field snapshots expire after five minutes or when focus or site state changes.</li>
+          <li>No draft history, provider credentials, or telemetry is stored.</li>
+        </ul>
+        <div class="actions-row"><button id="reset" type="button" class="danger">Reset preferences and site access</button></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="savebar"><div>
+    <p id="status" role="status" aria-live="polite"></p>
+    <button type="submit" form="preferences" class="primary">Save preferences</button>
+  </div></div>
+  <script type="module" src="options.mjs"></script>
+</body>
+</html>

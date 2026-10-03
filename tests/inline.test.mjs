@@ -130,8 +130,11 @@ test('keyboard Tab/Escape controls and accessibility tree expose the suggestion 
   assert.ok(tree.nodes.some(x => x.role?.value === 'button' && x.name?.value === 'Accept suggestion: goes'));
   assert.ok(tree.nodes.some(x => x.role?.value === 'region' && x.name?.value === 'Lineleaf suggestions'));
   await page.keyboard.press('Tab'); // Close.
-  await page.keyboard.press('Tab'); // Explanation disclosure.
-  await page.keyboard.press('Tab'); // Accept.
+  await page.keyboard.press('Tab'); // Accept: the primary action follows the heading, the explanation disclosure comes after the buttons.
+  assert.equal(await inline.button('Accept').evaluate(el => el.getRootNode().activeElement === el), true);
+  for (const name of ['Dismiss', 'Copy']) { await page.keyboard.press('Tab'); assert.equal(await inline.button(name).evaluate(el => el.getRootNode().activeElement === el), true, name); }
+  await page.keyboard.press('Tab'); assert.equal(await inline.locator('summary').evaluate(el => el.getRootNode().activeElement === el), true); // Why this suggestion?
+  await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab');
   assert.equal(await inline.button('Accept').evaluate(el => el.getRootNode().activeElement === el), true);
   await page.keyboard.press('Enter'); assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work.');
   await page.keyboard.press('Escape'); assert.equal(await page.locator('#textarea').evaluate(el => document.activeElement === el), true);

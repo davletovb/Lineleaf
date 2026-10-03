@@ -12,7 +12,7 @@
     "test": "npm run test:python && npm run test:unit && npm run test:browser",
     "test:unit": "node --test tests/extension.test.mjs tests/evaluation.test.mjs",
     "test:python": "python3 -m unittest discover -s tests -p 'test_*.py' -v",
-    "test:browser": "npm run build && node --test tests/editor.test.mjs tests/selection.test.mjs tests/inline.test.mjs tests/rich.test.mjs tests/rich-edit.test.mjs tests/rewrite.test.mjs tests/clarity.test.mjs tests/compatibility.test.mjs",
+    "test:browser": "npm run build && node --test tests/editor.test.mjs tests/selection.test.mjs tests/inline.test.mjs tests/rich.test.mjs tests/rich-edit.test.mjs tests/rewrite.test.mjs tests/clarity.test.mjs tests/design.test.mjs tests/compatibility.test.mjs",
     "test:extension": "npm run build && node --test tests/installed-extension.test.mjs tests/lifecycle.test.mjs",
     "evaluate:fixture": "npm run package && node tools/evaluate-writing.mjs --fixture",
     "beta:candidate": "npm run package && node tools/package-beta.mjs --candidate",

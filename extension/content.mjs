@@ -3,9 +3,15 @@ import {captureSelection, editorOf} from './lib/selection.mjs';
 import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
 import {errorCode, validText, FLAG_LABELS, WATCHDOG} from './lib/policy.mjs';
+import tokens from './tokens.css';
+import base from './base.css';
 import styles from './panel.css';
 import {mountInline} from './lib/inline.mjs';
+import {icon, iconLabel} from './lib/icons.mjs';
 import {categoryLabel, dictionaryWord} from './lib/policy.mjs';
+
+// A button label with an icon in front; the visible text stays the button's name.
+const withIcon = (button, glyph, label, iconOnly = false) => { button.replaceChildren(...iconLabel(glyph, label, {iconOnly})); return button; };
 
 export function mountContent(api) {
   mountInline(api);
@@ -32,19 +38,20 @@ export function mountContent(api) {
     const results = query('#results'); results.replaceChildren();
     for (const edit of edits) {
       const card = document.createElement('section'); card.className = 'card';
-      const category = document.createElement('div'); category.className = 'category'; category.textContent = categoryLabel(edit.category);
+      const category = document.createElement('p'); category.className = 'category'; category.dataset.category = edit.category; category.textContent = categoryLabel(edit.category);
       const change = document.createElement('div'); change.className = 'change';
       const before = document.createElement('span'); before.className = 'before'; before.textContent = edit.before;
       const after = document.createElement('span'); after.className = 'after'; after.textContent = edit.after || '(remove)';
-      change.append(before, document.createTextNode(' → '), after);
+      const arrow = document.createElement('span'); arrow.className = 'arrow'; arrow.setAttribute('aria-hidden', 'true'); arrow.textContent = ' → ';
+      change.append(before, arrow, after);
       const explanation = document.createElement('details'), summary = document.createElement('summary'), reason = document.createElement('p');
       summary.textContent = 'Why this suggestion?'; reason.className = 'explanation'; reason.textContent = edit.explanation; explanation.append(summary, reason);
       const controls = document.createElement('div'); controls.className = 'row';
-      const flags = document.createElement('p'); flags.className = 'explanation'; flags.hidden = !edit.flags?.length;
+      const flags = document.createElement('p'); flags.className = 'explanation note warn'; flags.hidden = !edit.flags?.length;
       flags.textContent = edit.flags?.length ? `Check this version: it changes ${edit.flags.map(flag => FLAG_LABELS[flag]).join(', ')}.` : '';
       const fullEdit = {...edit, start: edit.start + (capture?.offset ?? 0), end: edit.end + (capture?.offset ?? 0)};
       const canApply = !stale && capture?.adapter?.current(capture.snapshot) && validSpan(capture.snapshot.source, fullEdit);
-      const accept = document.createElement('button'); accept.textContent = 'Accept'; accept.className = 'primary'; accept.disabled = !canApply;
+      const accept = withIcon(document.createElement('button'), 'check', 'Accept'); accept.className = 'primary'; accept.disabled = !canApply;
       accept.addEventListener('click', event => {
         if (!event.isTrusted || !capture) return;
         const selected = capture, openedRoot = root;
@@ -63,7 +70,7 @@ export function mountContent(api) {
       });
       const dismiss = document.createElement('button'); dismiss.textContent = 'Dismiss';
       dismiss.addEventListener('click', event => { if (!event.isTrusted) return; edits = edits.filter(x => x !== edit); render(); if (!edits.length) status('Suggestions dismissed. Your text is unchanged.'); });
-      const copy = document.createElement('button'); copy.textContent = 'Copy';
+      const copy = withIcon(document.createElement('button'), 'copy', 'Copy'); copy.className = 'quiet';
       const manual = document.createElement('textarea'); manual.readOnly = true; manual.hidden = true; manual.setAttribute('aria-label', 'Suggestion to copy');
       copy.addEventListener('click', async event => {
         if (!event.isTrusted) return;
@@ -72,37 +79,41 @@ export function mountContent(api) {
       });
       controls.append(accept, dismiss, copy); card.append(category, change, flags, explanation, controls, manual);
       if (edit.category === 'spelling' && dictionaryWord(edit.before)) {
-        const add = document.createElement('button'); add.textContent = 'Add to dictionary';
+        const add = withIcon(document.createElement('button'), 'plus', 'Add to dictionary'); add.className = 'quiet';
         add.addEventListener('click', async event => {
           if (!event.isTrusted) return;
           try { const result = await api.runtime.sendMessage({type: 'add-word', payload: {word: edit.before}}); if (root) status(result.ok ? 'Word added. Reopen Lineleaf for a new check.' : messageFor(result.code)); }
           catch { if (root) status(messageFor('UNAVAILABLE')); }
         }); controls.append(add);
       }
-      if (!canApply) { const fallback = document.createElement('p'); fallback.className = 'muted'; fallback.textContent = 'Preview and copy only for this selection.'; card.append(fallback); }
+      if (!canApply) { const fallback = document.createElement('p'); fallback.className = 'note'; fallback.textContent = 'Preview and copy only for this selection.'; card.append(fallback); }
       results.append(card);
     }
   }
   function create() {
     host = document.createElement('div'); host.dataset.lineleafRoot = ''; root = host.attachShadow({mode: 'closed'});
-    const sheet = new CSSStyleSheet(); sheet.replaceSync(styles); root.adoptedStyleSheets = [sheet];
+    const sheet = new CSSStyleSheet(); sheet.replaceSync(tokens + base + styles); root.adoptedStyleSheets = [sheet];
     const node = (tag, text = '', attrs = {}, children = []) => {
       const element = document.createElement(tag); element.textContent = text;
       for (const [key, value] of Object.entries(attrs)) element.setAttribute(key, value);
       element.append(...children); return element;
     };
+    const logo = node('span', '', {class: 'logo', 'aria-hidden': 'true'}); logo.append(icon('leaf', {size: 18}));
+    const closeButton = node('button', '', {class: 'icon quiet', id: 'close', 'aria-label': 'Close Lineleaf'}); withIcon(closeButton, 'close', '✕', true);
     root.append(node('aside', '', {class: 'panel', 'aria-label': 'Lineleaf writing assistant'}, [
-      node('header', '', {}, [node('h2', 'Lineleaf ❧'), node('button', '✕', {class: 'quiet', id: 'close', 'aria-label': 'Close Lineleaf'})]),
-      node('p', 'Clearer writing. Still your words.', {class: 'tagline'}), node('label', 'Your selection'), node('blockquote', '', {id: 'selected'}),
-      node('p', 'Only this selection goes through Seatline to Codex when you press Check. Drafts are not saved.', {class: 'muted'}),
-      node('section', '', {id: 'paste-section'}, [node('label', 'Or paste text for preview and copy', {for: 'pasted'}),
-        node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
-        node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'For editors that cannot expose a safe selection, copy text yourself and paste it here. Lineleaf will only offer a preview and Copy.', {class: 'muted'})]),
-      node('label', 'What would you like to do?', {for: 'mode'}),
-      node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['improve', 'Rewrite · improve it'], ['paraphrase', 'Rewrite · paraphrase'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
-        ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
-      node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''}), node('button', 'Pause Lineleaf', {id: 'pause'})]),
-      node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('div', '', {id: 'results'})
+      node('header', '', {}, [logo, node('div', '', {class: 'titles'}, [node('h2', 'Lineleaf'), node('p', 'Clearer writing. Still your words.', {class: 'tagline'})]), closeButton]),
+      node('div', '', {class: 'scroll'}, [
+        node('label', 'Your selection'), node('blockquote', '', {id: 'selected'}),
+        node('p', 'Only this selection goes through Seatline to Codex when you press Check. Drafts are not saved.', {class: 'muted'}),
+        node('section', '', {id: 'paste-section'}, [node('label', 'Or paste text for preview and copy', {for: 'pasted'}),
+          node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
+          node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'For editors that cannot expose a safe selection, copy text yourself and paste it here. Lineleaf will only offer a preview and Copy.', {class: 'muted'})]),
+        node('label', 'What would you like to do?', {for: 'mode'}),
+        node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['improve', 'Rewrite · improve it'], ['paraphrase', 'Rewrite · paraphrase'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
+          ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
+        node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''}), node('button', 'Pause Lineleaf', {id: 'pause', class: 'quiet'})]),
+        node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('div', '', {id: 'results'})
+      ])
     ]));
     document.documentElement.append(host);
     query('#close').addEventListener('click', event => { if (event.isTrusted) close(); });

@@ -6,6 +6,9 @@ import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selec
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
 import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
+import {icon, iconLabel} from './icons.mjs';
+import tokens from '../tokens.css';
+import base from '../base.css';
 import styles from '../inline.css';
 
 const node = (tag, text = '', attributes = {}) => {
@@ -14,13 +17,16 @@ const node = (tag, text = '', attributes = {}) => {
   return el;
 };
 const trusted = fn => event => { if (event.isTrusted) void fn(event); };
+// Anatomy, top to bottom: the assistant badge by the field; underlines in the text; one card that opens from either. The card is
+// a header, the suggestion (or rewrite preview), the rewrite tools, a status strip and a quiet footer of everyday actions.
 class InlineView {
   constructor(field, actions) {
-    this.field = field; this.actions = actions; this.edits = []; this.index = 0;
+    this.field = field; this.actions = actions; this.edits = []; this.index = 0; this.anchored = false;
     this.host = node('div', '', {'data-lineleaf-inline': ''}); this.root = this.host.attachShadow({mode: 'closed'});
-    const sheet = new CSSStyleSheet(); sheet.replaceSync(styles); this.root.adoptedStyleSheets = [sheet];
+    const sheet = new CSSStyleSheet(); sheet.replaceSync(tokens + base + styles); this.root.adoptedStyleSheets = [sheet];
     this.layer = node('div', '', {class: 'layer'}); this.lines = node('div');
-    this.badge = node('button', 'Lineleaf', {class: 'badge', 'aria-label': 'Lineleaf writing assistance. Alt Shift L opens suggestions.'});
+    this.badge = node('button', '', {class: 'badge', 'data-state': 'idle', 'data-tip': 'Lineleaf', 'aria-label': 'Lineleaf writing assistance. Alt Shift L opens suggestions.'});
+    this.badge.append(node('span', '', {class: 'ring', 'aria-hidden': 'true'}), icon('leaf', {size: 18}));
     this.card = node('section', '', {class: 'card', hidden: '', 'aria-label': 'Lineleaf suggestions'});
     this.announcer = node('span', '', {class: 'sr', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true'});
     this.mirror = node('div', '', {class: 'mirror', 'aria-hidden': 'true'});
@@ -34,14 +40,21 @@ class InlineView {
   announce(message) { if (this.announcer.textContent !== message) this.announcer.textContent = message; }
   update(capture, edits, message, undo = false, copyOnly = false, busy = false) {
     clearInterval(this.ticker); this.busySince = busy ? this.busySince || Date.now() : 0; this.busy = busy;
-    this.capture = capture; this.edits = edits; this.message = message; this.undo = undo; this.copyOnly = copyOnly; this.index = Math.min(this.index, Math.max(0, edits.length - 1));
+    this.capture = capture; this.edits = edits; this.message = message; this.undo = undo; this.copyOnly = copyOnly; this.index = Math.min(this.index, Math.max(0, edits.length - 1)); this.anchored = false;
     this.announce(message);
-    this.badge.textContent = edits.some(edit => edit.rewrite) ? 'Lineleaf · rewrite ready' : edits.length ? `Lineleaf · ${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : /^(Checking|Working)/.test(message) ? 'Lineleaf · working…' : 'Lineleaf · review';
+    const rewrite = edits.some(edit => edit.rewrite), wording = edits.filter(edit => edit.category === 'clarity').length, working = busy || /^(Checking|Working)/.test(message);
+    this.badge.dataset.state = rewrite ? 'rewrite' : !edits.length ? 'idle' : wording === edits.length ? 'clarity' : 'fix';
+    this.badge.dataset.busy = working ? 'true' : 'false';
+    this.badge.dataset.tip = rewrite ? 'Rewrite ready' : edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : working ? 'Checking…' : 'Lineleaf';
+    this.badge.replaceChildren(node('span', '', {class: 'ring', 'aria-hidden': 'true'}), icon(rewrite ? 'sparkle' : 'leaf', {size: 18}),
+      ...(edits.length && !rewrite ? [node('span', String(edits.length), {class: 'count', 'aria-hidden': 'true'})] : []));
     this.badge.setAttribute('aria-label', `${message} Alt Shift L opens Lineleaf.`);
     this.card.hidden = true; this.card.replaceChildren(); this.draw();
   }
-  button(label, fn, attrs = {}) {
-    const button = node('button', label, attrs); button.addEventListener('click', trusted(fn)); return button;
+  // A button with an optional icon. `iconOnly` keeps the label for assistive technology and for the button's name.
+  button(label, fn, attrs = {}, glyph = null, iconOnly = false) {
+    const button = node('button', glyph ? '' : label, attrs); if (glyph) button.append(...iconLabel(glyph, label, {iconOnly}));
+    button.addEventListener('click', trusted(fn)); return button;
   }
   // Draft.js clears the DOM selection when it blurs, so a plain focus() would put the caret at the start of the document.
   remember() {
@@ -54,44 +67,64 @@ class InlineView {
     const selection = selectionFor(this.field);
     try { selection.removeAllRanges(); selection.addRange(this.range); } catch { /* the editor replaced the nodes; keep its own caret */ }
   }
-  open(index = 0) {
+  // `anchored`: opened from an underline, so the card sits by that word instead of by the field.
+  open(index = 0, anchored = false) {
     this.remember();
-    this.index = Math.min(index, Math.max(0, this.edits.length - 1)); this.card.replaceChildren(); this.card.hidden = false;
-    const title = node('h2', 'Lineleaf', {id: 'card-title', tabindex: '-1'}), heading = node('div', '', {class: 'heading'});
-    heading.append(title, this.button('✕', () => this.hide(), {'aria-label': 'Close suggestions'})); this.card.append(heading);
+    this.index = Math.min(index, Math.max(0, this.edits.length - 1)); this.anchored = anchored; this.card.dataset.compact = anchored ? 'true' : 'false'; this.card.replaceChildren(); this.card.hidden = false;
+    const title = node('h2', 'Lineleaf', {id: 'card-title', tabindex: '-1'}), head = node('header', '', {class: 'head'}), logo = node('span', '', {class: 'logo', 'aria-hidden': 'true'});
+    logo.append(icon('leaf', {size: 20}));
+    head.append(logo, title, this.button('✕', () => this.hide(), {'aria-label': 'Close suggestions', class: 'icon quiet'}, 'close', true)); this.card.append(head);
+    const body = node('div', '', {class: 'body'}); this.card.append(body);
     const edit = this.edits[this.index];
-    if (edit?.rewrite) this.rewritePreview(edit, title);
-    else if (edit) {
-      this.card.append(node('p', categoryLabel(edit.category), {class: 'category'}));
-      const change = node('p', '', {class: 'change'}); change.append(node('span', edit.before, {class: 'before'}), document.createTextNode(' → '), node('span', edit.after || '(remove)', {class: 'after'}));
-      this.card.append(change);
-      const explanation = node('details'); explanation.append(node('summary', 'Why this suggestion?'), node('p', edit.explanation, {class: 'explanation'})); this.card.append(explanation);
-      const controls = node('div', '', {class: 'row'});
-      if (!this.capture?.preview) controls.append(this.acceptButton(edit));
-      controls.append(this.button('Dismiss', () => this.actions.dismiss(edit)), this.copyButton(edit));
-      if (edit.category === 'spelling' && dictionaryWord(edit.before)) controls.append(this.button('Add to dictionary', () => this.actions.addWord(edit.before)));
-      this.card.append(controls);
-      if (this.edits.length > 1) {
-        const navigation = node('div', '', {class: 'row'}); navigation.append(this.button('Previous', () => this.open((this.index + this.edits.length - 1) % this.edits.length)), node('span', `${this.index + 1} of ${this.edits.length}`), this.button('Next', () => this.open((this.index + 1) % this.edits.length))); this.card.append(navigation);
-      }
-    }
-    this.card.append(this.rewriteRow());
+    if (edit?.rewrite) this.rewritePreview(body, edit, title);
+    else if (edit) this.suggestion(body, edit);
     const preview = Boolean(this.capture?.preview);
-    if (preview) this.card.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
-    else if (this.capture?.editable && this.copyOnly) this.card.append(node('p', 'This editor did not take the change cleanly, so Lineleaf is copy-only here until the page reloads. Check your draft; the editor’s own undo (Ctrl/⌘ Z) reverses its changes.', {class: 'note'}));
-    else if (this.capture?.editable && edit && !canApplyRich(this.capture, edit)) this.card.append(node('p', 'This change spans formatting or a mention, so Lineleaf can only copy it.', {class: 'note'}));
-    this.card.append(node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'}), ...this.elapsed(), node('p', preview
-      ? 'Codex via Seatline · model processing may be remote. Lineleaf does not change this editor.'
-      : 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'muted'}));
-    const footer = node('div', '', {class: 'row'});
-    if (this.undo) footer.append(this.button('Undo last edit', () => this.actions.undo()));
-    const check = this.button('Check now', () => this.actions.check()); check.disabled = Boolean(this.busy);
-    footer.append(check, this.button('Cancel check', () => this.actions.cancel()), this.button('Pause Lineleaf', () => this.actions.pause()), this.button('Settings', () => this.actions.settings()));
-    this.card.append(footer); this.draw(); title.focus({preventScroll: true});
+    if (preview) body.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
+    else if (this.capture?.editable && this.copyOnly) body.append(node('p', 'This editor did not take the change cleanly, so Lineleaf is copy-only here until the page reloads. Check your draft; the editor’s own undo (Ctrl/⌘ Z) reverses its changes.', {class: 'note'}));
+    else if (this.capture?.editable && edit && !canApplyRich(this.capture, edit)) body.append(node('p', 'This change spans formatting or a mention, so Lineleaf can only copy it.', {class: 'note'}));
+    this.card.append(this.rewriteRow());
+    const strip = node('div', '', {class: 'strip'}), status = node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'});
+    if (this.busy) status.dataset.busy = 'true';
+    strip.append(status, ...this.elapsed()); this.card.append(strip);
+    const foot = node('footer', '', {class: 'foot'});
+    if (this.undo) foot.append(this.button('Undo last edit', () => this.actions.undo(), {class: 'quiet small'}, 'undo'));
+    const check = this.button('Check now', () => this.actions.check(), {class: 'quiet small'}, 'refresh'); check.disabled = Boolean(this.busy);
+    foot.append(check, this.button('Cancel check', () => this.actions.cancel(), {class: 'quiet small'}, 'stop'), this.button('Pause Lineleaf', () => this.actions.pause(), {class: 'quiet small'}, 'pause'),
+      this.button('Settings', () => this.actions.settings(), {class: 'quiet small'}, 'sliders'));
+    this.card.append(foot, node('p', preview ? 'Codex via Seatline · model processing may be remote. Lineleaf does not change this editor.'
+      : 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'privacy'}));
+    this.draw(); title.focus({preventScroll: true});
+  }
+  // One correction or wording suggestion: its kind, the change, the way to accept it, and where it sits among the others.
+  suggestion(body, edit) {
+    body.append(node('p', categoryLabel(edit.category), {class: 'category', 'data-category': edit.category}));
+    const change = node('p', '', {class: 'change'}); change.append(node('span', edit.before, {class: 'before'}), node('span', ' → ', {class: 'arrow', 'aria-hidden': 'true'}), node('span', edit.after || '(remove)', {class: 'after'}));
+    body.append(change);
+    const controls = node('div', '', {class: 'row actions'});
+    if (!this.capture?.preview) controls.append(this.acceptButton(edit));
+    controls.append(this.button('Dismiss', () => this.actions.dismiss(edit)), this.copyButton(edit));
+    if (edit.category === 'spelling' && dictionaryWord(edit.before)) controls.append(this.button('Add to dictionary', () => this.actions.addWord(edit.before), {class: 'quiet'}, 'plus'));
+    body.append(controls);
+    const explanation = node('details'); explanation.append(node('summary', 'Why this suggestion?'), node('p', edit.explanation, {class: 'explanation'})); body.append(explanation);
+    const meta = node('div', '', {class: 'meta'});
+    if (this.edits.length > 1) {
+      const pager = node('div', '', {class: 'pager'});
+      pager.append(this.button('Previous', () => this.open((this.index + this.edits.length - 1) % this.edits.length, this.anchored), {class: 'icon quiet'}, 'left', true),
+        node('span', `${this.index + 1} of ${this.edits.length}`), this.button('Next', () => this.open((this.index + 1) % this.edits.length, this.anchored), {class: 'icon quiet'}, 'right', true));
+      meta.append(pager);
+    }
+    if (this.anchored) { // Opened from a word: just the suggestion. More brings in the rewrite tools and everyday actions.
+      const more = this.button('More', () => {
+        const compact = this.card.dataset.compact !== 'true'; this.card.dataset.compact = String(compact);
+        more.replaceChildren(...iconLabel(compact ? 'down' : 'up', compact ? 'More' : 'Less')); more.setAttribute('aria-expanded', String(!compact)); this.draw();
+      }, {class: 'quiet small', 'aria-expanded': 'false'}, 'down');
+      meta.append(more);
+    }
+    if (meta.children.length) body.append(meta);
   }
   acceptButton(edit) {
     const mapped = {...edit, start: edit.start + this.capture.offset, end: edit.end + this.capture.offset};
-    const accept = this.button(edit.rewrite ? 'Replace' : 'Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': edit.rewrite ? 'Replace the text with the suggested rewrite' : `Accept suggestion: ${edit.after || 'remove text'}`});
+    const accept = this.button(edit.rewrite ? 'Replace' : 'Accept', () => this.actions.accept(edit), {class: 'primary', 'aria-label': edit.rewrite ? 'Replace the text with the suggested rewrite' : `Accept suggestion: ${edit.after || 'remove text'}`}, 'check');
     accept.disabled = this.copyOnly || !this.capture.valid() || !(this.capture.editable ? canApplyRich(this.capture, edit) : validSpan(this.capture.snapshot.source, mapped));
     return accept;
   }
@@ -99,29 +132,29 @@ class InlineView {
     return this.button('Copy', async () => {
       try { await navigator.clipboard.writeText(edit.after); this.status('Suggestion copied.'); }
       catch { const copy = node('textarea', '', {readonly: '', 'aria-label': 'Suggestion to copy'}); copy.value = edit.after; this.card.append(copy); copy.focus(); copy.select(); this.status('Clipboard unavailable. Copy the selected text with your keyboard.'); }
-    });
+    }, {class: 'quiet'}, 'copy');
   }
   // A rewrite replaces a whole selection or paragraph, so it is shown as before/after text rather than an underline.
-  rewritePreview(edit, title) {
+  rewritePreview(body, edit, title) {
     title.textContent = REWRITE_LABELS[edit.rewrite] ?? 'Rewrite';
-    this.card.append(node('p', `${this.capture?.scope === 'selection' ? 'Selected text' : 'This paragraph'} · ${categoryLabel(edit.category)}`, {class: 'category'}));
-    this.card.append(node('p', 'Original', {class: 'label'}), node('p', edit.before, {class: 'text'}), node('p', 'Suggested', {class: 'label'}), node('p', edit.after, {class: 'text suggested'}));
-    if (edit.flags?.length) this.card.append(node('p', `Check this version: it changes ${edit.flags.map(flag => FLAG_LABELS[flag]).join(', ')}.`, {class: 'note warn'}));
-    const explanation = node('details'); explanation.append(node('summary', 'About this rewrite'), node('p', edit.explanation, {class: 'explanation'})); this.card.append(explanation);
-    const controls = node('div', '', {class: 'row'});
+    body.append(node('p', `${this.capture?.scope === 'selection' ? 'Selected text' : 'This paragraph'} · ${categoryLabel(edit.category)}`, {class: 'category', 'data-category': edit.category}));
+    body.append(node('p', 'Original', {class: 'label'}), node('p', edit.before, {class: 'text'}), node('p', 'Suggested', {class: 'label'}), node('p', edit.after, {class: 'text suggested'}));
+    if (edit.flags?.length) body.append(node('p', `Check this version: it changes ${edit.flags.map(flag => FLAG_LABELS[flag]).join(', ')}.`, {class: 'note warn'}));
+    const explanation = node('details'); explanation.append(node('summary', 'About this rewrite'), node('p', edit.explanation, {class: 'explanation'})); body.append(explanation);
+    const controls = node('div', '', {class: 'row actions'});
     if (!this.capture?.preview) controls.append(this.acceptButton(edit));
-    controls.append(this.button('Try again', () => this.actions.rewrite(edit.rewrite)), this.copyButton(edit), this.button('Back', () => this.actions.dismiss(edit)));
-    this.card.append(controls);
+    controls.append(this.button('Try again', () => this.actions.rewrite(edit.rewrite), {}, 'refresh'), this.copyButton(edit), this.button('Back', () => this.actions.dismiss(edit), {class: 'quiet'}, 'undo'));
+    body.append(controls);
   }
   // Explicit, optional rewrites of the selection, or of the caret paragraph when nothing is selected.
   rewriteRow() {
     const group = node('div', '', {class: 'rewrite', role: 'group', 'aria-label': 'Rewrite'});
-    group.append(node('p', 'Rewrite your selection, or this paragraph if nothing is selected.', {class: 'muted'}));
-    const main = node('div', '', {class: 'row'}), more = node('div', '', {class: 'row'});
-    for (const mode of ['improve', 'paraphrase']) main.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode}));
-    for (const mode of ['clearer', 'shorter', 'formal', 'friendly']) more.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {class: 'small', 'data-rewrite': mode}));
-    for (const button of [...main.children, ...more.children]) button.disabled = Boolean(this.busy); // One request at a time; Cancel check stays available.
-    group.append(main, more); return group;
+    group.append(node('p', 'Rewrite', {class: 'label', 'aria-hidden': 'true'}), node('p', 'Rewrite your selection, or this paragraph if nothing is selected.', {class: 'muted'}));
+    const chips = node('div', '', {class: 'chips'});
+    for (const mode of ['improve', 'paraphrase']) chips.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode, class: 'chip lead'}, 'sparkle'));
+    for (const mode of ['clearer', 'shorter', 'formal', 'friendly']) chips.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode, class: 'chip'}));
+    for (const button of chips.children) button.disabled = Boolean(this.busy); // One request at a time; Cancel check stays available.
+    group.append(chips); return group;
   }
   // While a request runs the card stays open and counts the seconds (visual only, so the live region is not read out every second).
   elapsed() {
@@ -130,29 +163,38 @@ class InlineView {
     tick(); this.ticker = setInterval(tick, 1000); return [line];
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
-  hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); this.restore(); }
+  hide() { this.card.hidden = true; this.draw(); this.field.focus({preventScroll: true}); this.restore(); }
+  rects(edit) { return this.capture.rects ? this.capture.rects(edit) : suggestionRects(this.field, this.capture.snapshot.source, this.capture.offset + edit.start, this.capture.offset + edit.end, this.mirror); }
   draw() {
     const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
     this.layer.hidden = !r; if (!r) { this.mirror.textContent = ''; return; }
+    const valid = Boolean(this.capture?.valid()), shown = !this.card.hidden, found = new Map();
+    if (valid) for (let i = 0; i < this.edits.length; i++) if (!this.edits[i].rewrite) found.set(i, this.rects(this.edits[i]));
     // A translated document root also translates fixed-position containing blocks.
     const origin = this.layer.getBoundingClientRect();
     this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth)) - origin.left}px`;
-    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - 30, r.bottom + 3)) - origin.top}px`;
-    if (!this.card.hidden) {
-      const width = this.card.offsetWidth, height = this.card.offsetHeight;
-      this.card.style.left = `${Math.max(12, Math.min(innerWidth - width - 12, r.right - width)) - origin.left}px`;
-      this.card.style.top = `${Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8)) - origin.top}px`;
+    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - this.badge.offsetHeight - 4, r.bottom + 4)) - origin.top}px`;
+    if (shown) {
+      const width = this.card.offsetWidth, height = this.card.offsetHeight, word = this.anchored ? found.get(this.index)?.[0] : null;
+      let left = Math.max(12, Math.min(innerWidth - width - 12, r.right - width)), top = Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8));
+      if (word) { // By the word, below it, or above when there is no room below.
+        left = Math.max(12, Math.min(innerWidth - width - 12, word.left - 16));
+        top = word.bottom + 10 + height <= innerHeight - 12 ? word.bottom + 10 : Math.max(12, Math.min(innerHeight - height - 12, word.top - height - 10));
+      }
+      this.card.style.left = `${left - origin.left}px`; this.card.style.top = `${top - origin.top}px`;
     }
-    if (!this.capture?.valid()) { this.mirror.textContent = ''; return; }
-    for (let i = 0; i < this.edits.length; i++) {
-      const edit = this.edits[i], start = this.capture.offset + edit.start, end = this.capture.offset + edit.end;
-      if (edit.rewrite) continue;
-      const rectangles = this.capture.rects ? this.capture.rects(edit) : suggestionRects(field, this.capture.snapshot.source, start, end, this.mirror);
+    for (const [i, rectangles] of found) {
+      const edit = this.edits[i];
       for (const rectangle of rectangles) {
-        const line = this.button('', () => this.open(i), {class: 'underline', tabindex: '-1', 'aria-hidden': 'true', 'data-category': edit.category});
+        if (shown && i === this.index) { // The word the open card is about.
+          const mark = node('div', '', {class: 'mark', 'data-category': edit.category, 'aria-hidden': 'true'});
+          mark.style.left = `${rectangle.left - origin.left}px`; mark.style.top = `${rectangle.top - origin.top}px`; mark.style.width = `${rectangle.right - rectangle.left}px`; mark.style.height = `${rectangle.bottom - rectangle.top}px`; this.lines.append(mark);
+        }
+        const line = this.button('', () => this.open(i, true), {class: 'underline', tabindex: '-1', 'aria-hidden': 'true', 'data-category': edit.category});
         line.style.left = `${rectangle.left - origin.left}px`; line.style.top = `${rectangle.bottom - 3 - origin.top}px`; line.style.width = `${rectangle.right - rectangle.left}px`; this.lines.append(line);
       }
     }
+    if (!valid) this.mirror.textContent = '';
   }
   close() { clearInterval(this.ticker); document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
 }

@@ -1,0 +1,59 @@
+/* Shared components for the extension pages and the in-page shadow roots. Colours and sizes come from tokens.css. */
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+button, input, select, textarea { font: inherit; color: inherit; }
+svg.ll-icon { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+svg.ll-icon .solid { fill: currentColor; stroke: none; }
+svg.ll-icon .vein { stroke: var(--ll-vein, var(--ll-bg)); stroke-width: 1.6; }
+
+/* Buttons: one primary per view, quiet secondary actions, text-weight tertiary ones. */
+button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 6px 12px; border: 1px solid var(--ll-line); border-radius: var(--ll-r);
+  background: var(--ll-bg); color: var(--ll-ink); font-size: 13px; font-weight: 500; line-height: 1.2; cursor: pointer; text-align: center;
+  transition: background var(--ll-fast) var(--ll-ease), border-color var(--ll-fast) var(--ll-ease), box-shadow var(--ll-fast) var(--ll-ease); }
+button:hover:not(:disabled) { background: var(--ll-surface); border-color: var(--ll-ink-3); }
+button:active:not(:disabled) { background: var(--ll-surface-2); }
+button.primary { background: var(--ll-brand); border-color: var(--ll-brand); color: var(--ll-on-brand); font-weight: 600; }
+button.primary:hover:not(:disabled) { background: var(--ll-brand-hover); border-color: var(--ll-brand-hover); }
+button.quiet { border-color: transparent; background: transparent; color: var(--ll-ink-2); }
+button.quiet:hover:not(:disabled) { background: var(--ll-surface); border-color: transparent; color: var(--ll-ink); }
+button.small { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+button.icon { width: 32px; min-height: 32px; padding: 0; border-radius: var(--ll-pill); }
+button:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: none; box-shadow: var(--ll-ring); }
+@media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight; } button { border-color: ButtonText; } }
+
+/* Text and callouts. */
+.muted { color: var(--ll-ink-3); font-size: 12px; line-height: 1.45; }
+.note { margin: 10px 0 0; padding: 8px 10px; border-radius: var(--ll-r-sm); border-left: 3px solid var(--ll-brand); background: var(--ll-brand-soft); color: var(--ll-brand-ink); font-size: 12px; line-height: 1.45; }
+.note.warn { border-left-color: var(--ll-warn); background: var(--ll-warn-soft); color: var(--ll-warn-ink); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* A suggestion's category: coloured dot plus label. The dot repeats what the underline style says, so colour is never the only cue. */
+.category { display: inline-flex; align-items: center; gap: 7px; margin: 0; color: var(--ll-fix-ink); font-size: 12px; font-weight: 600; }
+.category::before { content: ""; width: 8px; height: 8px; border-radius: var(--ll-pill); background: var(--ll-fix); flex: none; }
+.category[data-category="clarity"] { color: var(--ll-clear-ink); } .category[data-category="clarity"]::before { background: var(--ll-clear); border-radius: 2px; }
+.category[data-category="style"] { color: var(--ll-style-ink); } .category[data-category="style"]::before { background: var(--ll-style); border-radius: 2px; transform: rotate(45deg); }
+
+/* The change itself: what was written, struck through, then what Lineleaf proposes. */
+.change { margin: 8px 0 0; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ll-ink); }
+.change .before { color: var(--ll-ink-3); text-decoration: line-through; text-decoration-thickness: 1.5px; }
+.change .arrow { white-space: pre; color: var(--ll-ink-3); }
+.change .after { padding: 1px 6px; border-radius: var(--ll-r-sm); background: var(--ll-brand-soft); color: var(--ll-brand-ink); font-weight: 600; }
+.category[data-category="clarity"] ~ .change .after { background: var(--ll-clear-soft); color: var(--ll-clear-ink); }
+
+/* Disclosure rows. */
+details { margin-top: 8px; }
+summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 2px 4px; margin-left: -4px; border-radius: var(--ll-r-sm); color: var(--ll-ink-2); font-size: 12px; font-weight: 500; cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: ""; width: 6px; height: 6px; border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(-45deg); transition: transform var(--ll-fast) var(--ll-ease); }
+details[open] > summary::before { transform: rotate(45deg); }
+summary:hover { color: var(--ll-ink); background: var(--ll-surface); }
+.explanation { margin: 6px 0 0; color: var(--ll-ink-2); font-size: 12px; line-height: 1.5; }
+
+textarea, input[type=text], select { width: 100%; padding: 8px 10px; border: 1px solid var(--ll-line); border-radius: var(--ll-r); background: var(--ll-bg); color: var(--ll-ink); font-size: 13px; line-height: 1.45; }
+textarea:hover, input[type=text]:hover, select:hover { border-color: var(--ll-ink-3); }
+textarea:focus-visible, input[type=text]:focus-visible, select:focus-visible { border-color: var(--ll-brand); }
+select { appearance: none; padding-right: 32px; background-image: linear-gradient(45deg, transparent 50%, var(--ll-ink-2) 50%), linear-gradient(135deg, var(--ll-ink-2) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; } }
