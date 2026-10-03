@@ -1,5 +1,5 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 
@@ -85,7 +85,7 @@ export function installController(api, {now = Date.now} = {}) {
       if (signal.aborted) throw new LineleafError('CANCELLED');
       connection = native(); peer.connection = connection;
       send(peer.port, {type: 'progress', id: request.id, stage: 'connecting'});
-      requireReady(await connection.request('status', null, {signal, timeout: 15000}));
+      requireReady(await connection.request('status', null, {signal, timeout: PHASES.status}));
       // Permissions/settings may have changed while status was being probed.
       const latest = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
@@ -205,7 +205,7 @@ export function installController(api, {now = Date.now} = {}) {
     if (message.type === 'site-state' && p === null) return {enabled: allowed(settings, originOf(sender.url))};
     if (message.type === 'check-connection' && p === null) {
       if (active || diagnostic) throw new LineleafError('BUSY'); diagnostic = true; const connection = native();
-      try { return statusView(await connection.request('status', null, {timeout: 15000})); }
+      try { return statusView(await connection.request('status', null, {timeout: PHASES.status})); }
       finally { connection.close(); diagnostic = false; }
     }
     throw new LineleafError('INVALID_REQUEST');

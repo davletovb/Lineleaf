@@ -4,7 +4,7 @@ import {captureRichParagraph} from './rich-text.mjs';
 import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
 import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selection.mjs';
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
-import {AUTO_IDLE, AUTO_INTERVAL, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
+import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import styles from '../inline.css';
 
@@ -318,14 +318,15 @@ export function mountInline(api) {
           }
           clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
         } else if (message.type === 'error') {
-          finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED'].includes(message.code);
+          finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED', 'AUTO_PAUSED'].includes(message.code);
+          // A refusal that says when to come back is retried then; AUTO_PAUSED (another tab's timeout) may be several minutes away.
+          const retryDelay = Math.max(1000, Math.min(message.code === 'AUTO_PAUSED' ? AUTOMATIC_HOLD : 60000, message.retryAfterMs || (message.code === 'PROVIDER_RATE_LIMITED' ? 60000 : 5000)));
           if (wording) { // Optional and best-effort: wait out a shared-interval refusal once more, otherwise give up on this text; corrections stay and automatic checking goes on.
-            const wait = Math.max(1000, Math.min(60000, message.retryAfterMs || 5000));
-            if (retryable && message.code !== 'CANCELLED') { clarityDue = true; nextAt = Date.now() + wait; queue(); } else clarityDue = false;
+            if (retryable) { clarityDue = true; nextAt = Date.now() + retryDelay; queue(); } else clarityDue = false;
             if (!retryable) update(messageFor(message.code));
             return;
           }
-          if (retryable && automatic) { lastKey = null; nextAt = Date.now() + Math.max(1000, Math.min(60000, message.retryAfterMs || (message.code === 'PROVIDER_RATE_LIMITED' ? 60000 : 5000))); queue(nextAt - Date.now()); }
+          if (retryable && automatic) { lastKey = null; nextAt = Date.now() + retryDelay; queue(nextAt - Date.now()); }
           else blocked = !rewriteMode && message.code !== 'CANCELLED';
           if (rewriteMode) restoreHeld(messageFor(message.code));
           update(messageFor(message.code)); if (!automatic) view?.open();

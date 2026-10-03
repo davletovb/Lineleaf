@@ -14,7 +14,10 @@ export const FLAG_LABELS = {number: 'a number or date', name: 'a name or capital
 // can be cancelled. The page waits a little longer than the worker (its 3-second cancel drain included) so the worker's own answer arrives first.
 // Provisional until A-03 has measured a live distribution: one live report showed explicit requests needing more than 30 seconds.
 export const REQUEST_TIMEOUT = {automatic: 30000, manual: 90000};
-export const WATCHDOG = {automatic: 65000, manual: 105000};
+// The worker's phases in order: the readiness handshake, the sign-in/tool-isolation status probe, the provider turn, and the cancel drain.
+export const PHASES = {ready: 10000, status: 15000, drain: 3000};
+// The page waits for the whole sequence plus a margin, so the worker's own answer (or its own timeout) always arrives first.
+export const WATCHDOG = Object.fromEntries(Object.entries(REQUEST_TIMEOUT).map(([kind, ms]) => [kind, PHASES.ready + PHASES.status + ms + PHASES.drain + 7000]));
 export const AUTOMATIC_HOLD = 300000; // After a provider timeout, no background requests for five minutes (or until an explicit one succeeds).
 export const AUTO_IDLE = 1500;
 export const AUTO_INTERVAL = 10000;

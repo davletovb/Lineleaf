@@ -188,7 +188,7 @@ for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not co
     await page.evaluate(fault => {
       if (fault === 'the worker goes away') fixture.faults.drop = true;
       else if (fault === 'no connection can be made') fixture.faults.connect = true;
-      else { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 105000 ? 50 : ms, ...args); } // shorten only the watchdog
+      else { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); } // shorten only the watchdog
     }, fault);
     await openCard(); await press('Improve it');
     await inline.locator('#status').waitFor((el, text) => el.textContent.startsWith(text), expected);
@@ -402,10 +402,27 @@ test('an action Lineleaf refuses says why instead of doing nothing, and works on
 
 test('a Check now that times out reopens the card with the reason, and the next click works', async () => {
   await load(); await proofreadAnswer(); await useTextarea('He go to work.');
-  await page.evaluate(() => { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 105000 ? 50 : ms, ...args); }); // shorten only the explicit watchdog
+  await page.evaluate(() => { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); }); // shorten only the explicit watchdog
   await openCard(); await press('Check now');
   await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time'));
   assert.equal(await inline.button('Check now').isDisabled(), false); assert.equal(await inline.button('Improve it').isDisabled(), false);
   await page.evaluate(() => { fixture.worker.hold = false; });
   await press('Check now'); await inline.locator('.underline').waitFor();
+});
+
+// The hold that follows a provider timeout is temporary: an editor refused during it must try again by itself afterwards.
+test('an automatic check refused during the provider hold is retried after it, instead of leaving the editor blocked', async () => {
+  await load(); await proofreadAnswer(); await useTextarea('He go to work.');
+  await page.evaluate(() => { // the worker's 90-second turn limit becomes 50 ms; retries that would wait minutes wait three seconds (the card's own 300000 expiry is left alone)
+    fixture.worker.hold = true; const real = window.setTimeout;
+    window.setTimeout = (fn, ms, ...args) => real(fn, ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args); // not the 300000 expiry
+  });
+  await openCard(); await press('Check now');
+  await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time')); // sets the hold
+  await page.evaluate(() => { fixture.worker.hold = false; });
+  await press('Cancel check'); await typeAtEnd(' '); // unblocked; the next automatic check is refused by the hold
+  await inline.locator('.badge').waitFor(el => /Automatic checking is paused/.test(el.getAttribute('aria-label')));
+  await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 301000; }); // the five minutes pass
+  await inline.locator('.underline').waitFor(); // retried by itself and answered
+  assert.deepEqual((await requests()).map(x => x.kind), ['manual', 'automatic', 'automatic']);
 });

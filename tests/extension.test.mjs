@@ -2,7 +2,7 @@ import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {candidates, strictJSON, preservationFlags} from '../extension/lib/candidates.mjs';
-import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary} from '../extension/lib/policy.mjs';
+import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary, PHASES, REQUEST_TIMEOUT, WATCHDOG} from '../extension/lib/policy.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
 import {messageFor} from '../extension/lib/messages.mjs';
@@ -505,4 +505,33 @@ test('after a provider timeout background checks stop (across restarts) until an
   clock = 500000; slow = true; const expired = restarted.connect({documentId: 'expired'}); autoStart(expired);
   await waitFor(() => expired.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
   clock = 801000; slow = false; const after = restarted.connect({documentId: 'after'}); autoStart(after); await waitFor(() => after.received.some(x => x.type === 'result')); // the hold expires by itself
+});
+
+test('the page watchdog outlasts the worker’s whole sequence, so a slow but healthy handshake, status and turn still deliver', async () => {
+  for (const kind of ['automatic', 'manual']) assert.ok(WATCHDOG[kind] > PHASES.ready + PHASES.status + REQUEST_TIMEOUT[kind] + PHASES.drain, kind);
+  const settle = async () => { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); };
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    const f = fakeChrome({automatic: true}); const sends = [];
+    f.api.runtime.connectNative = () => {
+      const port = fakeNative((m, p) => {
+        if (m.method === 'status') setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 14000);
+        if (m.method === 'send') { sends.push(m); setTimeout(() => { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); }, 85000); }
+      }, null);
+      setTimeout(() => port.onMessage.emit({type: 'ready', version: 1}), 9000); // each phase just inside its own limit
+      return port;
+    };
+    installController(f.api, {now: () => 0}); const port = f.connect(); start(port); await settle();
+    mock.timers.tick(9000); await settle(); mock.timers.tick(14000); await settle(); assert.equal(sends.length, 1); // handshake and status done at 23 s
+    mock.timers.tick(85000); await settle(); // 108 s in all: past the earlier 105-second page limit, inside the new one
+    assert.ok(port.received.some(x => x.type === 'result'), JSON.stringify(port.received.map(x => x.type + ':' + (x.code ?? ''))));
+    assert.ok(108000 > 105000 && 108000 < WATCHDOG.manual);
+    // The phases really are bounded where the watchdog assumes: a status probe that takes 20 seconds is cut off at fifteen (plus the cancel drain).
+    const g = fakeChrome({automatic: true});
+    g.api.runtime.connectNative = () => fakeNative((m, p) => { if (m.method === 'status') setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 20000); });
+    installController(g.api, {now: () => 0}); const slow = g.connect(); start(slow); await settle();
+    mock.timers.tick(14000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false);
+    mock.timers.tick(2000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false); // the limit hit at 15 s; the unanswered cancel drains for 3 s
+    mock.timers.tick(5000); await settle(); assert.equal(slow.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT');
+  } finally { mock.timers.reset(); }
 });
