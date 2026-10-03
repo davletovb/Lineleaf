@@ -4,7 +4,7 @@ import {captureRichParagraph} from './rich-text.mjs';
 import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
 import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selection.mjs';
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
-import {AUTO_IDLE, AUTO_INTERVAL, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
+import {AUTO_IDLE, AUTO_INTERVAL, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import styles from '../inline.css';
 
@@ -32,7 +32,8 @@ class InlineView {
   }
   focused() { return document.activeElement === this.host; }
   announce(message) { if (this.announcer.textContent !== message) this.announcer.textContent = message; }
-  update(capture, edits, message, undo = false, copyOnly = false) {
+  update(capture, edits, message, undo = false, copyOnly = false, busy = false) {
+    clearInterval(this.ticker); this.busySince = busy ? this.busySince || Date.now() : 0; this.busy = busy;
     this.capture = capture; this.edits = edits; this.message = message; this.undo = undo; this.copyOnly = copyOnly; this.index = Math.min(this.index, Math.max(0, edits.length - 1));
     this.announce(message);
     this.badge.textContent = edits.some(edit => edit.rewrite) ? 'Lineleaf · rewrite ready' : edits.length ? `Lineleaf · ${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : /^(Checking|Working)/.test(message) ? 'Lineleaf · working…' : 'Lineleaf · review';
@@ -79,12 +80,13 @@ class InlineView {
     if (preview) this.card.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
     else if (this.capture?.editable && this.copyOnly) this.card.append(node('p', 'This editor did not take the change cleanly, so Lineleaf is copy-only here until the page reloads. Check your draft; the editor’s own undo (Ctrl/⌘ Z) reverses its changes.', {class: 'note'}));
     else if (this.capture?.editable && edit && !canApplyRich(this.capture, edit)) this.card.append(node('p', 'This change spans formatting or a mention, so Lineleaf can only copy it.', {class: 'note'}));
-    this.card.append(node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'}), node('p', preview
+    this.card.append(node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'}), ...this.elapsed(), node('p', preview
       ? 'Codex via Seatline · model processing may be remote. Lineleaf does not change this editor.'
       : 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'muted'}));
     const footer = node('div', '', {class: 'row'});
     if (this.undo) footer.append(this.button('Undo last edit', () => this.actions.undo()));
-    footer.append(this.button('Check now', () => this.actions.check()), this.button('Cancel check', () => this.actions.cancel()), this.button('Pause Lineleaf', () => this.actions.pause()), this.button('Settings', () => this.actions.settings()));
+    const check = this.button('Check now', () => this.actions.check()); check.disabled = Boolean(this.busy);
+    footer.append(check, this.button('Cancel check', () => this.actions.cancel()), this.button('Pause Lineleaf', () => this.actions.pause()), this.button('Settings', () => this.actions.settings()));
     this.card.append(footer); this.draw(); title.focus({preventScroll: true});
   }
   acceptButton(edit) {
@@ -118,7 +120,14 @@ class InlineView {
     const main = node('div', '', {class: 'row'}), more = node('div', '', {class: 'row'});
     for (const mode of ['improve', 'paraphrase']) main.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode}));
     for (const mode of ['clearer', 'shorter', 'formal', 'friendly']) more.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {class: 'small', 'data-rewrite': mode}));
+    for (const button of [...main.children, ...more.children]) button.disabled = Boolean(this.busy); // One request at a time; Cancel check stays available.
     group.append(main, more); return group;
+  }
+  // While a request runs the card stays open and counts the seconds (visual only, so the live region is not read out every second).
+  elapsed() {
+    if (!this.busy) return [];
+    const line = node('p', '', {class: 'muted', 'aria-hidden': 'true', 'data-elapsed': ''}), tick = () => { line.textContent = `Waiting for Codex… ${Math.round((Date.now() - this.busySince) / 1000)} s. Choose Cancel check to stop.`; };
+    tick(); this.ticker = setInterval(tick, 1000); return [line];
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
   hide() { this.card.hidden = true; this.field.focus({preventScroll: true}); this.restore(); }
@@ -145,7 +154,7 @@ class InlineView {
       }
     }
   }
-  close() { document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
+  close() { clearInterval(this.ticker); document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
 }
 
 export function mountInline(api) {
@@ -153,6 +162,7 @@ export function mountInline(api) {
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
   let mode = 'edit', settling = 0, before; // 'rich' = no adapter: caret-paragraph capture; Accept only in a verified editor family
   let held = null; // proofreading suggestions set aside while an explicit rewrite is shown
+  let working = false; // a request to the provider is in flight
   let clarityDue = false, clarityFor = null; // an optional clearer-wording check is waiting for the shared automatic interval, for this paragraph key
   const compositions = new WeakSet();
   // `available`: the site is enabled and not paused (site-state answered). `permitted`: automatic checking is also on. Without it the
@@ -161,11 +171,11 @@ export function mountInline(api) {
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
   const active = () => deepActive() === field;
   const stop = () => {
-    generation++; clearTimeout(timer); clearTimeout(watchdog); timer = null;
+    generation++; working = false; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
   };
   function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); held = null; clarityDue = false; clarityFor = null; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
-  function update(message) { view?.update(capture, edits, message, undo, copyOnly); }
+  function update(message) { view?.update(capture, edits, message, undo, copyOnly, working); }
   // Bring back the proofreading suggestions that were set aside for a rewrite, if their text is still the current text.
   function restoreHeld(message) {
     const previous = held; held = null;
@@ -174,10 +184,11 @@ export function mountInline(api) {
   }
   // A failed explicit rewrite is not a failed check: it brings back the suggestions set aside for it, leaves automatic checking
   // alone and opens the card with the reason. Only a failed proofreading check pauses further automatic checks.
-  function failed(code, rewriteMode, wording = false) {
+  function failed(code, rewriteMode, wording = false, explicit = Boolean(rewriteMode)) {
+    working = false;
     if (wording) clarityDue = false; // Optional extra check: say why, keep the corrections on screen, never pause automatic checking.
     else if (rewriteMode) restoreHeld(messageFor(code)); else blocked = true;
-    update(messageFor(code)); if (rewriteMode) view?.open();
+    update(messageFor(code)); if (explicit) view?.open(); // The user asked for something, so say why it did not happen.
   }
   // The corrections and the clearer-wording suggestions share one list; wording never overlaps a correction.
   function addWording(found) {
@@ -230,7 +241,7 @@ export function mountInline(api) {
         if (!eligibleDOM()) { drop(); return; }
       } else { drop(); return; }
       view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { if (edit.rewrite && restoreHeld('Rewrite dismissed. Your text is unchanged.')) { view.open(); return; } edits = edits.filter(x => x !== edit); update(edits.length ? (replaceable() ? 'Review each suggestion before accepting.' : 'Review each suggestion. Copy one to use it.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
-        check: () => { stop(); void run(false); }, rewrite: rewriteMode => { stop(); void run(false, rewriteMode); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); },
+        check: () => { stop(); void run(false); }, rewrite: rewriteMode => { stop(); void run(false, rewriteMode); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); view?.open(); },
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});
@@ -246,9 +257,17 @@ export function mountInline(api) {
     else if (clarityDue) timer = setTimeout(() => { timer = null; void run(true, null, true); }, Math.max(0, nextAt - Date.now())); // After the corrections, on the shared interval.
   }
   async function run(automatic, rewriteMode = null, wording = false) {
-    if (!field || port || composing || applying || !eligibleDOM() || document.visibilityState !== 'visible') return;
+    if (!field || port || composing || applying || !eligibleDOM() || document.visibilityState !== 'visible') {
+      // An automatic check may wait silently; something the user chose must never do nothing without saying why.
+      if (!automatic && field && view) {
+        update(port ? 'A request is already running. Choose Cancel check to stop it.' : composing ? 'Finish the text you are composing, then try again.'
+          : applying ? 'Lineleaf is applying an edit. Try again in a moment.' : 'Lineleaf cannot use this field right now: it may be hidden, read-only or excluded.');
+        view.open();
+      }
+      return;
+    }
     if (automatic && (!permitted() || !active() || blocked)) return;
-    if (!navigator.onLine) { failed('OFFLINE', rewriteMode); return; }
+    if (!navigator.onLine) { failed('OFFLINE', rewriteMode, wording, !automatic); return; }
     // Explicit Check now restores the field focus before capturing its current paragraph.
     if (!automatic) { field.focus({preventScroll: true}); view?.restore(); blocked = false; clarityDue = false; }
     let next;
@@ -256,28 +275,33 @@ export function mountInline(api) {
     catch {
       if (wording) { clarityDue = false; return; }
       if (rewriteMode) { update('Rewrites need 1–2,000 characters of text with letters inside one paragraph. Select text within a single paragraph, or put the caret in one.'); view?.open(); return; }
-      capture = null; edits = []; update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.'); return;
+      capture = null; edits = [];
+      if (automatic) update('Automatic checking needs a supported paragraph of 1–2,000 characters. Select text for a manual check.');
+      else { update('Check now needs 1–2,000 characters of text with letters in one paragraph. Put the caret in a paragraph with text.'); view?.open(); }
+      return;
     }
     if (wording ? !clarityDue || keyFor(next) !== clarityFor : automatic && (!dirty || keyFor(next) !== pendingKey || keyFor(next) === lastKey)) { if (wording) clarityDue = false; return; }
     const ticket = ++generation, selectedField = field, state = await rpc('site-state');
     if (ticket !== generation || selectedField !== field || !eligibleDOM() || !next.valid()) return;
     if (wording && state.ok && !state.value.clarity) { clarityDue = false; return; }
-    if (!state.ok || (automatic && !state.value.automatic)) { failed(state.code ?? 'AUTOMATIC_DISABLED', rewriteMode, wording); return; }
+    if (!state.ok || (automatic && !state.value.automatic)) { failed(state.code ?? 'AUTOMATIC_DISABLED', rewriteMode, wording, !automatic); return; }
     if (rewriteMode) held = capture && !edits.some(edit => edit.rewrite) ? {capture, edits} : held; // Set the suggestions aside; Back restores them.
     policy = state.value; capture = next; if (!wording) { edits = []; if (!rewriteMode) lastKey = keyFor(next); } copyOnly = false; clarityDue = false; // `undo` stays: the adapter refuses it once the text has changed
     clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
+    working = true;
     update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with Codex… You can keep typing.` : wording ? 'Looking for clearer wording with Codex… You can keep typing.' : 'Checking with Codex… You can keep typing.');
+    if (!automatic) view?.open(); // Stay visible while it runs: progress, and Cancel check.
     const id = crypto.randomUUID();
     try {
       const current = api.runtime.connect({name: 'lineleaf-writing-v1'}); port = current;
-      const finish = () => { clearTimeout(watchdog); if (port === current) port = null; try { current.disconnect(); } catch { /* document gone */ } };
-      current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; clearTimeout(watchdog); failed('UNAVAILABLE', rewriteMode, wording); } });
+      const finish = () => { clearTimeout(watchdog); if (port === current) { port = null; working = false; } try { current.disconnect(); } catch { /* document gone */ } };
+      current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; clearTimeout(watchdog); failed('UNAVAILABLE', rewriteMode, wording, !automatic); } });
       current.onMessage.addListener(message => {
         if (port !== current || message.id !== id || ticket !== generation) return;
         if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; held = null; queue(); update(messageFor('STALE')); return; }
         if (message.type === 'result') {
-          finish(); if (!Array.isArray(message.edits)) { failed('INVALID_OUTPUT', rewriteMode, wording); return; }
+          finish(); if (!Array.isArray(message.edits)) { failed('INVALID_OUTPUT', rewriteMode, wording, !automatic); return; }
           if (rewriteMode) {
             edits = message.edits; clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
             const label = REWRITE_LABELS[rewriteMode];
@@ -288,6 +312,7 @@ export function mountInline(api) {
           if (wording) { addWording(message.edits); update(edits.length ? countMessage() : 'No corrections or clearer wording suggested.'); }
           else {
             edits = message.edits; update(edits.length ? countMessage() : 'No corrections suggested.');
+            if (!automatic && !edits.length) view?.open(); // An explicit Check now with nothing to show still answers.
             // With the optional setting on, the same paragraph gets one more automatic request for clearer wording, after the shared interval.
             if (automatic && policy?.clarity === true) { clarityDue = true; clarityFor = keyFor(capture); queue(); }
           }
@@ -303,12 +328,12 @@ export function mountInline(api) {
           if (retryable && automatic) { lastKey = null; nextAt = Date.now() + Math.max(1000, Math.min(60000, message.retryAfterMs || (message.code === 'PROVIDER_RATE_LIMITED' ? 60000 : 5000))); queue(nextAt - Date.now()); }
           else blocked = !rewriteMode && message.code !== 'CANCELLED';
           if (rewriteMode) restoreHeld(messageFor(message.code));
-          update(messageFor(message.code)); if (rewriteMode) view?.open();
+          update(messageFor(message.code)); if (!automatic) view?.open();
         }
       });
-      watchdog = setTimeout(() => { stop(); failed('PROVIDER_TIMEOUT', rewriteMode, wording); }, 65000);
+      watchdog = setTimeout(() => { stop(); failed('PROVIDER_TIMEOUT', rewriteMode, wording, !automatic); }, WATCHDOG[automatic ? 'automatic' : 'manual']);
       current.postMessage({type: 'start', id, text: capture.text, mode: rewriteMode ?? (wording ? 'clarity' : 'proofread'), kind: automatic ? 'automatic' : 'manual'});
-    } catch { stop(); failed('UNAVAILABLE', rewriteMode, wording); }
+    } catch { stop(); failed('UNAVAILABLE', rewriteMode, wording, !automatic); }
   }
   const RICH_FAILURES = {
     stale_or_unavailable: 'The text changed before this could be applied. Choose Check now to review the current text.',

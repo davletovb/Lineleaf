@@ -2,7 +2,7 @@ import {deepActive, eventElement, navigationToken, observeNavigation} from './li
 import {captureSelection, editorOf} from './lib/selection.mjs';
 import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
-import {errorCode, validText, FLAG_LABELS} from './lib/policy.mjs';
+import {errorCode, validText, FLAG_LABELS, WATCHDOG} from './lib/policy.mjs';
 import styles from './panel.css';
 import {mountInline} from './lib/inline.mjs';
 import {categoryLabel, dictionaryWord} from './lib/policy.mjs';
@@ -185,7 +185,7 @@ export function mountContent(api) {
           edits = message.edits; render(); status(edits.length ? 'Review each suggestion before accepting.' : query('#mode').value === 'proofread' ? 'No corrections suggested.' : 'No change suggested. This already reads well.');
         }
       });
-      watchdog = setTimeout(() => { stop(); status(messageFor('PROVIDER_TIMEOUT')); }, 65000);
+      watchdog = setTimeout(() => { stop(); status(messageFor('PROVIDER_TIMEOUT')); }, WATCHDOG.manual); // The panel only makes explicit requests.
       current.postMessage({type: 'start', id, text: capture.text, mode: query('#mode').value});
     } catch { stop(); status(messageFor('UNAVAILABLE')); }
   }

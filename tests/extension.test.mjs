@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {candidates, strictJSON, preservationFlags} from '../extension/lib/candidates.mjs';
@@ -465,4 +465,44 @@ test('a clearer-wording check spends the shared automatic budget and returns sep
   for (let i = 0; i < 4; i++) { clock += 10000; const p = f.connect({documentId: `more-${i}`}); clarityStart(p); await waitFor(() => p.received.some(x => x.type === 'result')); }
   clock = 155000; const capped = f.connect({documentId: 'capped'}); clarityStart(capped); // a seventh start inside the minute: the cap counts both kinds
   await waitFor(() => capped.received.some(x => x.code === 'AUTO_WAIT'));
+});
+
+// A slow provider: how long each kind of request waits, and what a timeout does to background work. (Live evidence: an explicit
+// request needed more than the old 30 seconds.)
+test('an explicit request waits ninety seconds for the provider, a background check thirty', async () => {
+  const settle = async () => { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); };
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    const f = fakeChrome({automatic: true, hang: true}); installController(f.api, {now: () => 0});
+    const background = f.connect(); autoStart(background); await settle(); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+    mock.timers.tick(29000); await settle(); assert.equal(background.received.some(x => x.type === 'error'), false);
+    mock.timers.tick(2000); await settle(); assert.equal(background.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT'); // 31 s
+    const explicit = f.connect({documentId: 'explicit'}); start(explicit); await settle(); assert.equal(f.calls.filter(x => x.method === 'send').length, 2);
+    mock.timers.tick(31000); await settle(); assert.equal(explicit.received.some(x => x.type === 'error'), false); // still waiting at 31 s
+    mock.timers.tick(58000); await settle(); assert.equal(explicit.received.some(x => x.type === 'error'), false); // and at 89 s
+    mock.timers.tick(2000); await settle(); assert.equal(explicit.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT'); // 91 s
+  } finally { mock.timers.reset(); }
+});
+test('after a provider timeout background checks stop (across restarts) until an explicit request gets an answer', async () => {
+  let clock = 100000; const f = fakeChrome({automatic: true});
+  let slow = true; const sends = [];
+  f.api.runtime.connectNative = () => fakeNative((m, p) => {
+    if (m.method === 'send') sends.push(m);
+    if (m.method === 'status') { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }
+    if (m.method === 'send') { if (slow) p.reply(m.id, {type: 'failed', reason: 'PROVIDER_TIMEOUT'}); else { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); } }
+  });
+  installController(f.api, {now: () => clock}); const first = f.connect(); autoStart(first);
+  await waitFor(() => first.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
+  assert.equal(f.sessionData.automaticHold, 400000);
+  clock = 120000; const second = f.connect({documentId: 'two'}); autoStart(second); // another tab, past the ten-second interval
+  await waitFor(() => second.received.some(x => x.code === 'AUTO_PAUSED')); assert.equal(sends.length, 1);
+  const restarted = fakeChrome({automatic: true}); restarted.api.storage.session = f.api.storage.session; restarted.api.runtime.connectNative = f.api.runtime.connectNative;
+  installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third); // a restarted worker keeps the hold
+  await waitFor(() => third.received.some(x => x.code === 'AUTO_PAUSED'));
+  slow = false; const explicit = restarted.connect({documentId: 'explicit'}); start(explicit); // the user can always try again
+  await waitFor(() => explicit.received.some(x => x.type === 'result')); assert.equal(f.sessionData.automaticHold, 0);
+  clock = 140000; const later = restarted.connect({documentId: 'later'}); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result')); // answered: background checks resume
+  clock = 500000; slow = true; const expired = restarted.connect({documentId: 'expired'}); autoStart(expired);
+  await waitFor(() => expired.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
+  clock = 801000; slow = false; const after = restarted.connect({documentId: 'after'}); autoStart(after); await waitFor(() => after.received.some(x => x.type === 'result')); // the hold expires by itself
 });
