@@ -190,6 +190,18 @@ test('when the second step of a whole-text rewrite is refused, the first is take
   assert.equal(await page.evaluate(() => ownedDraft.alive()), true);
 });
 
+test('a rewrite the field refuses is rolled back and its preview stays available to copy after the next poll', async () => {
+  await load(); await rewriteAnswer('He goes to work and they were late.');
+  await useTextarea('He go to work.'); await page.locator('#textarea').evaluate(el => { el.maxLength = 15; el.setSelectionRange(14, 14); });
+  await openCard(); await press('Improve it'); await suggested(); await press('Replace');
+  await inline.locator('#status').waitFor(el => /Original text restored/.test(el.textContent));
+  assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
+  await page.waitForTimeout(700); // The poll used to clear the card about 250 ms after a refused edit.
+  assert.match(await inline.locator('#status').textContent(), /Original text restored/);
+  assert.equal(await inline.locator('.suggested').textContent(), 'He goes to work and they were late.');
+  assert.equal(await inline.button('Copy').count(), 1); assert.equal(await inline.button('Replace').isDisabled(), true);
+});
+
 test('a Slate-like editor that only trusts beforeinput takes a whole-paragraph rewrite itself', async () => {
   await load(); await rewriteAnswer('He goes to work.');
   await caretAfter('#model-slate', 'work.'); await openCard(); await press('Improve it'); await suggested();

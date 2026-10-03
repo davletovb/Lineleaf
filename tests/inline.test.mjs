@@ -194,4 +194,11 @@ test('inline editing failure restores the source and keeps the candidate availab
   await inline.button('Accept').click(); assert.equal(await page.locator('#input').inputValue(), 'He go to work.');
   assert.match(await inline.locator('#status').textContent(), /Original text restored/);
   assert.equal(await inline.button('Accept').isDisabled(), true); assert.equal(await inline.button('Copy').count(), 1);
+  // The candidate stays after the next poll tick (it used to be cleared about 250 ms later), and goes only when the text changes.
+  await page.waitForTimeout(700);
+  assert.match(await inline.locator('#status').textContent(), /Original text restored/); assert.equal(await inline.button('Copy').count(), 1);
+  assert.equal(await inline.locator('.underline').count(), 1);
+  await page.locator('#input').evaluate(el => { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }); await page.keyboard.press('Backspace');
+  await inline.locator('.badge').waitFor(el => /changed/i.test(el.getAttribute('aria-label')));
+  assert.equal(await inline.locator('.underline').count(), 0);
 });

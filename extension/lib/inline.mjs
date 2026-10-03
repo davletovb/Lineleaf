@@ -430,6 +430,13 @@ export function mountInline(api) {
     try { result = capture.adapter.apply(capture.snapshot, {...edit, start: capture.offset + edit.start, end: capture.offset + edit.end}); }
     finally { applying = false; }
     if (capture !== selected || view !== selectedView) return;
+    // A refused edit that was rolled back leaves the same text, but the capture is stale for good: the rollback raises the adapter's
+    // revision with its own `input` event, and the field is no longer replaceable. Without a new capture the next poll would clear the
+    // suggestion Copy still offers. A copy-mode snapshot stays valid until the text really changes.
+    if (result?.status !== 'applied' && result?.restored) {
+      const fresh = adapter.snapshot({copy: true});
+      if (fresh && fresh.source === selected.snapshot.source) capture = {...selected, snapshot: fresh, valid: () => adapter.currentCapture(fresh)};
+    }
     undo = result?.status === 'applied'; edits = undo ? [] : [edit]; copyOnly = !undo;
     update(result?.contextChanged ? 'The editor changed context during this edit. Review its draft and use its own undo; safe restoration is unavailable.' : undo ? 'Applied. You can undo this edit before other typing.' : result?.restored ? `Original text restored. Use Copy.${result.stateUncertain ? ' Site state could not be verified.' : ''}` : 'Safe replacement is unavailable. Use the manual panel to preview and copy.');
     if (!undo) { blocked = true; view.open(); return; }
