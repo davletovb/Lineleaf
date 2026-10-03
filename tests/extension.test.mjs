@@ -59,7 +59,9 @@ test('rewrites report silent changes to numbers, names and negation instead of h
   assert.deepEqual(flags('Thanks for coming.', 'Thank you for coming.'), []);
   assert.deepEqual(flags('Maya paid the invoice.', 'Priya paid the invoice.'), ['name']); // a name that begins the text still counts
   assert.deepEqual(flags('Maya paid the invoice.', 'The invoice was paid by Maya.'), []);
-  assert.deepEqual(flags('I met Dr. Okafor. Okafor was late.', 'I met Dr. Okafor, who was late.'), []);
+  assert.deepEqual(flags('Maya thanked Maya for the notes.', 'Maya thanked for the notes.'), ['name']); // a repeated name is counted by occurrence
+  assert.deepEqual(flags('I met Dr. Okafor. Okafor was late.', 'I met Dr. Okafor, who was late.'), ['name']); // merging two mentions is reported, not hidden
+  assert.deepEqual(flags('We met Maya.', 'We met Maya, and Maya agreed.'), ['name']); // a name added to the rewrite more often than the source had it
   assert.deepEqual(flags('Maya\u2019s team won.', 'The team led by Maya won.'), []);
   assert.deepEqual(flags('The purpose of this note is to remind you that it is due.', 'Reminder: it is due.'), []); // a new first word is not an added name
   assert.deepEqual(flags('I am not available.', 'I am never available.'), ['negation']); // swapping one negator for another is still reported
@@ -84,7 +86,7 @@ test('settings permit only exact HTTP(S) origins and safe provider models', () =
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
   assert.equal(sitePattern('https://writing.test:8443'), 'https://writing.test/*');
   assert.deepEqual(preferences({provider: 'other', model: 'bad\nmodel', sites: ['https://writing.test', 'https://writing.test/path', 'file:///tmp']}),
-    {provider: 'codex', model: '', variant: 'US', paused: false, automatic: false, dictionary: [], sites: ['https://writing.test']});
+    {provider: 'codex', model: '', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: ['https://writing.test']});
 });
 test('packaged manifest has optional site access, no automatic/all-site content script or exposed resources', async () => {
   const m = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url)));
@@ -387,4 +389,80 @@ test('dictionary protects changed words inside phrases/punctuation and English p
     assert.deepEqual(filterDictionary([{...edit, category: 'grammar'}], settings), [{...edit, category: 'grammar'}]);
   }
   for (const edit of [spelling('Lineleaf is mispelt', 'Lineleaf is misspelt'), spelling('Seatlinearity', 'Seatline'), spelling('Lineleaf.', 'Lineleaf!')]) assert.deepEqual(filterDictionary([edit], settings), [edit]);
+});
+
+// F-02: optional clearer-wording suggestions. Their own setting (off by default, and only on with automatic checking), their own strict
+// contract, and the same shared automatic budget.
+const suggestion = (before, after, left = '', right = '', explanation = 'Shorter and clearer.') => ({before, after, left, right, explanation});
+const clarityOutput = suggestions => JSON.stringify({suggestions});
+const clarityStart = (port, text = 'We met in order to plan the launch.') => port.onMessage.emit({type: 'start', kind: 'automatic', id: crypto.randomUUID(), text, mode: 'clarity'});
+test('clearer-wording suggestions follow a strict phrase-level contract and are labelled separately from corrections', () => {
+  const source = 'We met in order to plan the launch, and it was due to the fact that Maya asked.';
+  const edits = candidates(clarityOutput([suggestion('in order to', 'to', 'met ', ' plan'), suggestion('it was due to the fact that', 'Maya asked', ', and ', ' Maya')].slice(0, 1)), source, 'clarity');
+  assert.deepEqual(edits.map(({category, before, after, start, end}) => ({category, before, after, start, end})), [{category: 'clarity', before: 'in order to', after: 'to', start: 7, end: 18}]);
+  assert.equal(edits[0].left, 'met '); assert.equal(edits[0].explanation, 'Shorter and clearer.');
+  assert.deepEqual(candidates(clarityOutput([]), source, 'clarity'), []);
+  for (const bad of [{corrections: []}, {suggestions: [], extra: 1}, {suggestions: [{...suggestion('in order to', 'to', 'met ', ' plan'), category: 'grammar'}]},
+    {suggestions: [suggestion('in order to', 'in order to', 'met ', ' plan')]}, {suggestions: [suggestion('missing', 'x')]}, {suggestions: [suggestion('the', 'a')]},
+    {suggestions: [suggestion('in order to', 'to', 'met ', ' plan'), suggestion('order to plan', 'to plan', 'in ', ' the')]},
+    {suggestions: Array.from({length: 9}, (_, i) => suggestion('in order to', `to${i}`, 'met ', ' plan'))},
+    {suggestions: [suggestion('in order to', 'x'.repeat(241), 'met ', ' plan')]}]) rejects(() => candidates(JSON.stringify(bad), source, 'clarity'));
+  rejects(() => candidates(output([correction('go', 'goes', 'He ', ' to')]), 'He go to work.', 'clarity'));
+});
+test('a clearer-wording suggestion that changes a number, name or negation, or only formatting, is dropped rather than shown', () => {
+  const source = 'Maya did not pay $1,250 on Monday, so we asked the finance team to look at it.';
+  const dropped = [suggestion('did not pay', 'paid', 'Maya ', ' $1,250'), suggestion('$1,250', '$2,500', 'pay ', ' on'), suggestion('Maya', 'Priya', '', ' did'),
+    suggestion('so', 'So', ', ', ' we'), suggestion('Monday,', 'Monday', 'on ', ' so')];
+  assert.deepEqual(candidates(clarityOutput(dropped), source, 'clarity'), []);
+  const kept = candidates(clarityOutput([...dropped, suggestion('to look at it', 'to review it', 'team ', '.')]), source, 'clarity');
+  assert.deepEqual(kept.map(x => x.after), ['to review it']);
+  // Preservation is judged on the whole paragraph with the edit applied, not on the isolated phrase: the context decides.
+  const inContext = (text, before, after, left, right) => candidates(clarityOutput([suggestion(before, after, left, right)]), text, 'clarity');
+  assert.deepEqual(inContext('We meet on May 6.', 'May', 'June', 'on ', ' 6'), []);
+  assert.deepEqual(inContext('We asked the finance team to check.', 'the finance team', 'Maya', 'asked ', ' to check'), []);
+  assert.deepEqual(inContext('Maya thanked Maya for the notes.', 'Maya thanked Maya', 'Maya thanked', '', ' for the notes'), []); // one of two occurrences of a name
+  assert.equal(inContext('We asked the finance team to look at it.', 'to look at it', 'to review it', 'team ', '.').length, 1);
+});
+test('the clearer-wording prompt keeps corrections out, forbids changing facts and bounds the output', () => {
+  const turn = writingTurn('We met in order to plan.', 'clarity', preferences({variant: 'UK'}));
+  assert.match(turn.system, /Do not fix grammar, spelling or punctuation/); assert.match(turn.system, /never change names, numbers, dates, negation or uncertainty/);
+  assert.match(turn.system, /\{"suggestions":\[/); assert.match(turn.system, /at most 8 suggestions/); assert.match(turn.system, /British/);
+  assert.equal(turn.tools, 'none'); assert.equal(turn.session, 'ephemeral'); assert.equal(turn.continuation, null);
+});
+test('clearer wording is off by default, needs automatic checking, and turning automatic checking off turns it off', async () => {
+  assert.equal(preferences({sites: ['https://writing.test'], automatic: true}).clarity, false);
+  assert.equal(preferences({automatic: false, clarity: true}).clarity, false); assert.equal(preferences({automatic: true, clarity: true}).clarity, true);
+  const f = fakeChrome(); installController(f.api);
+  const save = (changes, expected) => f.rpc('save-settings', {changes, expected, dictionary: {add: [], remove: []}});
+  assert.equal((await save({clarity: true}, {clarity: false})).code, 'INVALID_REQUEST'); // not without automatic checking
+  assert.equal((await save({automatic: true, clarity: true}, {automatic: false, clarity: false})).ok, true); assert.equal(f.data.preferences.clarity, true);
+  assert.equal((await save({automatic: false}, {automatic: true})).ok, true); assert.equal(f.data.preferences.clarity, false);
+  assert.equal((await save({automatic: true}, {automatic: false})).ok, true); assert.equal(f.data.preferences.clarity, false); // no silent re-enable
+  assert.equal((await f.rpc('site-state', null, f.sender)).value.clarity, false);
+  assert.equal((await f.rpc('reset')).ok, true); assert.equal(preferences(f.data).clarity, false);
+});
+test('automatic clearer-wording requests are refused unless their own setting is on, and are never made by hand', async () => {
+  const off = fakeChrome({automatic: true}); installController(off.api); const refused = off.connect(); clarityStart(refused);
+  await waitFor(() => refused.received.some(x => x.code === 'CLARITY_DISABLED')); assert.equal(off.calls.some(x => x.method === 'status' || x.method === 'send'), false);
+  const manual = fakeChrome({automatic: true, clarity: true}); installController(manual.api); const hand = manual.connect();
+  hand.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: 'We met in order to plan.', mode: 'clarity'});
+  await waitFor(() => hand.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(manual.calls.some(x => x.method === 'send'), false);
+  const noKind = manual.connect({documentId: 'document-two'});
+  noKind.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'We met in order to plan.', mode: 'clarity'});
+  await waitFor(() => noKind.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(manual.calls.some(x => x.method === 'send'), false);
+});
+test('a clearer-wording check spends the shared automatic budget and returns separately labelled suggestions', async () => {
+  let clock = 100000;
+  const f = fakeChrome({automatic: true, clarity: true, answer: clarityOutput([suggestion('in order to', 'to', 'met ', ' plan')])}); installController(f.api, {now: () => clock});
+  const proof = f.connect(); autoStart(proof); await waitFor(() => proof.received.some(x => x.type === 'result' || x.type === 'error'));
+  const second = f.connect({documentId: 'document-two'}); clarityStart(second);
+  await waitFor(() => second.received.some(x => x.code === 'AUTO_WAIT')); // the same ten-second interval
+  assert.equal(second.received.find(x => x.code === 'AUTO_WAIT').retryAfterMs, 10000); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+  clock += 10000; const third = f.connect({documentId: 'document-three'}); clarityStart(third);
+  await waitFor(() => third.received.some(x => x.type === 'result'));
+  assert.deepEqual(third.received.find(x => x.type === 'result').edits.map(x => [x.category, x.before, x.after]), [['clarity', 'in order to', 'to']]);
+  assert.deepEqual(f.sessionData.automaticBudget, [100000, 110000]);
+  for (let i = 0; i < 4; i++) { clock += 10000; const p = f.connect({documentId: `more-${i}`}); clarityStart(p); await waitFor(() => p.received.some(x => x.type === 'result')); }
+  clock = 155000; const capped = f.connect({documentId: 'capped'}); clarityStart(capped); // a seventh start inside the minute: the cap counts both kinds
+  await waitFor(() => capped.received.some(x => x.code === 'AUTO_WAIT'));
 });

@@ -51,10 +51,10 @@ test('corpus covers paragraph/multi-edit/variant/boundary inputs and distinct ge
     assert.equal(rows.find(c=>c.variant==='US').proposal.corrections.length,0);
     assert.equal(rows.find(c=>c.variant==='UK').proposal.corrections.length,1);
   }
-  const rewrites = corpus.cases.filter(c => c.mode !== 'proofread'); assert.equal(new Set(rewrites.map(c => c.source)).size,36);
+  const rewrites = corpus.cases.filter(c => !['proofread', 'clarity'].includes(c.mode)); assert.equal(new Set(rewrites.map(c => c.source)).size,36);
   assert.ok(rewrites.filter(c => c.mode === 'shorter').every(c => c.proposal.rewrite.length < c.source.length));
-  assert.deepEqual([...new Set(corpus.cases.filter(c => c.mode !== 'proofread').map(c => c.mode))].sort(), ['clearer', 'formal', 'friendly', 'improve', 'paraphrase', 'shorter']);
-  assert.equal(new Set(corpus.cases.map(c => c.id)).size, 362);
+  assert.deepEqual([...new Set(corpus.cases.filter(c => c.mode !== 'proofread').map(c => c.mode))].sort(), ['clarity', 'clearer', 'formal', 'friendly', 'improve', 'paraphrase', 'shorter']);
+  assert.equal(new Set(corpus.cases.map(c => c.id)).size, 380);
   const d = data(), templates = reviewTemplates(corpus, d.run);
   assert.equal(templates.labels.review.kind, 'pending'); assert.equal(templates.judgments.cases[0].suggestions[0].correct, null);
   assert.throws(() => score(corpus, d.run, {labels: templates.labels}));
@@ -124,8 +124,8 @@ test('runner records malformed answers, continues every remaining case with fres
     calls.push({method,turn}); if(method==='status') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true}};
     return c.id===corpus.cases[3].id ? '```json\n{"corrections":[]}\n```' : JSON.stringify(c.proposal);
   },close(){closed++;}}; };
-  const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,362); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
-  assert.equal(opened,362); assert.equal(closed,362); assert.equal(calls.filter(c=>c.method==='send').length,362);
+  const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,380); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
+  assert.equal(opened,380); assert.equal(closed,380); assert.equal(calls.filter(c=>c.method==='send').length,380);
   const send = calls.find(c => c.method === 'send').turn;
   assert.equal(send.tools, 'none'); assert.equal(send.session, 'ephemeral'); assert.equal(send.continuation, null);
   assert.match(send.system, /Preserve facts, names, numbers, dates, negation/); assert.equal(JSON.parse(send.messages[0].text).text, corpus.cases[0].source);
@@ -165,7 +165,7 @@ test('invalid and partial runs with reviews report outcome rates and missing cas
     d.judgments=reviewTemplates(corpus,d.run).judgments; d.judgments.review={...human};
     for (const row of d.judgments.cases) if(d.run.rows.some(r=>r.id===row.id && r.status==='completed')) { row.meaningPreserved=true; row.suggestions.forEach(x=>{x.correct=x.explanationAccurate=true;}); }
     const s=reviewed(d); assert.equal(s.releaseEligible,false); assert.ok(s.reasons.includes('INCOMPLETE_OR_INVALID_RESPONSES'));
-    assert.equal(s.invalidOutputRate,kind==='invalid'?1/362:0); assert.equal(s.missingCaseIds.length,kind==='partial'?358:0);
+    assert.equal(s.invalidOutputRate,kind==='invalid'?1/380:0); assert.equal(s.missingCaseIds.length,kind==='partial'?376:0);
     if(kind==='invalid') assert.deepEqual(s.invalidCaseIds,[d.run.rows[3].id]);
   }
 });
@@ -230,4 +230,36 @@ test('beta gate recomputes quality and requires all exact-package live/device ev
     const value = structuredClone(e); mutate(value); const result = await gate(d, value); assert.equal(result.releaseReady, false); assert.deepEqual(result.advertisedPlatforms, []);
   }
   d.run.rows.pop(); d.judgments.runHash = sha256(d.run); assert.equal((await gate(d, e)).releaseReady, false);
+});
+
+// F-02: clearer-wording suggestions are measured on their own cases, never folded into proofreading precision or recall.
+test('clearer-wording suggestions are scored apart from corrections and from rewrites', () => {
+  const clarityCases = corpus.cases.filter(c => c.mode === 'clarity');
+  assert.equal(clarityCases.length, 18); assert.ok(clarityCases.filter(c => c.proposal.suggestions.length === 0).length >= 4); // already-clear, informal, ambiguous and negation traps
+  assert.ok(clarityCases.some(c => c.strata.includes('negation')) && clarityCases.some(c => c.strata.includes('facts')));
+  const s = reviewed(data());
+  assert.equal(s.releaseEligible, true); assert.equal(s.coverage.clarity, 18);
+  assert.equal(s.metrics.clarity.cases, 18); assert.equal(s.metrics.clarity.emitted, 18); assert.equal(s.metrics.clarity.humanPrecision, 1); assert.equal(s.metrics.clarity.referenceRecall, 1);
+  assert.equal(s.metrics.proofread.cases, 326); assert.equal(s.metrics.style.cases, 36); // unchanged by the new mode
+  assert.equal(Object.values(s.strata).reduce((n, x) => n + x.cases, 0), corpus.cases.filter(c => c.mode !== 'clarity').reduce((n, c) => n + c.strata.length, 0)); // no clearer-wording case enters the proofreading strata
+});
+test('human false positives among clearer-wording suggestions fail their own gate and leave the proofreading gate alone', () => {
+  const d = data(); d.judgments.cases.find(r => r.id === 'clarity-004').suggestions[1].correct = false;
+  const s = reviewed(d);
+  assert.ok(s.reasons.includes('CLARITY_PRECISION_GATE_NOT_MET')); assert.ok(!s.reasons.includes('PRECISION_GATE_NOT_MET'));
+  assert.equal(s.metrics.clarity.falsePositives, 1); assert.equal(s.metrics.clarity.humanPrecision, 17 / 18); assert.equal(s.metrics.proofread.humanPrecision, 1); assert.equal(s.releaseEligible, false);
+});
+test('offering no clearer wording at all cannot pass, and too few clearer-wording cases is incomplete coverage', () => {
+  const d = data();
+  for (const c of corpus.cases.filter(c => c.mode === 'clarity')) { d.run.rows.find(r => r.id === c.id).response = '{"suggestions":[]}'; d.judgments.cases.find(r => r.id === c.id).suggestions = []; }
+  const s = reviewed(d); assert.equal(s.metrics.clarity.humanPrecision, null); assert.ok(s.reasons.includes('CLARITY_PRECISION_GATE_NOT_MET')); assert.equal(s.metrics.clarity.referenceRecall, 0);
+  const reduced = structuredClone(corpus); reduced.cases = reduced.cases.filter(c => c.mode !== 'clarity');
+  const run = {...data().run, corpusHash: sha256(reduced), rows: data().run.rows.filter(r => reduced.cases.some(c => c.id === r.id))};
+  assert.ok(score(reduced, run).reasons.includes('CORPUS_COVERAGE_INCOMPLETE'));
+});
+test('a clearer-wording answer outside the contract is an invalid output, and a suggestion that changes a number is not emitted', () => {
+  const d = data(); d.run.rows.find(r => r.id === 'clarity-001').response = '{"corrections":[]}';
+  const s = score(corpus, d.run); assert.deepEqual(s.invalidCaseIds, ['clarity-001']);
+  const changesNumber = data(); changesNumber.run.rows.find(r => r.id === 'clarity-006').response = JSON.stringify({suggestions: [{before: '80 percent', after: '90 percent', left: 'total of ', right: ' of the work', explanation: 'x'}]});
+  assert.deepEqual(candidates(changesNumber.run.rows.find(r => r.id === 'clarity-006').response, corpus.cases.find(c => c.id === 'clarity-006').source, 'clarity'), []);
 });

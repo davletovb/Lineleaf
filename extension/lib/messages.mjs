@@ -16,6 +16,7 @@ export const MESSAGES = {
   BUSY: 'Another Lineleaf request is running. Cancel it or wait for it to finish.',
   AUTO_WAIT: 'Automatic checking is waiting for the shared request interval.',
   AUTOMATIC_DISABLED: 'Automatic checking is off. Enable it in settings after reviewing the provider disclosure.',
+  CLARITY_DISABLED: 'Clearer-wording suggestions are off. Enable them in settings after reviewing the provider disclosure.',
   SETTINGS_CHANGED: 'Preferences changed elsewhere. Reload settings before saving your changes.',
   OFFLINE: 'You are offline. Check your connection, then retry when ready.',
   CANCELLED: 'Cancelled. No changes were made.', STALE: 'The selection changed. Select text and check again.',

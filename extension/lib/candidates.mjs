@@ -1,4 +1,4 @@
-import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, LineleafError} from './policy.mjs';
+import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError} from './policy.mjs';
 
 // Bounded recursive JSON parser: JSON.parse alone silently accepts duplicate keys.
 export function strictJSON(source) {
@@ -61,19 +61,19 @@ const OPENERS = new Set(('A An The This That These Those There Here It Its He Sh
   'What Why How Who Whom Which Where Whose All Any Some Each Every Both Many Most More Much Few Several Such One Two Another Other Once').split(' '));
 const tally = (items) => { const counts = new Map(); for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1); return counts; };
 const sameCounts = (a, b) => a.size === b.size && [...a].every(([key, count]) => b.get(key) === count);
-// `all` holds every capitalised word; `kept` those that count as names (sentence openers and "I" excluded); `inner` the kept
-// words that do not begin a sentence.
+// Occurrence counts of capitalised words: `all` every one; `kept` those that count as names (sentence openers and "I" excluded);
+// `inner` the kept ones that do not begin a sentence. Counting occurrences means "Maya thanked Maya" → "Maya thanked" is a change.
 function capitalised(text) {
-  const all = new Set(), kept = new Set(), inner = new Set();
+  const all = new Map(), kept = new Map(), inner = new Map(), add = (map, word) => map.set(word, (map.get(word) ?? 0) + 1);
   for (const match of text.matchAll(WORDS)) {
     const word = match[0].replace(/['’]s?$/iu, ''), head = word.replace(/['’].*$/u, '');
-    all.add(word);
+    add(all, word);
     if (head === 'I') continue;
     const before = text.slice(0, match.index);
     const opening = before.trim() === '' || /[.!?…:]["'”’)\]]*\s+$/u.test(before) || /\n\s*$/.test(before);
     if (opening && OPENERS.has(head)) continue;
-    kept.add(word);
-    if (!opening) inner.add(word);
+    add(kept, word);
+    if (!opening) add(inner, word);
   }
   return {all, kept, inner};
 }
@@ -81,7 +81,7 @@ const negations = text => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS
 export function preservationFlags(source, rewrite) {
   const flags = [], a = capitalised(source), b = capitalised(rewrite);
   if (!sameCounts(tally(source.match(NUMBERS) ?? []), tally(rewrite.match(NUMBERS) ?? []))) flags.push('number');
-  if ([...a.kept].some(word => !b.all.has(word)) || [...b.inner].some(word => !a.all.has(word))
+  if ([...a.kept].some(([word, n]) => (b.all.get(word) ?? 0) < n) || [...b.inner].some(([word, n]) => n > (a.all.get(word) ?? 0))
       || !sameCounts(tally(source.match(HANDLES) ?? []), tally(rewrite.match(HANDLES) ?? []))) flags.push('name');
   if (!sameCounts(negations(source), negations(rewrite))) flags.push('negation');
   return flags;
@@ -90,9 +90,40 @@ const EXPLANATIONS = {
   improve: 'Optional improvement for clarity and flow. Review facts and meaning before accepting.',
   paraphrase: 'Optional paraphrase in different words. Review facts and meaning before accepting.'
 };
+// Clearer-wording suggestions are optional style, shown automatically as underlines, so they are held to a stricter bar than a
+// rewrite the user asked for: the response must follow the contract exactly (any violation rejects it, as for corrections), and
+// a well-formed suggestion is still dropped, not merely flagged, when it changes a number, name or negation, or only changes
+// spacing, punctuation or capitalisation (that is a correction, not a wording improvement).
+const bare = text => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+function clarity(data, source, points) {
+  const bad = () => { throw new LineleafError('INVALID_OUTPUT'); };
+  if (!exactKeys(data, ['suggestions']) || !Array.isArray(data.suggestions) || data.suggestions.length > CLARITY_MAX) bad();
+  const edits = [], spans = [];
+  for (const item of data.suggestions) {
+    if (!exactKeys(item, ['before', 'after', 'left', 'right', 'explanation'])
+        || !validText(item.before, 240) || typeof item.after !== 'string' || item.after.length > 240 || !item.after.isWellFormed()
+        || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(item.after) || item.before === item.after
+        || !validText(item.explanation, 280)
+        || !['left', 'right'].every(k => typeof item[k] === 'string' && item[k].length <= 120 && item[k].isWellFormed())) bad();
+    const matches = [];
+    for (let from = 0, start; (start = source.indexOf(item.before, from)) !== -1; from = start + 1) {
+      const end = start + item.before.length;
+      if (source.slice(0, start).endsWith(item.left) && source.slice(end).startsWith(item.right)) matches.push({start, end});
+    }
+    if (matches.length !== 1) bad();
+    const {start, end} = matches[0];
+    if (!points.has(start) || !points.has(end) || spans.some(x => start < x.end && x.start < end)) bad();
+    spans.push({start, end});
+    // The whole paragraph is compared with and without the edit: an isolated phrase hides the context ("May" → "June" before "6").
+    if (bare(item.before) === bare(item.after) || preservationFlags(source, source.slice(0, start) + item.after + source.slice(end)).length) continue;
+    edits.push({...item, category: 'clarity', start, end});
+  }
+  return edits.sort((a, b) => a.start - b.start);
+}
 export function candidates(answer, source, mode) {
   const data = strictJSON(answer), points = boundaries(source), edits = [];
   const bad = () => { throw new LineleafError('INVALID_OUTPUT'); };
+  if (mode === 'clarity') return clarity(data, source, points);
   if (mode !== 'proofread') {
     if (!exactKeys(data, ['rewrite']) || !validText(data.rewrite)) bad();
     if (data.rewrite === source) { if (MAY_STAY_SAME.includes(mode)) return []; bad(); }

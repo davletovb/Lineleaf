@@ -8,6 +8,7 @@ button:disabled { opacity: .5; cursor: default; } .primary { background: #285c3f
 .badge { position: fixed; pointer-events: auto; padding: 4px 9px; background: #f4f8f0; font-size: 12px; box-shadow: 0 2px 9px #16372920; }
 .underline { position: fixed; pointer-events: auto; height: 6px; padding: 0; border: 0; border-bottom: 2px dotted #b13a3a; border-radius: 0; background: transparent; }
 .underline[data-category="punctuation"] { border-color: #a37112; } .underline[data-category="spelling"] { border-bottom-style: solid; }
+.underline[data-category="clarity"] { border-color: #2f6fa8; border-bottom-style: dashed; }
 .card { position: fixed; pointer-events: auto; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; padding: 17px; background: #fbfcf8; border: 1px solid #d6dfd6; border-radius: 16px; box-shadow: 0 12px 40px #16372930; }
 .heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; } h2 { margin: 0; font-size: 18px; } .quiet { border: 0; background: transparent; }
 .category { font-size: 11px; font-weight: 700; color: #567c45; } .change { white-space: pre-wrap; overflow-wrap: anywhere; }
