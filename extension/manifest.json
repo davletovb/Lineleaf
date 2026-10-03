@@ -20,9 +20,21 @@
     "service_worker": "worker.mjs",
     "type": "module"
   },
+  "icons": {
+    "16": "icons/lineleaf-16.png",
+    "32": "icons/lineleaf-32.png",
+    "48": "icons/lineleaf-48.png",
+    "128": "icons/lineleaf-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Lineleaf"
+    "default_title": "Lineleaf",
+    "default_icon": {
+      "16": "icons/lineleaf-16.png",
+      "32": "icons/lineleaf-32.png",
+      "48": "icons/lineleaf-48.png",
+      "128": "icons/lineleaf-128.png"
+    }
   },
   "options_ui": {
     "page": "options.html",

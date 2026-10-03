@@ -12,6 +12,7 @@
 | [MVP scope and toolchain](architecture/mvp-scope-and-toolchain.md) | A-05 conservative scope, development commands, and unresolved decisions |
 | [Selection prototype](implementation/selection-mvp.md) | B-01–B-05 build/load instructions, explicit writing flow, validation, and acceptance limits |
 | [Inline prototype](implementation/inline-mvp.md) | C-01–C-05 opt-in automatic checking, accessible review controls, preferences, privacy, and verification boundaries |
+| [Interface design](implementation/interface-design.md) | Shared design tokens, the inline badge, underlines and word popover, panel, popup and settings, and what the redesign does not verify |
 | [Priority editor matrix](investigations/priority-editor-matrix.md) | D-01 synthetic boundaries, live-site acceptance checklist and copy fallback |
 | [Complex editor feasibility](investigations/complex-editor-feasibility.md) | D-03 Google Docs/framework decision and gates for dedicated adapters |
 | [Dynamic editor evidence](evidence/editor-compatibility-ci.md) | D-02 context, SPA, geometry, frames and open-shadow regression evidence |

@@ -7,6 +7,9 @@ async function load() {
   [tab] = await chrome.tabs.query({active: true, currentWindow: true}); origin = originOf(tab?.url);
   settings = await command('get-settings');
   query('#site').textContent = origin || 'This page is unavailable.';
+  query('#avatar').textContent = origin ? new URL(origin).hostname.replace(/^www\./u, '').charAt(0) || '·' : '!';
+  const state = !origin || tab.incognito ? 'off' : settings.paused ? 'paused' : settings.sites.includes(origin) ? 'on' : 'off';
+  query('#state').dataset.state = state; query('#state').textContent = !origin || tab.incognito ? 'Unavailable' : {on: 'On here', paused: 'Paused', off: 'Off here'}[state];
   query('#enabled').checked = settings.sites.includes(origin);
   query('#paused').checked = settings.paused;
   query('#enabled').disabled = !origin || tab.incognito;
@@ -37,4 +40,10 @@ query('#connection').addEventListener('click', async () => {
   finally { query('#connection').disabled = false; }
 });
 query('#settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
-load().catch(() => show(messageFor('UNAVAILABLE')));
+// First open only: say why the writing panel is unavailable instead of leaving a dimmed button unexplained.
+function hint() {
+  if (query('#status').textContent) return;
+  if (!origin || tab.incognito) show('Lineleaf cannot run on this page.');
+  else if (!settings.sites.includes(origin)) show('Turn on “Check my writing here” to use Lineleaf on this site.');
+}
+load().then(hint).catch(() => show(messageFor('UNAVAILABLE')));
