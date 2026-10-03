@@ -1,10 +1,10 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 
 export function installController(api, {now = Date.now} = {}) {
-  let active = null, diagnostic = false, backoffUntil = 0;
+  let active = null, diagnostic = false, backoffUntil = 0, automaticHold = 0; // automaticHold: no background requests after the provider failed to answer in time
   const peers = new Set();
   const read = async () => preferences((await api.storage.local.get('preferences')).preferences);
   const native = () => new NativeSeatline(host => {
@@ -12,8 +12,11 @@ export function installController(api, {now = Date.now} = {}) {
     port.onDisconnect.addListener(() => { void api.runtime.lastError; });
     return port;
   });
-  const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get('providerBackoff')])
-    .then(([, saved]) => { if (Number.isFinite(saved.providerBackoff) && saved.providerBackoff > now()) backoffUntil = Math.min(saved.providerBackoff, now() + 60000); });
+  const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get(['providerBackoff', 'automaticHold'])])
+    .then(([, saved]) => {
+      if (Number.isFinite(saved.providerBackoff) && saved.providerBackoff > now()) backoffUntil = Math.min(saved.providerBackoff, now() + 60000);
+      if (Number.isFinite(saved.automaticHold) && saved.automaticHold > now()) automaticHold = Math.min(saved.automaticHold, now() + AUTOMATIC_HOLD);
+    });
   const ui = sender => sender.id === api.runtime.id && !sender.incognito && !sender.tab?.incognito
     && [`chrome-extension://${api.runtime.id}/popup.html`, `chrome-extension://${api.runtime.id}/options.html`].includes(sender.url);
   const send = (port, message) => { try { port.postMessage(message); } catch { /* document closed */ } };
@@ -75,25 +78,29 @@ export function installController(api, {now = Date.now} = {}) {
       if (!automatic && active?.automatic) { const previous = active; cancelPeer(previous); await previous.done; await eligible(peer.sender); }
       if (active || diagnostic) throw new LineleafError('BUSY');
       if (now() < backoffUntil) throw waiting('PROVIDER_RATE_LIMITED', backoffUntil - now());
+      // A provider that just failed to answer in time is not given more background work (each turn is a process on the user's machine).
+      if (automatic && now() < automaticHold) throw waiting('AUTO_PAUSED', Math.min(automaticHold - now(), AUTOMATIC_HOLD));
       active = peer;
       if (automatic) await automaticBudget();
       if (signal.aborted) throw new LineleafError('CANCELLED');
       connection = native(); peer.connection = connection;
       send(peer.port, {type: 'progress', id: request.id, stage: 'connecting'});
-      requireReady(await connection.request('status', null, {signal, timeout: 15000}));
+      requireReady(await connection.request('status', null, {signal, timeout: PHASES.status}));
       // Permissions/settings may have changed while status was being probed.
       const latest = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
       if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
       send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
-      const answer = await connection.request('send', writingTurn(request.text, request.mode, latest.settings), {signal});
+      const answer = await connection.request('send', writingTurn(request.text, request.mode, latest.settings), {signal, timeout: REQUEST_TIMEOUT[automatic ? 'automatic' : 'manual']});
       const final = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
       const edits = filterDictionary(candidates(answer, request.text, request.mode), final.settings);
       send(peer.port, {type: 'result', id: request.id, edits});
+      if (automaticHold) { automaticHold = 0; await api.storage.session.set({automaticHold: 0}).catch(() => {}); } // It answered, so background checks may resume.
     } catch (error) {
       const code = errorCode(error);
+      if (code === 'PROVIDER_TIMEOUT') { automaticHold = now() + AUTOMATIC_HOLD; await api.storage.session.set({automaticHold}).catch(() => {}); }
       if (code === 'PROVIDER_RATE_LIMITED' && !error.local) backoffUntil = now() + 60000;
       else if (code === 'QUEUE_FULL') backoffUntil = now() + 5000;
       if (backoffUntil > now()) await api.storage.session.set({providerBackoff: backoffUntil}).catch(() => {});
@@ -198,7 +205,7 @@ export function installController(api, {now = Date.now} = {}) {
     if (message.type === 'site-state' && p === null) return {enabled: allowed(settings, originOf(sender.url))};
     if (message.type === 'check-connection' && p === null) {
       if (active || diagnostic) throw new LineleafError('BUSY'); diagnostic = true; const connection = native();
-      try { return statusView(await connection.request('status', null, {timeout: 15000})); }
+      try { return statusView(await connection.request('status', null, {timeout: PHASES.status})); }
       finally { connection.close(); diagnostic = false; }
     }
     throw new LineleafError('INVALID_REQUEST');

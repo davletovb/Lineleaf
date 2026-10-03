@@ -1,9 +1,9 @@
-import {MAX_OUTPUT, LineleafError, safeReason, isObject, exactKeys} from './policy.mjs';
+import {MAX_OUTPUT, PHASES, LineleafError, safeReason, isObject, exactKeys} from './policy.mjs';
 const TYPES = new Set(['launched', 'started', 'activity', 'delta', 'session', 'session_lost', 'usage', 'source', 'status', 'completed', 'stopped', 'failed']);
 const TERMINAL = new Set(['completed', 'stopped', 'failed']);
 
 export class NativeSeatline {
-  constructor(connectNative, {readyTimeout = 10000, drainTimeout = 3000} = {}) {
+  constructor(connectNative, {readyTimeout = PHASES.ready, drainTimeout = PHASES.drain} = {}) {
     this.connectNative = connectNative; this.readyTimeout = readyTimeout; this.drainTimeout = drainTimeout;
     this.pending = new Map(); this.ignored = new Set(); this.ready = null; this.port = null;
   }

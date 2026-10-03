@@ -180,7 +180,7 @@ test('rewrites are refused where nothing eligible is selected', async () => {
 
 // Failures of an explicit rewrite are not failed checks: the proofreading suggestions set aside for it come back, automatic
 // checking keeps working, and the card shows the reason.
-for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not complete this action.'], ['no connection can be made', 'Lineleaf could not complete this action.'], ['the provider never answers', 'The request timed out and was cancelled.']]) {
+for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not complete this action.'], ['no connection can be made', 'Lineleaf could not complete this action.'], ['the provider never answers', 'Codex did not answer in time']]) {
   test(`a rewrite fails cleanly when ${fault}: suggestions come back and automatic checking stays on`, async () => {
     await load(); await proofreadAnswer();
     await useTextarea('He go to work.'); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
@@ -188,7 +188,7 @@ for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not co
     await page.evaluate(fault => {
       if (fault === 'the worker goes away') fixture.faults.drop = true;
       else if (fault === 'no connection can be made') fixture.faults.connect = true;
-      else { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 65000 ? 50 : ms, ...args); } // shorten only the watchdog
+      else { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); } // shorten only the watchdog
     }, fault);
     await openCard(); await press('Improve it');
     await inline.locator('#status').waitFor((el, text) => el.textContent.startsWith(text), expected);
@@ -372,4 +372,57 @@ test('with automatic checking off, typing in a rich editor reads nothing more an
   await page.keyboard.type('!'); await page.keyboard.type('?');
   await inline.locator('.badge').waitFor(el => /The text changed\. Choose Check now or a rewrite/.test(el.getAttribute('aria-label')));
   assert.equal(await reads(), opened); assert.deepEqual(await requests(), []);
+});
+
+// Live report: a slow provider made the card vanish while "working", reappear with a timeout, and look dead. An explicit action
+// keeps the card open with progress and Cancel, always says why it did not happen, and works again afterwards.
+test('while a request runs the card stays open with progress, the actions are disabled and Cancel check stops it', async () => {
+  await load(); await proofreadAnswer(); await useTextarea('He go to work.');
+  await page.evaluate(() => { fixture.worker.hold = true; });
+  await openCard(); await press('Improve it');
+  await inline.locator('#status').waitFor(el => /^Working on “Improve it” with Codex/.test(el.textContent));
+  await inline.locator('[data-elapsed]').waitFor(el => /^Waiting for Codex… \d+ s\. Choose Cancel check to stop\.$/.test(el.textContent));
+  assert.equal(await inline.button('Improve it').isDisabled(), true); assert.equal(await inline.button('Check now').isDisabled(), true);
+  assert.equal(await inline.button('Cancel check').isDisabled(), false);
+  await press('Cancel check'); await inline.locator('#status').waitFor(el => /^Cancelled/.test(el.textContent));
+  assert.equal(await inline.button('Improve it').isDisabled(), false); assert.equal(await inline.locator('[data-elapsed]').count(), 0);
+  await page.evaluate(() => { fixture.worker.hold = false; fixture.worker.answer = '{"rewrite":"He goes to work."}'; });
+  await press('Improve it'); await suggested();
+});
+
+test('an action Lineleaf refuses says why instead of doing nothing, and works once the reason is gone', async () => {
+  await load(); await proofreadAnswer(); await useTextarea('He go to work.');
+  await page.locator('#textarea').evaluate(el => el.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true})));
+  await openCard(); await press('Check now');
+  await inline.locator('#status').waitFor(el => /^Finish the text you are composing/.test(el.textContent));
+  assert.deepEqual(await requests(), []);
+  await page.locator('#textarea').evaluate(el => el.dispatchEvent(new CompositionEvent('compositionend', {bubbles: true})));
+  await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
+});
+
+test('a Check now that times out reopens the card with the reason, and the next click works', async () => {
+  await load(); await proofreadAnswer(); await useTextarea('He go to work.');
+  await page.evaluate(() => { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); }); // shorten only the explicit watchdog
+  await openCard(); await press('Check now');
+  await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time'));
+  assert.equal(await inline.button('Check now').isDisabled(), false); assert.equal(await inline.button('Improve it').isDisabled(), false);
+  await page.evaluate(() => { fixture.worker.hold = false; });
+  await press('Check now'); await inline.locator('.underline').waitFor();
+});
+
+// The hold that follows a provider timeout is temporary: an editor refused during it must try again by itself afterwards.
+test('an automatic check refused during the provider hold is retried after it, instead of leaving the editor blocked', async () => {
+  await load(); await proofreadAnswer(); await useTextarea('He go to work.');
+  await page.evaluate(() => { // the worker's 90-second turn limit becomes 50 ms; retries that would wait minutes wait three seconds (the card's own 300000 expiry is left alone)
+    fixture.worker.hold = true; const real = window.setTimeout;
+    window.setTimeout = (fn, ms, ...args) => real(fn, ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args); // not the 300000 expiry
+  });
+  await openCard(); await press('Check now');
+  await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time')); // sets the hold
+  await page.evaluate(() => { fixture.worker.hold = false; });
+  await press('Cancel check'); await typeAtEnd(' '); // unblocked; the next automatic check is refused by the hold
+  await inline.locator('.badge').waitFor(el => /Automatic checking is paused/.test(el.getAttribute('aria-label')));
+  await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 301000; }); // the five minutes pass
+  await inline.locator('.underline').waitFor(); // retried by itself and answered
+  assert.deepEqual((await requests()).map(x => x.kind), ['manual', 'automatic', 'automatic']);
 });

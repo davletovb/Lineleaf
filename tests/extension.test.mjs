@@ -1,8 +1,8 @@
-import test from 'node:test';
+import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {candidates, strictJSON, preservationFlags} from '../extension/lib/candidates.mjs';
-import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary} from '../extension/lib/policy.mjs';
+import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary, PHASES, REQUEST_TIMEOUT, WATCHDOG} from '../extension/lib/policy.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
 import {messageFor} from '../extension/lib/messages.mjs';
@@ -465,4 +465,73 @@ test('a clearer-wording check spends the shared automatic budget and returns sep
   for (let i = 0; i < 4; i++) { clock += 10000; const p = f.connect({documentId: `more-${i}`}); clarityStart(p); await waitFor(() => p.received.some(x => x.type === 'result')); }
   clock = 155000; const capped = f.connect({documentId: 'capped'}); clarityStart(capped); // a seventh start inside the minute: the cap counts both kinds
   await waitFor(() => capped.received.some(x => x.code === 'AUTO_WAIT'));
+});
+
+// A slow provider: how long each kind of request waits, and what a timeout does to background work. (Live evidence: an explicit
+// request needed more than the old 30 seconds.)
+test('an explicit request waits ninety seconds for the provider, a background check thirty', async () => {
+  const settle = async () => { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); };
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    const f = fakeChrome({automatic: true, hang: true}); installController(f.api, {now: () => 0});
+    const background = f.connect(); autoStart(background); await settle(); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+    mock.timers.tick(29000); await settle(); assert.equal(background.received.some(x => x.type === 'error'), false);
+    mock.timers.tick(2000); await settle(); assert.equal(background.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT'); // 31 s
+    const explicit = f.connect({documentId: 'explicit'}); start(explicit); await settle(); assert.equal(f.calls.filter(x => x.method === 'send').length, 2);
+    mock.timers.tick(31000); await settle(); assert.equal(explicit.received.some(x => x.type === 'error'), false); // still waiting at 31 s
+    mock.timers.tick(58000); await settle(); assert.equal(explicit.received.some(x => x.type === 'error'), false); // and at 89 s
+    mock.timers.tick(2000); await settle(); assert.equal(explicit.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT'); // 91 s
+  } finally { mock.timers.reset(); }
+});
+test('after a provider timeout background checks stop (across restarts) until an explicit request gets an answer', async () => {
+  let clock = 100000; const f = fakeChrome({automatic: true});
+  let slow = true; const sends = [];
+  f.api.runtime.connectNative = () => fakeNative((m, p) => {
+    if (m.method === 'send') sends.push(m);
+    if (m.method === 'status') { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }
+    if (m.method === 'send') { if (slow) p.reply(m.id, {type: 'failed', reason: 'PROVIDER_TIMEOUT'}); else { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); } }
+  });
+  installController(f.api, {now: () => clock}); const first = f.connect(); autoStart(first);
+  await waitFor(() => first.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
+  assert.equal(f.sessionData.automaticHold, 400000);
+  clock = 120000; const second = f.connect({documentId: 'two'}); autoStart(second); // another tab, past the ten-second interval
+  await waitFor(() => second.received.some(x => x.code === 'AUTO_PAUSED')); assert.equal(sends.length, 1);
+  const restarted = fakeChrome({automatic: true}); restarted.api.storage.session = f.api.storage.session; restarted.api.runtime.connectNative = f.api.runtime.connectNative;
+  installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third); // a restarted worker keeps the hold
+  await waitFor(() => third.received.some(x => x.code === 'AUTO_PAUSED'));
+  slow = false; const explicit = restarted.connect({documentId: 'explicit'}); start(explicit); // the user can always try again
+  await waitFor(() => explicit.received.some(x => x.type === 'result')); assert.equal(f.sessionData.automaticHold, 0);
+  clock = 140000; const later = restarted.connect({documentId: 'later'}); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result')); // answered: background checks resume
+  clock = 500000; slow = true; const expired = restarted.connect({documentId: 'expired'}); autoStart(expired);
+  await waitFor(() => expired.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
+  clock = 801000; slow = false; const after = restarted.connect({documentId: 'after'}); autoStart(after); await waitFor(() => after.received.some(x => x.type === 'result')); // the hold expires by itself
+});
+
+test('the page watchdog outlasts the worker’s whole sequence, so a slow but healthy handshake, status and turn still deliver', async () => {
+  for (const kind of ['automatic', 'manual']) assert.ok(WATCHDOG[kind] > PHASES.ready + PHASES.status + REQUEST_TIMEOUT[kind] + PHASES.drain, kind);
+  const settle = async () => { for (let i = 0; i < 40; i++) await new Promise(resolve => setImmediate(resolve)); };
+  mock.timers.enable({apis: ['setTimeout']});
+  try {
+    const f = fakeChrome({automatic: true}); const sends = [];
+    f.api.runtime.connectNative = () => {
+      const port = fakeNative((m, p) => {
+        if (m.method === 'status') setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 14000);
+        if (m.method === 'send') { sends.push(m); setTimeout(() => { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); }, 85000); }
+      }, null);
+      setTimeout(() => port.onMessage.emit({type: 'ready', version: 1}), 9000); // each phase just inside its own limit
+      return port;
+    };
+    installController(f.api, {now: () => 0}); const port = f.connect(); start(port); await settle();
+    mock.timers.tick(9000); await settle(); mock.timers.tick(14000); await settle(); assert.equal(sends.length, 1); // handshake and status done at 23 s
+    mock.timers.tick(85000); await settle(); // 108 s in all: past the earlier 105-second page limit, inside the new one
+    assert.ok(port.received.some(x => x.type === 'result'), JSON.stringify(port.received.map(x => x.type + ':' + (x.code ?? ''))));
+    assert.ok(108000 > 105000 && 108000 < WATCHDOG.manual);
+    // The phases really are bounded where the watchdog assumes: a status probe that takes 20 seconds is cut off at fifteen (plus the cancel drain).
+    const g = fakeChrome({automatic: true});
+    g.api.runtime.connectNative = () => fakeNative((m, p) => { if (m.method === 'status') setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 20000); });
+    installController(g.api, {now: () => 0}); const slow = g.connect(); start(slow); await settle();
+    mock.timers.tick(14000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false);
+    mock.timers.tick(2000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false); // the limit hit at 15 s; the unanswered cancel drains for 3 s
+    mock.timers.tick(5000); await settle(); assert.equal(slow.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT');
+  } finally { mock.timers.reset(); }
 });

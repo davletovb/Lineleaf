@@ -12,7 +12,7 @@ The owner’s C-01–C-05 instruction authorizes opt-in automatic checking for d
 
 ## Latency and release gates
 
-For explicit requests, use a provisional 30-second deadline, cancellation, and visible progress. It is a product timeout, not a measured acceptable p95. A-03 must produce at least 30 live turns, first/subsequent p50/p95, source-valid structured output, confirmed cancellation, and stated hardware/runtime/model metadata before finalizing provider choice or automatic-check latency thresholds. The harness records static broker limits without spending calls to discover an account's quota.
+For explicit requests, use a provisional 90-second deadline (30 seconds for background checks), cancellation, and visible progress with elapsed time. An earlier 30-second deadline for explicit requests was too short for a live report on a real page; these are product timeouts, not a measured acceptable p95. A-03 must produce at least 30 live turns, first/subsequent p50/p95, source-valid structured output, confirmed cancellation, and stated hardware/runtime/model metadata before finalizing provider choice or automatic-check latency thresholds. The harness records static broker limits without spending calls to discover an account's quota.
 
 If results are too slow for inline checking, keep explicit requests usable and separately evaluate an extension-owned local spelling/rule component. Its licensing and quality need review; Seatline must remain provider-neutral. Do not make an unlimited-use claim.
 
