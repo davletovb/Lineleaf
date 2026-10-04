@@ -147,8 +147,8 @@ def start_turn(connection, provider, source, model, readiness):
     if readiness == "legacy":
         return connection.start(provider, "send", writing_turn(source, model))
     # Sent under the readiness just checked, so Seatline repeats no sign-in probe.
-    return connection.start(provider, "send_ready", {"turn": writing_turn(source, model, check_sign_in=False),
-                                                      "freshness": READINESS_CACHED})
+    return connection.start(provider, "send_ready_with_policy", {"turn": writing_turn(source, model, check_sign_in=False),
+                                                      "freshness": READINESS_CACHED, "allowed_sign_in": ["subscription"]})
 
 
 def measure_turn(connection, provider, model, case, repetition, phase, timeout, readiness="legacy", log=None):
@@ -235,7 +235,7 @@ def finalize(report):
 def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=30, cancel_after=0.1, fixture=False,
                   readiness="legacy", launch_log=None):
     """`readiness`: "legacy" asks `status` and sends with `send` (Seatline probes sign-in again inside every turn); "cached" asks
-    `readiness` (reused for up to 30 s) and sends with `send_ready`. `launch_log`: a fake provider's launch record, to count launches."""
+    `readiness` (reused for up to 30 s) and sends with `send_ready_with_policy`. `launch_log`: a fake provider's launch record, to count launches."""
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
     log = LaunchLog(launch_log) if launch_log else None
     report = {"status": "blocked", "kind": "fixture" if fixture else "live",
@@ -305,7 +305,7 @@ def main():
     if not 1 <= args.timeout <= 120 or not 0 <= args.cancel_after <= 2:
         parser.error("timeout must be 1–120 seconds and cancel-after 0–2 seconds")
     if args.fixture:
-        command = [sys.executable, str(ROOT / "tests/fixtures/companion.py")]
+        command = [sys.executable, str(ROOT / "tests/fixtures/companion.py"), "--hold-turn", str(len(CASES) + 1)]
     else:
         binary = shutil.which(args.companion)
         if binary is None:

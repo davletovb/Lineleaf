@@ -18,6 +18,7 @@ export function installController(api, {now = Date.now} = {}) {
   }, {onClose: () => { readinessApi = null; clearTimeout(linkTimer); }});
   const idleLink = () => {
     clearTimeout(linkTimer);
+    if (!link?.port) return;
     linkTimer = setTimeout(() => { if (active || diagnostic || warming) idleLink(); else link?.close(); }, LINK_IDLE);
   };
   // The provider's readiness: from Seatline's cache when `freshness` allows, or, for a companion without the readiness API, a status probe.
@@ -123,11 +124,13 @@ export function installController(api, {now = Date.now} = {}) {
         send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
         const turn = writingTurn(request.text, request.mode, latest.settings, {checkSignIn: !modern}), timeout = REQUEST_TIMEOUT[automatic ? 'automatic' : 'manual'];
         try {
-          // `send_ready` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
+          // `send_ready_with_policy` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
           // evidence has changed or lapsed, and the status it reports is checked again as it arrives.
-          answer = await (modern ? connection.request('send_ready', {turn, freshness: READINESS.cached}, {signal, timeout, onStatus: requireReady}) : connection.request('send', turn, {signal, timeout}));
+          if (!modern) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
+          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']}, {signal, timeout, onStatus: requireReady});
           break;
         } catch (error) {
+          if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
           // Nothing was started, so one more attempt is safe: from a fresh readiness, which the send then reuses (it is the cached evidence now).
           if (modern && attempt === 0 && READINESS_REFUSALS.has(errorCode(error))) { verification = READINESS.fresh; continue; }
           throw error;

@@ -141,7 +141,7 @@ test('inline SPA navigation cancels the old request, ignores late output and sta
   await page.evaluate(() => history.pushState({}, '', '/new-compose?automatic'));
   await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'cancel'));
   await page.evaluate(() => {
-    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy');
     port.reply(request.id, {type: 'delta', text: '{"corrections":[]}'}); port.reply(request.id, {type: 'completed'}); fixture.worker.hold = false;
   });
   await page.waitForTimeout(1700); assert.equal((await sends()).length, 1);
@@ -319,7 +319,7 @@ test('harmless ancestor classes retain a pending response and completed manual s
   await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.evaluate(() => {
     document.body.classList.add('is-scrolled'); document.querySelector('#textarea').classList.add('focused');
-    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy');
     port.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
     port.reply(request.id, {type: 'completed'});
   });

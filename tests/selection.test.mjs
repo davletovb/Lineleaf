@@ -226,6 +226,6 @@ test('opening the panel prepares the provider with no text, and asking for a che
   assert.equal(prepared.length, 1); assert.deepEqual(prepared[0].params, {mode: 'cached', max_age_ms: 30000});
   assert.equal(JSON.stringify(prepared).includes('He go'), false);
   await check();
-  assert.deepEqual(await page.evaluate(() => fixture.worker.calls.filter(x => x.method).map(x => x.method)), ['prepare', 'readiness', 'send_ready']);
+  assert.deepEqual(await page.evaluate(() => fixture.worker.calls.filter(x => x.method).map(x => x.method)), ['prepare', 'readiness', 'send_ready_with_policy']);
   assert.equal(await page.evaluate(() => fixture.worker.ports.length), 1);
 });

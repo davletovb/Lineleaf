@@ -6,6 +6,8 @@ import {installController} from '../extension/lib/controller.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {requireReady, LINK_IDLE, PREPARE_INTERVAL, READINESS} from '../extension/lib/policy.mjs';
 import {fakeNative, fakeChrome, broker, sent, probed, turnOf, READY, waitFor} from './fixtures/extension-api.mjs';
+import {closeNativeFixtures} from './fixtures/extension-api.mjs';
+test.afterEach(closeNativeFixtures);
 
 const API_KEY = {...READY, sign_in: 'api_key'};
 const correction = (before, after) => ({before, after, left: '', right: '', category: 'grammar', explanation: 'Test'});
@@ -24,8 +26,8 @@ test('readiness and prepare answer with the provider status; a checked send repo
   const native = new NativeSeatline(() => fakeNative((m, p) => { seen.push(m.method); broker(m, p, {answer: 'answer'}); }));
   assert.deepEqual(await native.request('readiness', READINESS.cached), READY);
   assert.deepEqual(await native.request('prepare', READINESS.cached), READY);
-  const statuses = []; assert.equal(await native.request('send_ready', {turn: {}, freshness: READINESS.cached}, {onStatus: status => statuses.push(status)}), 'answer');
-  assert.deepEqual(statuses, [READY]); assert.deepEqual(seen, ['readiness', 'prepare', 'send_ready']); assert.equal(native.pending.size, 0); native.close();
+  const statuses = []; assert.equal(await native.request('send_ready_with_policy', {turn: {}, freshness: READINESS.cached, allowed_sign_in: ['subscription']}, {onStatus: status => statuses.push(status)}), 'answer');
+  assert.deepEqual(statuses, [READY]); assert.deepEqual(seen, ['readiness', 'prepare', 'send_ready_with_policy']); assert.equal(native.pending.size, 0); native.close();
 });
 test('status events outside their place, and a checked send that never reports a status, close the connection', async () => {
   const cases = {
@@ -36,17 +38,17 @@ test('status events outside their place, and a checked send that never reports a
     'no status before completion': (m, p) => { p.reply(m.id, {type: 'completed'}); },
   };
   for (const [name, handler] of Object.entries(cases)) {
-    const method = name === 'a status for a plain send' ? 'send' : name === 'output for a readiness check' ? 'readiness' : 'send_ready';
+    const method = name === 'a status for a plain send' ? 'send' : name === 'output for a readiness check' ? 'readiness' : 'send_ready_with_policy';
     const native = new NativeSeatline(() => fakeNative(handler));
     await assert.rejects(native.request(method, {}), /PROTOCOL_ERROR/, name); assert.equal(native.port, null, name);
   }
 });
 test('a status that fails the app policy stops a checked send at once, and its output is dropped', async () => {
   let port; const native = new NativeSeatline(() => port = fakeNative((m, p) => {
-    if (m.method === 'send_ready') { p.reply(m.id, {type: 'status', status: API_KEY}); p.reply(m.id, {type: 'delta', text: 'billed'}); }
+    if (m.method === 'send_ready_with_policy') { p.reply(m.id, {type: 'status', status: API_KEY}); p.reply(m.id, {type: 'delta', text: 'billed'}); }
     if (m.method === 'cancel') { p.reply(m.id, {type: 'completed'}); p.reply(m.target, {type: 'delta', text: 'more'}); p.reply(m.target, {type: 'stopped'}); }
   }));
-  await assert.rejects(native.request('send_ready', {}, {onStatus: requireReady}), /SUBSCRIPTION_REQUIRED/);
+  await assert.rejects(native.request('send_ready_with_policy', {}, {onStatus: requireReady}), /SUBSCRIPTION_REQUIRED/);
   assert.equal(port.sent[1].method, 'cancel'); assert.equal(port.sent[1].target, port.sent[0].id); assert.equal(native.pending.size, 0); native.close();
 });
 test('one connection carries concurrent requests and keeps their answers apart', async () => {
@@ -93,9 +95,10 @@ test('checks share one native connection and one readiness: readiness, then a se
   const f = fakeChrome(); installController(f.api);
   for (let i = 0; i < 3; i++) { const port = f.connect({documentId: `document-${i}`}); start(port); await waitFor(() => result(port)); }
   assert.equal(f.ports.length, 1); assert.equal(f.ports[0].closed, false);
-  assert.deepEqual(methods(f), ['readiness', 'send_ready', 'readiness', 'send_ready', 'readiness', 'send_ready']);
+  assert.deepEqual(methods(f), ['readiness', 'send_ready_with_policy', 'readiness', 'send_ready_with_policy', 'readiness', 'send_ready_with_policy']);
   for (const m of f.calls.filter(probed)) assert.deepEqual(m.params, {mode: 'cached', max_age_ms: 30000});
   for (const m of f.calls.filter(sent)) {
+    assert.deepEqual(m.params.allowed_sign_in, ['subscription']);
     assert.deepEqual(m.params.freshness, {mode: 'cached', max_age_ms: 30000});
     assert.equal(turnOf(m).check_sign_in, false, 'the readiness just checked stands in for a second probe');
     assert.deepEqual([turnOf(m).tools, turnOf(m).session, turnOf(m).continuation, turnOf(m).cleanup_group], ['none', 'ephemeral', null, null]);
@@ -106,7 +109,7 @@ test('Lineleaf’s own policy is enforced from the readiness before anything is 
   await waitFor(() => failure(port)); assert.equal(failure(port).code, 'SUBSCRIPTION_REQUIRED'); assert.deepEqual(methods(refused), ['readiness']);
   // The account changes between the check and the send: the send's own status is a billing mode Lineleaf refuses.
   const f = fakeChrome(); let swapped = false;
-  f.api.runtime.connectNative = () => fakeNative((m, p) => broker(m, p, {state: swapped && m.method === 'send_ready' ? API_KEY : READY, send: (m, p) => { p.reply(m.id, {type: 'delta', text: 'billed'}); p.reply(m.id, {type: 'completed'}); }}));
+  f.api.runtime.connectNative = () => fakeNative((m, p) => broker(m, p, {state: swapped && m.method === 'send_ready_with_policy' ? API_KEY : READY, send: (m, p) => { p.reply(m.id, {type: 'delta', text: 'billed'}); p.reply(m.id, {type: 'completed'}); }}));
   installController(f.api); swapped = true; const second = f.connect(); start(second);
   await waitFor(() => failure(second)); assert.equal(failure(second).code, 'SUBSCRIPTION_REQUIRED'); assert.equal(result(second), undefined);
 });
@@ -118,7 +121,7 @@ test('Seatline refusing before a turn starts earns one fresh check and send; a s
       else { p.reply(m.id, {type: 'delta', text: JSON.stringify({corrections: []})}); p.reply(m.id, {type: 'completed'}); }
     }}); });
     installController(f.api); const port = f.connect(); start(port); await waitFor(() => result(port));
-    assert.deepEqual(methods(f), ['readiness', 'send_ready', 'readiness', 'send_ready'], reason);
+    assert.deepEqual(methods(f), ['readiness', 'send_ready_with_policy', 'readiness', 'send_ready_with_policy'], reason);
     assert.deepEqual(f.calls.filter(probed).map(m => m.params.mode), ['cached', 'fresh'], reason);
     assert.deepEqual(f.calls.filter(sent).map(m => m.params.freshness.mode), ['cached', 'cached'], reason); // the retry's send reuses the fresh check just made
   }
@@ -131,22 +134,35 @@ test('Seatline refusing before a turn starts earns one fresh check and send; a s
   g.api.runtime.connectNative = () => fakeNative((m, p) => { if (sent(m)) tries++; broker(m, p, {send: (m, p) => p.reply(m.id, {type: 'failed', reason: 'PROVIDER_FAILED'})}); });
   installController(g.api); const other = g.connect(); start(other); await waitFor(() => failure(other)); assert.equal(tries, 1);
 });
-test('a companion without the readiness API is detected once per connection and served with status and send', async () => {
+test('a companion without policy enforcement can show status but cannot receive a writing prompt', async () => {
   const f = fakeChrome({legacy: true}); installController(f.api);
-  const first = f.connect(); start(first); await waitFor(() => result(first));
-  const second = f.connect({documentId: 'document-two'}); start(second); await waitFor(() => result(second));
-  assert.deepEqual(methods(f), ['readiness', 'status', 'send', 'status', 'send']); assert.equal(f.ports.length, 1);
-  for (const m of f.calls.filter(sent)) assert.equal(m.params.check_sign_in, true, 'the old companion still gets its own probe inside the turn');
+  const first = f.connect(); start(first); await waitFor(() => failure(first));
+  const second = f.connect({documentId: 'document-two'}); start(second); await waitFor(() => failure(second));
+  assert.deepEqual(methods(f), ['readiness', 'status', 'status']); assert.equal(f.ports.length, 1);
+  assert.equal(failure(first).code, 'COMPANION_UPDATE_REQUIRED');
+  assert.equal(f.calls.filter(sent).length, 0, 'no fallback prompt may bypass policy enforcement');
   // The connection ends and the companion has been updated meanwhile: the readiness API is tried again, and used.
   f.ports[0].disconnect(); f.legacy = false;
   const third = f.connect({documentId: 'document-three'}); start(third); await waitFor(() => result(third));
-  assert.deepEqual(methods(f).slice(5), ['readiness', 'send_ready']); assert.equal(f.ports.length, 2);
+  assert.deepEqual(methods(f).slice(3), ['readiness', 'send_ready_with_policy']); assert.equal(f.ports.length, 2);
   // Once the readiness API has answered on a connection, an INVALID_REQUEST from it is a real failure, not a reason to fall back to status.
   const g = fakeChrome(); let refuse = false;
   g.api.runtime.connectNative = () => { const port = fakeNative((m, p) => { g.calls.push(m); if (refuse && m.method === 'readiness') p.reply(m.id, {type: 'failed', reason: 'INVALID_REQUEST'}); else broker(m, p); }); g.ports.push(port); return port; };
   installController(g.api); const ok = g.connect(); start(ok); await waitFor(() => result(ok));
   refuse = true; const bad = g.connect({documentId: 'bad'}); start(bad); await waitFor(() => failure(bad));
-  assert.equal(failure(bad).code, 'INVALID_REQUEST'); assert.deepEqual(methods(g), ['readiness', 'send_ready', 'readiness']); assert.equal(g.ports.length, 1);
+  assert.equal(failure(bad).code, 'INVALID_REQUEST'); assert.deepEqual(methods(g), ['readiness', 'send_ready_with_policy', 'readiness']); assert.equal(g.ports.length, 1);
+});
+test('a readiness-capable companion without protected sends fails closed without a fallback turn', async () => {
+  const f = fakeChrome();
+  f.api.runtime.connectNative = () => fakeNative((m, p) => {
+    f.calls.push(m);
+    if (m.method === 'send_ready_with_policy') p.reply(m.id, {type: 'failed', reason: 'INVALID_REQUEST'});
+    else broker(m, p);
+  });
+  installController(f.api); const port = f.connect(); start(port);
+  await waitFor(() => failure(port));
+  assert.equal(failure(port).code, 'COMPANION_UPDATE_REQUIRED');
+  assert.deepEqual(methods(f), ['readiness', 'send_ready_with_policy']);
 });
 test('the connection closes after the idle limit, never while work is running, and the next request reconnects', async () => {
   mock.timers.enable({apis: ['setTimeout']});
@@ -215,11 +231,11 @@ test('a cancelled field leaves nothing behind for the next field, not even outpu
   f.api.runtime.connectNative = () => { const port = fakeNative((m, p) => {
     f.calls.push(m);
     if (m.method === 'cancel') { p.reply(m.target, {type: 'delta', text: JSON.stringify({corrections: [correction('Alpha', 'LEAK')]})}); p.reply(m.id, {type: 'completed'}); p.reply(m.target, {type: 'stopped'}); return; }
-    if (m.method === 'send_ready' && ++answers === 1) { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'delta', text: '{"corrections":['}); return; } // field A: half an answer, then it is cancelled
+    if (m.method === 'send_ready_with_policy' && ++answers === 1) { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'delta', text: '{"corrections":['}); return; } // field A: half an answer, then it is cancelled
     broker(m, p, {answer: turn => JSON.stringify({corrections: [correction(JSON.parse(turn.messages[0].text).text.split(' ')[0], 'ok')]})});
   }); f.ports.push(port); return port; };
   const a = f.connect({documentId: 'field-a'}), b = f.connect({documentId: 'field-b'});
-  start(a, 'Alpha go home.'); await waitFor(() => f.calls.some(m => m.method === 'send_ready'));
+  start(a, 'Alpha go home.'); await waitFor(() => f.calls.some(m => m.method === 'send_ready_with_policy'));
   a.disconnect(); await waitFor(() => failure(a) || controller.active === null);
   start(b, 'Bravo go home.'); await waitFor(() => result(b));
   assert.deepEqual(result(b).edits.map(e => [e.before, e.after]), [['Bravo', 'ok']]); assert.equal(JSON.stringify(b.received).includes('LEAK'), false); assert.equal(f.ports.length, 1);
@@ -243,7 +259,7 @@ test('an enabled editor’s preparation asks Seatline for a cached readiness and
   clock += PREPARE_INTERVAL; assert.deepEqual(await f.rpc('prepare', null, f.sender), {ok: true, value: 'prepared'}); assert.equal(frames(f).length, 2);
   // The check that follows reuses the connection and asks for the same cached readiness.
   const port = f.connect(); start(port); await waitFor(() => result(port));
-  assert.deepEqual(methods(f), ['prepare', 'prepare', 'readiness', 'send_ready']); assert.equal(f.ports.length, 1);
+  assert.deepEqual(methods(f), ['prepare', 'prepare', 'readiness', 'send_ready_with_policy']); assert.equal(f.ports.length, 1);
 });
 test('preparation happens only for a site the user enabled and Lineleaf is not paused on, and never for a sender it does not trust', async () => {
   const off = fakeChrome({sites: []}); installController(off.api);

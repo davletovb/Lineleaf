@@ -18,8 +18,8 @@
 //
 // --expect cached: a companion with Seatline's readiness API. All checks complete over one host process, with one sign-in probe in all
 // (none for a check that follows a preparation) and one model turn per check.
-// --expect legacy: a companion that predates it. The controller falls back after one refused `readiness`; the connection is still kept,
-// and each check costs the two probes (status, and the one inside the turn) that older companions always ran.
+// --expect blocked: an older companion can answer status, but cannot enforce subscription-only sending.
+// The controller refuses every writing request, without launching any model turn or falling back to send.
 //
 // Linux only (the broker and bridge use the registry layout and shell the isolated-registry validation uses).
 import {execFileSync, spawn} from 'node:child_process';
@@ -106,6 +106,7 @@ async function scenario(world, {extension, checks, prepare}) {
     record(`check ${i}`, before, started, final.type === 'result' ? 'ok' : final.code);
     await until(() => controller.active === null, 'the controller to be idle');
   }
+  await f.rpc('reset');
   return rows;
 }
 
@@ -123,21 +124,22 @@ function summarize(rows) {
 /** What `--expect` holds a run to; returns the mismatches. */
 function expectations(kind, {summary, steps}, checks, prepared) {
   const wrong = [], same = (name, actual, wanted) => { if (actual !== wanted) wrong.push(`${name}: ${actual}, expected ${wanted}`); };
-  same('checks completed', summary.completed, checks); same('host processes', summary.total.hosts, 1); same('model turns', summary.total.exec, checks);
+  same('checks completed', summary.completed, kind === 'blocked' ? 0 : checks); same('host processes', summary.total.hosts, 1); same('model turns', summary.total.exec, kind === 'blocked' ? 0 : checks);
   if (kind === 'cached') {
     same('sign-in probes in all', summary.total.login, 1);
     if (prepared) { const prepare = steps.find(step => step.step === 'prepare'); same('prepare outcome', prepare?.outcome, 'prepared'); same('first check probes after a preparation', summary.first_check.login, 0); same('first check hosts after a preparation', summary.first_check.hosts, 0); }
   } else {
-    same('sign-in probes in all', summary.total.login, 2 * checks);
-    same('first check methods', steps.find(step => step.step === 'check 1')?.frames.join(','), 'readiness,status,send');
-    for (const step of steps.filter(step => step.step.startsWith('check') && step.step !== 'check 1')) same(`${step.step} methods`, step.frames.join(','), 'status,send');
+    same('sign-in probes in all', summary.total.login, checks);
+    same('first check methods', steps.find(step => step.step === 'check 1')?.frames.join(','), 'readiness,status');
+    for (const step of steps.filter(step => step.step.startsWith('check'))) same(`${step.step} outcome`, step.outcome, 'COMPANION_UPDATE_REQUIRED');
+    for (const step of steps.filter(step => step.step.startsWith('check') && step.step !== 'check 1')) same(`${step.step} methods`, step.frames.join(','), 'status');
   }
   return wrong;
 }
 
 const {values} = parseArgs({options: {expect: {type: 'string'}, companion: {type: 'string'}, extension: {type: 'string', default: join(ROOT, 'extension/lib')}, compare: {type: 'string'},
   checks: {type: 'string', default: '6'}, prepare: {type: 'boolean', default: false}, label: {type: 'string'}, json: {type: 'boolean', default: false}}});
-if (!values.companion) { console.error('usage: measure-readiness.mjs --companion <seatline-companion> [--checks N] [--prepare] [--extension DIR] [--compare OLDER_EXTENSION_LIB] [--expect cached|legacy] [--json]'); process.exit(2); }
+if (!values.companion) { console.error('usage: measure-readiness.mjs --companion <seatline-companion> [--checks N] [--prepare] [--extension DIR] [--compare OLDER_EXTENSION_LIB] [--expect cached|blocked] [--json]'); process.exit(2); }
 const checks = Number(values.checks);
 if (!(checks >= 2 && checks <= 20)) { console.error('--checks must be between 2 and 20'); process.exit(2); }
 const runs = values.compare
@@ -157,7 +159,7 @@ for (const run of runs) {
   } finally { world.remove(); }
 }
 if (values.expect) {
-  if (!['cached', 'legacy'].includes(values.expect) || values.compare || report.runs.length !== 1) { console.error('--expect cached|legacy takes one run'); process.exit(2); }
+  if (!['cached', 'blocked'].includes(values.expect) || values.compare || report.runs.length !== 1) { console.error('--expect cached|blocked takes one run'); process.exit(2); }
   const wrong = expectations(values.expect, report.runs[0], checks, report.runs[0].prepare);
   report.expected = {kind: values.expect, mismatches: wrong};
   if (wrong.length) { console.error(`Readiness expectations (${values.expect}) failed:\n  ${wrong.join('\n  ')}`); process.exitCode = 1; }

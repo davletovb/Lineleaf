@@ -69,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        companion: [current, minimum]
+        companion: [current, legacy]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -89,17 +89,17 @@ jobs:
           import json
           contract = json.load(open('config/seatline-contract.json'))
           print(f"current={contract['revision']}")
-          print(f"minimum={contract['minimum_revision']}")
+          print(f"legacy={contract['legacy_revision']}")
           PY
       - name: Check out the shared Seatline revision
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: davletovb/seatline
-          ref: ${{ matrix.companion == 'current' && steps.contract.outputs.current || steps.contract.outputs.minimum }}
+          ref: ${{ matrix.companion == 'current' && steps.contract.outputs.current || steps.contract.outputs.legacy }}
           path: .seatline-audit
           persist-credentials: false
       - name: Name the revision under test
-        run: echo "SEATLINE_REVISION=${{ matrix.companion == 'current' && steps.contract.outputs.current || steps.contract.outputs.minimum }}" >> "$GITHUB_ENV"
+        run: echo "SEATLINE_REVISION=${{ matrix.companion == 'current' && steps.contract.outputs.current || steps.contract.outputs.legacy }}" >> "$GITHUB_ENV"
       - name: Build the companion
         working-directory: .seatline-audit
         run: cargo build --locked --release -p seatline-companion -p seatline-tests --bins
@@ -121,10 +121,10 @@ jobs:
           COMPANION="$PWD/.seatline-audit/target/release/seatline-companion"
           node tools/measure-readiness.mjs --companion "$COMPANION" --checks 6 --expect cached --json > test-results/controller-readiness.json
           node tools/measure-readiness.mjs --companion "$COMPANION" --checks 6 --prepare --expect cached --json > test-results/controller-readiness-prepared.json
-      - name: Run the production controller against a companion without the readiness API (minimum companion)
-        if: matrix.companion == 'minimum'
+      - name: Run the production controller against a companion without the readiness API (legacy companion, generation refused)
+        if: matrix.companion == 'legacy'
         run: |
-          node tools/measure-readiness.mjs --companion "$PWD/.seatline-audit/target/release/seatline-companion" --checks 6 --expect legacy --json > test-results/controller-fallback.json
+          node tools/measure-readiness.mjs --companion "$PWD/.seatline-audit/target/release/seatline-companion" --checks 6 --expect blocked --json > test-results/controller-fallback.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

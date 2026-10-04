@@ -1,7 +1,7 @@
 import {MAX_OUTPUT, PHASES, LineleafError, safeReason, errorCode, isObject, exactKeys} from './policy.mjs';
 const TYPES = new Set(['launched', 'started', 'activity', 'delta', 'session', 'session_lost', 'usage', 'source', 'status', 'completed', 'stopped', 'failed']);
 const TERMINAL = new Set(['completed', 'stopped', 'failed']);
-// Answered with one status event. `send_ready` also carries one, ahead of its turn, which `onStatus` can refuse.
+// Answered with one status event. `send_ready_with_policy` also carries one, ahead of its turn, which `onStatus` can refuse.
 const STATUS = new Set(['status', 'readiness', 'prepare']);
 const UNSENT = Symbol('unsent');
 
@@ -43,16 +43,16 @@ export class NativeSeatline {
         if (TERMINAL.has(event.type)) this.finish(frame.id, new LineleafError(item.cancelled));
         return;
       }
-      const reports = STATUS.has(item.method) || item.method === 'send_ready';
+      const reports = STATUS.has(item.method) || item.method === 'send_ready_with_policy';
       if (event.type === 'delta') {
-        if (!['send', 'send_ready'].includes(item.method) || typeof event.text !== 'string' || !event.text.isWellFormed()) throw new Error();
+        if (!['send', 'send_ready_with_policy'].includes(item.method) || typeof event.text !== 'string' || !event.text.isWellFormed()) throw new Error();
         item.bytes += new TextEncoder().encode(event.text).length;
         if (item.bytes > MAX_OUTPUT) throw new Error(); item.output += event.text;
       } else if (event.type === 'status') {
         if (!reports || !isObject(event.status) || item.status !== null || item.bytes) throw new Error();
         item.status = event.status;
         // The check this request was sent under, as Seatline saw it. A refusal stops the turn at once, whatever an earlier check said.
-        if (item.method === 'send_ready' && item.onStatus) {
+        if (item.method === 'send_ready_with_policy' && item.onStatus) {
           try { item.onStatus(event.status); } catch (error) { this.cancel(frame.id, errorCode(error)); }
         }
       } else if (event.type === 'session' || event.type === 'session_lost') {
@@ -66,7 +66,7 @@ export class NativeSeatline {
       }
     } catch { this.close('PROTOCOL_ERROR'); }
   }
-  // `readiness` and `prepare` answer with the provider's status; `send_ready` with the model's output, after `onStatus` has seen the
+  // `readiness` and `prepare` answer with the provider's status; `send_ready_with_policy` with the model's output, after `onStatus` has seen the
   // status it was sent under; `status` and `send` as before. A frame that provably never left, because the retained port had already
   // gone, is sent once more on a new connection: nothing started, so nothing is replayed. Any later failure is final.
   async request(method, params = null, options = {}) {
@@ -101,6 +101,7 @@ export class NativeSeatline {
     const item = this.pending.get(id); if (!item || item.cancelled) return;
     item.cancelled = reason; item.output = ''; clearTimeout(item.timer);
     const cancelId = crypto.randomUUID(); this.ignored.add(cancelId);
+    item.cancelId = cancelId;
     item.timer = setTimeout(() => this.close(reason), this.drainTimeout);
     try { this.port.postMessage({id: cancelId, provider: 'codex', method: 'cancel', target: id, params: null}); }
     catch { this.close(reason); }
@@ -108,6 +109,9 @@ export class NativeSeatline {
   finish(id, error, result) {
     const item = this.pending.get(id); if (!item) return;
     clearTimeout(item.timer); item.signal?.removeEventListener('abort', item.abort); this.pending.delete(id);
+    // Seatline terminates the target, without acknowledging the cancel ID.
+    // Retain that ID only while draining, for peers that acknowledge early.
+    if (item.cancelId) this.ignored.delete(item.cancelId);
     item.output = ''; error ? item.reject(error) : item.resolve(result);
   }
   close(code = 'CANCELLED') {

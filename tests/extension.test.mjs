@@ -8,6 +8,8 @@ import {installController} from '../extension/lib/controller.mjs';
 import {messageFor} from '../extension/lib/messages.mjs';
 import {EXCLUDED} from '../extension/lib/editor-policy.mjs';
 import {fakeNative, fakeChrome, broker, sent, probed, turnOf, READY, waitFor} from './fixtures/extension-api.mjs';
+import {closeNativeFixtures} from './fixtures/extension-api.mjs';
+test.afterEach(closeNativeFixtures);
 const correction = (before = 'go', after = 'goes', left = '', right = '') => ({before, after, left, right, category: 'grammar', explanation: 'Subject agreement'});
 const output = corrections => JSON.stringify({corrections});
 const rejects = fn => assert.throws(fn, /INVALID_OUTPUT/);
@@ -128,6 +130,23 @@ test('cancellation targets the original ID, drains stopped, and ignores cancel a
   }));
   const result = native.request('send', {}, {signal: abort.signal}); await waitFor(() => port.sent.length === 1); abort.abort();
   await assert.rejects(result, /CANCELLED/); assert.equal(port.sent[1].target, port.sent[0].id); assert.equal(native.pending.size, 0); native.close();
+});
+test('completed cancellations retain no cancel IDs when Seatline acknowledges only the target', async () => {
+  let port;
+  const native = new NativeSeatline(() => port = fakeNative((m, p) => {
+    if (m.method === 'cancel') p.reply(m.target, {type: 'stopped'});
+  }));
+  for (let i = 0; i < 5; i++) {
+    const abort = new AbortController();
+    const done = native.request('send', {}, {signal: abort.signal});
+    await waitFor(() => native.pending.size === 1);
+    abort.abort();
+    await assert.rejects(done, /CANCELLED/);
+    assert.equal(native.pending.size, 0);
+    assert.equal(native.ignored.size, 0, 'cancel IDs must not accumulate on the retained port');
+    assert.equal(port.closed, false);
+  }
+  native.close();
 });
 test('timeout with no stopped event force-closes after the bounded drain', async () => {
   let port; const native = new NativeSeatline(() => port = fakeNative(), {drainTimeout: 10});
@@ -517,7 +536,7 @@ test('the page watchdog outlasts the worker’s whole sequence, so a slow but he
       const port = fakeNative((m, p) => {
         if (probed(m)) setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 14000);
         if (sent(m)) {
-          sends.push(m); if (m.method === 'send_ready') p.reply(m.id, {type: 'status', status: READY});
+          sends.push(m); if (m.method === 'send_ready_with_policy') p.reply(m.id, {type: 'status', status: READY});
           setTimeout(() => { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); }, 85000);
         }
       }, null);

@@ -78,9 +78,10 @@ export function allowed(settings, origin) { return !settings.paused && settings.
 // The readiness reasons mean Seatline refused before it started a model turn.
 export const READINESS_REFUSALS = new Set(['READINESS_CHANGED', 'READINESS_EXPIRED', 'READINESS_UNVERIFIED']);
 export function safeReason(reason) {
+  if (reason === 'SIGN_IN_POLICY_DENIED') return 'SUBSCRIPTION_REQUIRED';
   return new Set(['EXECUTABLE_NOT_FOUND', 'LOGIN_REQUIRED', 'AUTH_REJECTED', 'APP_NOT_AUTHORIZED', 'QUEUE_FULL',
     'PROVIDER_RATE_LIMITED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_TIMEOUT', 'TOOL_ISOLATION_UNAVAILABLE',
-    'INVALID_REQUEST', 'MODEL_NOT_SUPPORTED', ...READINESS_REFUSALS, 'READINESS_TIMEOUT']).has(reason) ? reason : 'PROVIDER_FAILED';
+    'INVALID_REQUEST', 'READINESS_UNSUPPORTED', 'MODEL_NOT_SUPPORTED', ...READINESS_REFUSALS, 'READINESS_TIMEOUT']).has(reason) ? reason : 'PROVIDER_FAILED';
 }
 export class LineleafError extends Error {
   constructor(code) { super(code); this.code = code; }

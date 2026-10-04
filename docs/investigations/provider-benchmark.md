@@ -24,7 +24,7 @@ A disconnect, malformed stream, failed cancel/drain, later readiness failure, or
 
 ## Readiness mode and launch counts
 
-By default the harness runs as the production extension did before Seatline's readiness API: `status`, then `send` with `check_sign_in`, which makes Seatline probe sign-in again inside every turn. `--readiness cached` asks `readiness` once per connection (Seatline reuses a verified result for up to 30 seconds) and sends each turn with `send_ready` under it and `check_sign_in: false`. A companion without the API refuses the cached mode with `INVALID_REQUEST` and no measurement is taken.
+By default the harness runs as the production extension did before Seatline's readiness API: `status`, then `send` with `check_sign_in`, which makes Seatline probe sign-in again inside every turn. `--readiness cached` asks `readiness` once per connection (Seatline reuses a verified result for up to 30 seconds) and sends each turn with `send_ready_with_policy` under it, with `allowed_sign_in: ["subscription"]` and `check_sign_in: false`. The cached mode requires the protected launch-policy API; an older companion refuses it with `INVALID_REQUEST` and no measurement is taken.
 
 `--launch-log PATH` names a fake provider's launch record (Seatline's fake Codex appends one line per launch to `codex-invocations`). The report then counts real launches, split into sign-in probes (`status`) and model turns (`generation`), for the readiness check, each turn (so per phase) and the cancellation probe. A live provider keeps no such record, so a live run has no launch counts.
 

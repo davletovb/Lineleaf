@@ -1,5 +1,6 @@
 export const MESSAGES = {
   NATIVE_UNAVAILABLE: 'Seatline is unavailable. Install the shared companion and authorize the Lineleaf extension ID.',
+  COMPANION_UPDATE_REQUIRED: 'Update Seatline before checking text. This companion cannot enforce the subscription sign-in policy before launch.',
   PROTOCOL_ERROR: 'Seatline returned an unsupported response. Check the companion version.',
   EXECUTABLE_NOT_FOUND: 'Codex was not found by Seatline. Install the supported Codex CLI.',
   LOGIN_REQUIRED: 'Sign in to Codex, then try again.', AUTH_REJECTED: 'Codex sign-in was rejected. Sign in again.',

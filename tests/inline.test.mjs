@@ -83,7 +83,7 @@ test('typing cancels in-flight work, drops late output, and explicit retry uses 
   await page.evaluate(() => { fixture.worker.hold = true; }); await type();
   await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.keyboard.type(' Now.'); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'cancel'));
-  await page.evaluate(() => { const p = fixture.worker.ports[0], request = p.sent.find(x => x.method === 'send' || x.method === 'send_ready'); p.reply(request.id, {type: 'delta', text: '{"corrections":[]}'}); p.reply(request.id, {type: 'completed'}); fixture.worker.hold = false; });
+  await page.evaluate(() => { const p = fixture.worker.ports[0], request = p.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy'); p.reply(request.id, {type: 'delta', text: '{"corrections":[]}'}); p.reply(request.id, {type: 'completed'}); fixture.worker.hold = false; });
   assert.equal(await inline.locator('.underline').count(), 0);
   await open(); await inline.button('Check now').click(); await result();
   assert.deepEqual(JSON.parse((await sends()).at(-1).params.messages[0].text), {text: 'He go to work. Now.'});

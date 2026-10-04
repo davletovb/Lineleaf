@@ -163,7 +163,9 @@ class ConnectionTests(unittest.TestCase):
                 connection.start("codex", "status")
 
     def test_fixture_benchmark_labels_and_no_draft_content_in_report(self):
-        report = run_benchmark(FIXTURE, fixture=True, timeout=3)
+        # The final synthetic generation stays active until cancellation;
+        # scheduler delays must not let its 180 ms answer win this assertion.
+        report = run_benchmark(FIXTURE + ["--hold-turn", str(len(CASES) + 1)], fixture=True, timeout=3, cancel_after=0.3)
         self.assertEqual(report["kind"], "fixture")
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["summary"]["attempted"], len(CASES))
@@ -184,7 +186,7 @@ class RecordingConnection(NativeConnection):
     def start(self, provider, method, params=None):
         RecordingConnection.asked.append((method, params))
         launches = {"status": ["login status"], "readiness": [] if RecordingConnection.warm else ["login status"],
-                    "send": ["login status", "exec --json"], "send_ready": ["exec --json"]}.get(method, [])
+                    "send": ["login status", "exec --json"], "send_ready_with_policy": ["exec --json"]}.get(method, [])
         if method == "readiness":
             RecordingConnection.warm = True  # Seatline's cache: later checks within the window launch nothing.
         if RecordingConnection.log:
@@ -215,13 +217,13 @@ class ReadinessModeTests(unittest.TestCase):
         self.assertEqual(report["readiness"], "cached")
         methods = [method for method, _ in RecordingConnection.asked]
         self.assertEqual(methods.count("readiness"), 2)
-        self.assertEqual(methods.count("send_ready"), 2 * len(CASES) + 1)
+        self.assertEqual(methods.count("send_ready_with_policy"), 2 * len(CASES) + 1)
         self.assertNotIn("status", methods)
         self.assertNotIn("send", methods)
         for method, params in RecordingConnection.asked:
             if method == "readiness":
                 self.assertEqual(params, READINESS_CACHED)
-            if method == "send_ready":
+            if method == "send_ready_with_policy":
                 self.assertEqual(params["freshness"], READINESS_CACHED)
                 self.assertFalse(params["turn"]["check_sign_in"])
                 self.assertEqual((params["turn"]["tools"], params["turn"]["session"], params["turn"]["continuation"]),

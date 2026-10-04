@@ -4,7 +4,7 @@ The provider benchmark runs twice against a real companion and broker in an isol
 Seatline's own tests (signed in with a ChatGPT subscription) standing in for the provider:
 
 * legacy: `status`, then `send` with `check_sign_in`. Seatline probes sign-in again inside every turn.
-* cached: `readiness`, then `send_ready` under it. One probe serves the whole run.
+* cached: `readiness`, then `send_ready_with_policy` under it. One probe serves the whole run.
 
 The fake records every launch, so the counts are real process launches. It is a fake provider, so this says nothing about a live
 provider's latency, quota or sign-in behaviour; those need a live run, which CI cannot make.

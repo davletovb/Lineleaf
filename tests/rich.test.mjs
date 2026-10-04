@@ -255,7 +255,7 @@ test('a descendant exclusion added while the provider request is pending discard
   await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   await wrapInCode('#quill p:nth-of-type(2)');
   await page.evaluate(() => {
-    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy');
     port.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
     port.reply(request.id, {type: 'completed'});
   });
