@@ -3,7 +3,9 @@
 This archive is for development review. Check `review.json`: `releaseReady: false` means beta distribution is blocked. No browser/OS is advertised until the acceptance checklist passes. The nested extension ZIP contains the loadable manifest at its root; extract it before loading unpacked.
 
 1. Use desktop Chrome on a review device. Extract `lineleaf-0.1.0.zip`, open `chrome://extensions`, enable Developer mode, and load its directory unpacked. Verify ID `lnbkadelggojehiapgnhonicnfonobal`. This is a stable development ID, not an issued Chrome Web Store ID.
-2. Use your existing shared Seatline companion at revision `dc1086582c8b98498aa48dae91c8d174bc3cfc3c`. Use its normal installation procedure if it is not installed. Lineleaf ships no companion, provider, Node runtime, or credential.
+2. Use your existing shared Seatline companion at revision `0cb105e4c4d753abf8fb305d8ccedeeb64dd0ef4` or a later one. Use its normal installation procedure if it is not installed. Lineleaf ships no companion, provider, Node runtime, or credential. A companion as old as `dc1086582c8b98498aa48dae91c8d174bc3cfc3c` (the revision Lineleaf was first audited against) still works: Lineleaf finds out that it lacks Seatline's readiness API and falls back to the earlier request sequence, which probes Codex's sign-in twice per check instead of once per thirty seconds. Update the companion with its normal procedure; the authorization command in step 3 is unchanged, and if Lineleaf reports that Seatline is unavailable after an update, authorize again as in step 3.
+
+   Lineleaf keeps one connection to the companion between checks and closes it after a minute without one, when Lineleaf is paused or reset, or when no site is enabled. If a check ever misbehaves after a companion update, closing and reopening the browser starts a clean connection. To go back to the previous behavior, load the earlier candidate (the retained connection and the readiness API are part of the extension, with no setting to turn them off).
 3. Authorize the Lineleaf development origin with the existing companion:
 
    ```sh

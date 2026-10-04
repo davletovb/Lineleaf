@@ -59,7 +59,8 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
     const row = {id: c.id, inputHash: sha256(c.source), status: 'failed', response: '', elapsedMs: 0, code: null};
     let native, checkingReadiness = true;
     try {
-      // Like production, every case gets a new bridge/handshake, status probe and ephemeral send.
+      // Every case gets a new bridge/handshake, status probe and ephemeral send: the cold path. Production now keeps its connection and reuses
+      // Seatline's readiness, so these timings are not production's (the report's timing boundary says what they include).
       native = open();
       requireReady(await native.request('status', null, {timeout: Math.min(timeout, 15000)}));
       checkingReadiness = false;

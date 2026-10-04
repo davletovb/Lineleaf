@@ -20,14 +20,14 @@ before(async () => {
 });
 after(async () => { await browser?.close(); });
 beforeEach(async () => { await page.context().setOffline(false); await page.goto('https://inline.lineleaf.test/?automatic'); await page.waitForFunction(() => window.__lineleafMounted); });
-const sends = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+const sends = () => page.evaluate(() => fixture.worker.turns);
 const settings = patch => page.evaluate(async patch => {
   const p = fixture.worker.data.preferences;
   const expected = Object.fromEntries(Object.keys(patch).map(key => [key, p[key]]));
   return fixture.worker.rpc('save-settings', {changes: patch, expected, dictionary: {add: [], remove: []}});
 }, patch);
 async function type(id = 'textarea', value = 'He go to work.') { await page.locator(`#${id}`).fill(value); }
-async function result() { await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send')); await inline.locator('.underline').waitFor(); }
+async function result() { await page.waitForFunction(() => fixture.worker.turns.length > 0); await inline.locator('.underline').waitFor(); }
 async function open() { await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor(); }
 const idle = () => page.waitForTimeout(1700);
 test('automatic mode is opt-in and focusing prefilled text alone never sends a request', async () => {
@@ -81,9 +81,9 @@ test('synthetic page input cannot start an automatic request', async () => {
 });
 test('typing cancels in-flight work, drops late output, and explicit retry uses the latest source', async () => {
   await page.evaluate(() => { fixture.worker.hold = true; }); await type();
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+  await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.keyboard.type(' Now.'); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'cancel'));
-  await page.evaluate(() => { const p = fixture.worker.ports[0], request = p.sent.find(x => x.method === 'send'); p.reply(request.id, {type: 'delta', text: '{"corrections":[]}'}); p.reply(request.id, {type: 'completed'}); fixture.worker.hold = false; });
+  await page.evaluate(() => { const p = fixture.worker.ports[0], request = p.sent.find(x => x.method === 'send' || x.method === 'send_ready'); p.reply(request.id, {type: 'delta', text: '{"corrections":[]}'}); p.reply(request.id, {type: 'completed'}); fixture.worker.hold = false; });
   assert.equal(await inline.locator('.underline').count(), 0);
   await open(); await inline.button('Check now').click(); await result();
   assert.deepEqual(JSON.parse((await sends()).at(-1).params.messages[0].text), {text: 'He go to work. Now.'});
@@ -94,7 +94,7 @@ test('dictionary, UK variant, global pause and reset change the production check
   await page.waitForFunction(() => fixture.worker.data.preferences.dictionary.includes('go'));
   await settings({variant: 'UK'}); await type('textarea', 'He go to work. Again.');
   await page.waitForSelector('[data-lineleaf-inline]', {state: 'attached'}); await open(); await inline.button('Check now').click();
-  await page.waitForFunction(() => fixture.worker.calls.filter(x => x.method === 'send').length === 2);
+  await page.waitForFunction(() => fixture.worker.turns.length === 2);
   await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').includes('No corrections'));
   assert.equal(await inline.locator('.underline').count(), 0); assert.match((await sends()).at(-1).params.system, /British/);
   await open(); await inline.button('Pause Lineleaf').click(); await page.waitForFunction(() => fixture.worker.data.preferences.paused);
@@ -164,7 +164,7 @@ test('typing announces a repeated idle message once and still announces state tr
 test('disabled site, revoked permission and removed field cancel work and remove all previews', async () => {
   for (const change of ['disable', 'revoke', 'remove']) {
     await page.goto('https://inline.lineleaf.test/?automatic'); await page.waitForFunction(() => window.__lineleafMounted);
-    await page.evaluate(() => { fixture.worker.hold = true; }); await type(); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+    await page.evaluate(() => { fixture.worker.hold = true; }); await type(); await page.waitForFunction(() => fixture.worker.turns.length > 0);
     await page.evaluate(async change => {
       if (change === 'disable') await fixture.worker.rpc('set-site', {origin: location.origin, enabled: false});
       else if (change === 'revoke') await fixture.worker.api.permissions.remove({origins: [`${location.protocol}//${location.hostname}/*`]});
@@ -175,7 +175,7 @@ test('disabled site, revoked permission and removed field cancel work and remove
   }
 });
 test('offline flow cancels work, offers a fixed error, and makes no automatic retry on reconnect', async () => {
-  await page.evaluate(() => { fixture.worker.hold = true; }); await type(); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+  await page.evaluate(() => { fixture.worker.hold = true; }); await type(); await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.context().setOffline(true); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'cancel'));
   await open(); assert.match(await inline.locator('#status').textContent(), /offline/);
   await page.context().setOffline(false); await idle(); assert.equal((await sends()).length, 1);
@@ -185,7 +185,7 @@ test('authentication failure stops automatic retries until an explicit check', a
   await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').includes('Sign in'));
   assert.equal((await sends()).length, 0);
   await page.keyboard.type(' Again.'); await idle();
-  assert.equal(await page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'status').length), 1);
+  assert.equal(await page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'status' || x.method === 'readiness').length), 1);
   await page.evaluate(() => { fixture.worker.state.authentication = 'authenticated'; });
   await open(); await inline.button('Check now').click(); await result(); assert.equal((await sends()).length, 1);
 });
@@ -201,4 +201,27 @@ test('inline editing failure restores the source and keeps the candidate availab
   await page.locator('#input').evaluate(el => { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }); await page.keyboard.press('Backspace');
   await inline.locator('.badge').waitFor(el => /changed/i.test(el.getAttribute('aria-label')));
   assert.equal(await inline.locator('.underline').count(), 0);
+});
+
+const prepares = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'prepare'));
+test('an editor Lineleaf may check prepares the provider once, with no text, however often focus moves', async () => {
+  await page.locator('#textarea').focus();
+  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'prepare'));
+  await page.locator('#input').focus(); await page.locator('#textarea').focus(); await idle();
+  const calls = await prepares(); assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].params, {mode: 'cached', max_age_ms: 30000});
+  assert.equal(JSON.stringify(calls).includes('He go'), false); assert.equal((await sends()).length, 0);
+});
+test('with automatic checking off nothing is prepared on focus; asking for the card does', async () => {
+  await settings({automatic: false}); await page.locator('#textarea').focus(); await idle();
+  assert.equal((await prepares()).length, 0, 'focus alone does nothing without the opt-in');
+  await open(); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'prepare'));
+  assert.equal((await prepares()).length, 1); assert.equal((await sends()).length, 0);
+});
+test('sensitive and read-only fields and a paused Lineleaf prepare nothing', async () => {
+  for (const id of ['password', 'card']) await page.locator(`#${id}`).focus();
+  await page.locator('#textarea').evaluate(el => { el.readOnly = true; }); await page.locator('#textarea').focus(); await idle();
+  assert.equal((await prepares()).length, 0);
+  await page.evaluate(() => fixture.worker.rpc('set-pause', {paused: true}));
+  await page.locator('#input').focus(); await idle(); assert.equal((await prepares()).length, 0);
 });

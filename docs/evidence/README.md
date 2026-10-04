@@ -3,6 +3,7 @@
 For the B-01–B-05 extension, see [selection prototype CI and package provenance](selection-prototype-ci.md).
 For C-01–C-05, see [inline prototype CI and package provenance](inline-prototype-ci.md).
 For E-01–E-03, see [evaluation and review-candidate provenance](evaluation-beta-ci.md); live/human/device beta gates remain open.
+For the retained connection, readiness reuse and preparation (Seatline performance tracker G-01), see [readiness reuse](readiness-reuse-local.json): local runs of the production controller and the benchmark through a real broker with stand-in providers, and the unchanged authorization/coexistence checks against Seatline `0cb105e4c4d753abf8fb305d8ccedeeb64dd0ef4`. They are local, not CI, and not a live-provider result.
 
 Accepted code revision: [`9d1ccaed15f3efcb0540db5d183fb5eab2718a2d`](https://github.com/davletovb/Lineleaf/commit/9d1ccaed15f3efcb0540db5d183fb5eab2718a2d). [Foundation validation run 36856262500](https://github.com/davletovb/Lineleaf/actions/runs/36856262500) passed all three jobs on that revision. Later documentation commits archive these results; this run is evidence for the named code revision.
 

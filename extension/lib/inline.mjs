@@ -4,7 +4,7 @@ import {captureRichParagraph} from './rich-text.mjs';
 import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
 import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selection.mjs';
 import {suggestionRects, visibleEditorRect} from './geometry.mjs';
-import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
+import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, PREPARE_INTERVAL, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import {icon, iconLabel} from './icons.mjs';
 import tokens from '../tokens.css';
@@ -245,6 +245,14 @@ export function mountInline(api) {
   async function rpc(type, payload = null) {
     try { return await api.runtime.sendMessage({type, payload}); } catch { return {ok: false, code: 'UNAVAILABLE'}; }
   }
+  // Gets the provider ready for a check the user is likely to ask for: the field they are in is one Lineleaf may check (the site is enabled and
+  // not paused, and either automatic checking is on or they asked for the card). Nothing is read from the page and no text goes with
+  // it; the worker prepares only the provider the user chose and declines when a request is running or the provider is struggling.
+  let preparedAt = -Infinity;
+  function prepare() {
+    if (Date.now() - preparedAt < PREPARE_INTERVAL) return;
+    preparedAt = Date.now(); void rpc('prepare');
+  }
   async function refresh() {
     const ticket = ++epoch, result = await rpc('site-state'); if (ticket !== epoch) return;
     policy = result.ok ? result.value : null;
@@ -287,7 +295,7 @@ export function mountInline(api) {
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});
-      update(idleMessage());
+      update(idleMessage()); prepare();
     }
     queue();
   }
@@ -502,7 +510,7 @@ export function mountInline(api) {
   document.addEventListener('keydown', trusted(event => {
     if (!(event.altKey && event.shiftKey && event.code === 'KeyL')) return;
     if (!view && !permitted()) choose(deepActive(), true); // choose() declines when the site is disabled or paused
-    if (view) { event.preventDefault(); view.open(); }
+    if (view) { event.preventDefault(); view.open(); prepare(); }
   }), true);
   const paint = () => { if (!frame) frame = requestAnimationFrame(() => { frame = null; view?.draw(); }); };
   document.addEventListener('scroll', paint, {capture: true, passive: true}); window.addEventListener('resize', paint);

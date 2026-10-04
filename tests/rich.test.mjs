@@ -24,7 +24,7 @@ before(async () => {
 after(async () => { await browser?.close(); });
 const URL_AUTOMATIC = 'https://rich.lineleaf.test/compose?automatic';
 async function load(url = URL_AUTOMATIC) { await page.goto(url); await page.waitForFunction(() => window.__lineleafMounted); }
-const sends = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+const sends = () => page.evaluate(() => fixture.worker.turns);
 const requestTexts = async () => (await sends()).map(x => JSON.parse(x.params.messages[0].text).text);
 const idle = () => page.waitForTimeout(1900);
 // Put the caret right after `needle` inside the editor, as a user clicking there would.
@@ -42,7 +42,7 @@ async function caretAfter(host, needle) {
 async function typeAfter(host, needle, text = ' ') { await caretAfter(host, needle); await page.keyboard.type(text); }
 async function checked(host, needle) {
   await typeAfter(host, needle);
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   await inline.locator('.underline').waitFor();
 }
 // Viewport box of `word` inside the text node that contains `context`.
@@ -119,7 +119,7 @@ test('a state-owning editor that cancels beforeinput and re-renders its text nod
 test('Backspace and Enter in a state-owning editor also arm a check of the paragraph the caret is in', async () => {
   await load();
   await caretAfter('#controlled-editor', 'work.'); await page.keyboard.press('Backspace'); await page.keyboard.type('. ');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
 });
 test('focusing text, moving the caret, or leaving the typed paragraph before the pause sends nothing', async () => {
@@ -130,11 +130,11 @@ test('focusing text, moving the caret, or leaving the typed paragraph before the
   await page.keyboard.type(' '); await page.keyboard.press('ArrowDown'); await idle();
   assert.equal((await sends()).length, 0);
   await caretAfter('#draft', 'work.'); await page.keyboard.type(' ');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
 });
 test('only the active <br>-delimited line is sent, and mid-line carets use that line', async () => {
-  await load(); await caretAfter('#brlines', 'First'); await page.keyboard.type('x'); await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await load(); await caretAfter('#brlines', 'First'); await page.keyboard.type('x'); await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()), ['Firstx line.']);
 });
 test('zero-width placeholders and non-breaking spaces are normalised in the request and underline mapping', async () => {
@@ -154,7 +154,7 @@ test('inline code or pre blocks only withhold their own paragraph, not the whole
   await typeAfter('#mixed', 'now.'); await idle(); assert.equal((await sends()).length, 0); // Caret paragraph contains <code>.
   await typeAfter('#mixed pre', 'pre block.'); await idle(); assert.equal((await sends()).length, 0); // Caret is in <pre>.
   await typeAfter('#mixed p:nth-of-type(2)', 'work.');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
 });
 test('formatting boundaries: a Gmail-style composer underlines text spanning bold and plain runs', async () => {
@@ -193,7 +193,7 @@ test('IME composition in a rich editor defers the check until the composition en
   await page.keyboard.type(' '); await idle(); assert.equal((await sends()).length, 0);
   await page.locator('#draft').evaluate(el => el.dispatchEvent(new CompositionEvent('compositionend', {bubbles: true})));
   await page.keyboard.type(' '); // The synthetic event cannot authorise a check; final trusted typing restarts the window.
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000}); assert.equal((await sends()).length, 1);
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000}); assert.equal((await sends()).length, 1);
 });
 test('plain text controls keep Accept while unlisted rich editors in the same page get copy-only previews', async () => {
   await load();
@@ -226,7 +226,7 @@ test('suggestions disappear when the checked paragraph changes by typing; an exp
   await page.keyboard.type('!'); await inline.locator('.underline').waitFor((_, __, all) => all.length === 0);
   assert.equal((await sends()).length, 1); // The shared ten-second automatic interval applies; nothing is resent early.
   await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor(); await inline.button('Check now').click();
-  await page.waitForFunction(() => fixture.worker.calls.filter(x => x.method === 'send').length === 2, null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length === 2, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.', 'He go to work. !']);
 });
 test('closing the card restores the caret in editors that clear the DOM selection on blur (Draft.js)', async () => {
@@ -252,10 +252,10 @@ test('a descendant exclusion added after capture removes the preview without cha
 test('a descendant exclusion added while the provider request is pending discards its result', async () => {
   await load(); await page.evaluate(() => { fixture.worker.hold = true; });
   await typeAfter('#quill', 'work.');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   await wrapInCode('#quill p:nth-of-type(2)');
   await page.evaluate(() => {
-    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready');
     port.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
     port.reply(request.id, {type: 'completed'});
   });
@@ -274,7 +274,7 @@ test('a rejected keystroke leaves an already armed check in place', async () => 
   await typeAfter('#draft', 'work.'); // Accepted: arms the check.
   await page.evaluate(() => document.querySelector('#draft').addEventListener('beforeinput', event => event.preventDefault(), true));
   await page.keyboard.type('x'); // Rejected within the idle window.
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
 });
 test('Check now uses the remembered caret when the editor cleared its selection on blur, whether the card opened by key or mouse', async () => {
@@ -286,7 +286,7 @@ test('Check now uses the remembered caret when the editor cleared its selection 
     await inline.locator('#card-title').waitFor();
     assert.equal(await page.evaluate(() => getSelection().rangeCount), 0, how); // The editor really did drop its selection.
     await press('Check now');
-    await page.waitForFunction(() => fixture.worker.calls.filter(x => x.method === 'send').length === 2, null, {timeout: 8000});
+    await page.waitForFunction(() => fixture.worker.turns.length === 2, null, {timeout: 8000});
     assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.', 'He go to work.'], how);
   }
 });

@@ -24,7 +24,7 @@ before(async () => {
 after(async () => { await browser?.close(); });
 const URL_AUTOMATIC = 'https://rich.lineleaf.test/compose?automatic';
 async function load(url = URL_AUTOMATIC) { await page.goto(url); await page.waitForFunction(() => window.__lineleafMounted); }
-const sends = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+const sends = () => page.evaluate(() => fixture.worker.turns);
 const answer = corrections => page.evaluate(corrections => { fixture.worker.answer = JSON.stringify({corrections}); }, corrections.map(c => ({category: 'grammar', explanation: 'Synthetic', ...c})));
 async function caretAfter(host, needle) {
   await page.evaluate(([host, needle]) => {
@@ -38,7 +38,7 @@ async function caretAfter(host, needle) {
 }
 async function checked(host, needle) {
   await caretAfter(host, needle); await page.keyboard.type(' ');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000});
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   await inline.locator('.underline').waitFor();
 }
 const wordBox = (host, context, word) => page.evaluate(([host, context, word]) => {
@@ -116,7 +116,7 @@ test('a Draft.js-like editor that reconciles native edits and re-renders keeps i
 test('the caret is restored when the edit is earlier in the paragraph than the caret', async () => {
   await load();
   await caretAfter('#prose', 'He go to'); await page.keyboard.type(' ');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000}); await inline.locator('.underline').waitFor();
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000}); await inline.locator('.underline').waitFor();
   await accept(); await applied();
   assert.equal(await checkedLine('#prose'), 'He goes to  work.');
   await page.keyboard.type('Z'); assert.equal(await checkedLine('#prose'), 'He goes to Z work.');

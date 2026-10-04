@@ -81,7 +81,7 @@ def validate(binary, fake_provider=None, *, coexistence=False):
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
     checks = {}
     report = {"status": "failed", "kind": "native", "protocol": 1,
-              "seatline_revision": contract["revision"], "platform": "linux",
+              "seatline_revision": os.environ.get("SEATLINE_REVISION") or contract["revision"], "platform": "linux",
               "development_extension_id": contract["development_extension_id"], "checks": checks,
               "store_extension_id": None, "chrome_permission_ui_tested": False,
               "provider_diagnostics": {},

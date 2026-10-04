@@ -46,4 +46,7 @@ function hint() {
   if (!origin || tab.incognito) show('Lineleaf cannot run on this page.');
   else if (!settings.sites.includes(origin)) show('Turn on “Check my writing here” to use Lineleaf on this site.');
 }
-load().then(hint).catch(() => show(messageFor('UNAVAILABLE')));
+// Opening the menu on a site Lineleaf is on for is the likeliest moment before a check: get the provider ready. The worker declines unless it is
+// worth doing, and nothing here waits for it or shows its result.
+const prepare = () => { if (query('#state').dataset.state === 'on') command('prepare', {tabId: tab.id}).catch(() => {}); };
+load().then(() => { hint(); prepare(); }).catch(() => show(messageFor('UNAVAILABLE')));

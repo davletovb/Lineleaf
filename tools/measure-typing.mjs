@@ -27,9 +27,9 @@ export async function measureTyping() {
         el.addEventListener('input', event => { if (event.isTrusted && started !== undefined) queueMicrotask(() => window.timings.push(performance.now() - started)); });
       });
       await page.keyboard.type('He go to work. ' + 'x'.repeat(105));
-      if (automatic) await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+      if (automatic) await page.waitForFunction(() => fixture.worker.turns.length > 0);
       else await page.waitForTimeout(1800);
-      const sample = await page.evaluate(() => ({times: [...window.timings].sort((a, b) => a - b), sends: fixture.worker.calls.filter(x => x.method === 'send').length}));
+      const sample = await page.evaluate(() => ({times: [...window.timings].sort((a, b) => a - b), sends: fixture.worker.turns.length}));
       if (sample.times.length !== 120 || sample.sends !== (automatic ? 1 : 0)) throw new Error('TYPING_PROBE_INCOMPLETE');
       const percentile = p => sample.times[Math.ceil(sample.times.length * p) - 1];
       scenarios.push({automatic, trustedInputs: sample.times.length, providerSubmissions: sample.sends, inputDispatchP50Ms: percentile(.5), inputDispatchP95Ms: percentile(.95), maxMs: sample.times.at(-1)});

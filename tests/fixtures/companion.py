@@ -14,8 +14,11 @@ active = {}
 parser = argparse.ArgumentParser()
 parser.add_argument("--fail-on", type=int)
 parser.add_argument("--failure", choices=["disconnect", "malformed", "rate_limit"], default="disconnect")
+parser.add_argument("--legacy", action="store_true", help="Act as a companion that predates Seatline's readiness API")
 args = parser.parse_args()
 sends = 0
+STATUS = {"availability": "available", "authentication": "authenticated", "sign_in": "subscription",
+          "capabilities": {"tool_isolation": True}, "models": []}
 
 
 def emit(value):
@@ -52,12 +55,15 @@ while True:
     if method == "cancel":
         if request.get("target") in active:
             active[request["target"]].set()
-    elif method == "status":
-        reply(request, {"type": "status", "provider": request["provider"], "status": {
-            "availability": "available", "authentication": "authenticated", "sign_in": "subscription",
-            "capabilities": {"tool_isolation": True}, "models": []}})
+    elif method in ("readiness", "prepare", "send_ready") and args.legacy:
+        reply(request, {"type": "failed", "reason": "INVALID_REQUEST"})  # An unknown method, as an older companion answers it.
+    elif method in ("status", "readiness", "prepare"):
+        reply(request, {"type": "status", "provider": request["provider"], "status": STATUS})
         reply(request, {"type": "completed"})
-    elif method == "send":
+    elif method in ("send", "send_ready"):
+        if method == "send_ready":  # A checked send reports the readiness it ran under before its turn.
+            reply(request, {"type": "status", "provider": request["provider"], "status": STATUS})
+            request = {**request, "params": request["params"]["turn"]}
         sends += 1
         if sends == args.fail_on:
             if args.failure == "disconnect":

@@ -63,6 +63,13 @@ jobs:
           name: fixture-benchmark-${{ runner.os }}
           path: test-results/fixture-benchmark.json
   shared-companion:
+    # `current` is the Seatline revision the extension is built and tested against; `minimum` the oldest companion it still works with
+    # (it falls back to `status` and `send` there). Both come from config/seatline-contract.json, so they cannot drift from the code.
+    name: shared-companion (${{ matrix.companion }})
+    strategy:
+      fail-fast: false
+      matrix:
+        companion: [current, minimum]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -72,14 +79,28 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
-      - name: Check out the audited shared Seatline revision
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+      - name: Read the Seatline revisions from the contract
+        id: contract
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          contract = json.load(open('config/seatline-contract.json'))
+          print(f"current={contract['revision']}")
+          print(f"minimum={contract['minimum_revision']}")
+          PY
+      - name: Check out the shared Seatline revision
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: davletovb/seatline
-          ref: dc1086582c8b98498aa48dae91c8d174bc3cfc3c
+          ref: ${{ matrix.companion == 'current' && steps.contract.outputs.current || steps.contract.outputs.minimum }}
           path: .seatline-audit
           persist-credentials: false
-      - name: Build the existing companion
+      - name: Name the revision under test
+        run: echo "SEATLINE_REVISION=${{ matrix.companion == 'current' && steps.contract.outputs.current || steps.contract.outputs.minimum }}" >> "$GITHUB_ENV"
+      - name: Build the companion
         working-directory: .seatline-audit
         run: cargo build --locked --release -p seatline-companion -p seatline-tests --bins
       - name: Validate isolated native authorization
@@ -89,10 +110,23 @@ jobs:
       - name: Validate isolated concurrent-consumer coexistence
         run: |
           python3 -m tools.validate_coexistence --companion .seatline-audit/target/release/seatline-companion --fake-provider .seatline-audit/target/release/seatline-fake-provider > test-results/native-coexistence.json
+      # With the fake Codex standing in for the provider these are real process launches, not a live provider measurement.
+      - name: Count provider launches with and without Seatline's readiness API (current companion)
+        if: matrix.companion == 'current'
+        run: |
+          python3 -m tools.validate_readiness --companion .seatline-audit/target/release/seatline-companion --fake-provider .seatline-audit/target/release/seatline-fake-provider > test-results/native-readiness-benchmark.json
+      - name: Run the production controller through the broker (current companion)
+        if: matrix.companion == 'current'
+        run: |
+          COMPANION="$PWD/.seatline-audit/target/release/seatline-companion"
+          node tools/measure-readiness.mjs --companion "$COMPANION" --checks 6 --expect cached --json > test-results/controller-readiness.json
+          node tools/measure-readiness.mjs --companion "$COMPANION" --checks 6 --prepare --expect cached --json > test-results/controller-readiness-prepared.json
+      - name: Run the production controller against a companion without the readiness API (minimum companion)
+        if: matrix.companion == 'minimum'
+        run: |
+          node tools/measure-readiness.mjs --companion "$PWD/.seatline-audit/target/release/seatline-companion" --checks 6 --expect legacy --json > test-results/controller-fallback.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: native-authorization
-          path: |
-            test-results/native-authorization.json
-            test-results/native-coexistence.json
+          name: native-companion-${{ matrix.companion }}
+          path: test-results/
