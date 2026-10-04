@@ -1,6 +1,6 @@
 # Lineleaf and Seatline Integration
 
-Status: A-01 contract audited at Seatline `dc1086582c8b98498aa48dae91c8d174bc3cfc3c`, protocol 1. The extension is built and tested against Seatline `a33a0c95bd00956abb3314c8b87a0151a127ef32` (`config/seatline-contract.json`), whose readiness API it uses, and requires its protected send method for writing. The audited legacy revision remains a status/refusal compatibility check. [API audit](../investigations/seatline-api-audit.md), [authorization evidence](../investigations/extension-authorization.md), and [A-05 decision](mvp-scope-and-toolchain.md) distinguish verified code from open live/device gates. See the [implementation tracker](../product/lineleaf-implementation-tracker.md).
+Status: A-01 contract audited at Seatline `dc1086582c8b98498aa48dae91c8d174bc3cfc3c`, protocol 1. The extension is built and tested against Seatline `fdd237720a913963cb4df78817c41ee968a0ad2a` (`config/seatline-contract.json`), whose readiness API it uses, and requires its protected send method for writing. The audited legacy revision remains a status/refusal compatibility check. [API audit](../investigations/seatline-api-audit.md), [authorization evidence](../investigations/extension-authorization.md), and [A-05 decision](mvp-scope-and-toolchain.md) distinguish verified code from open live/device gates. See the [implementation tracker](../product/lineleaf-implementation-tracker.md).
 
 ## Architecture and ownership
 
@@ -58,7 +58,7 @@ This is Lineleaf's side of Seatline's performance work (the Seatline performance
 | Focus moves into an editor with automatic checking off | No: focus alone does nothing without the opt-in |
 | A disabled site, a paused Lineleaf, a password, payment or read-only field, an excluded field | No |
 
-The page asks at most once every ten seconds per frame, and the worker at most once every ten seconds in all. It declines when a request is running, the provider is rate-limited or has just timed out, or the companion has no readiness API, and it never shows a failure (nobody asked). It shares one connection and one provider check with a request that arrives meanwhile. The user's own **Check Seatline** always asks for a fresh readiness and never reuses a cached answer.
+The page asks at most once every ten seconds per frame, and the worker at most once every ten seconds in all. It declines when a request is running, the provider is rate-limited or has just timed out, or the companion has no readiness API, and it never shows a failure (nobody asked). A completed preparation leaves its connection and readiness available for the next request. If writing or an explicit diagnostic arrives while preparation is unfinished, the worker aborts preparation and detaches its port before starting foreground work on a new port. Preparation timeout/drain callbacks cannot close that foreground connection, including when the old companion ignores cancellation or its native handshake never completes. The user's own **Check Seatline** always asks for a fresh readiness and never reuses a cached answer.
 
 **Cancellation retention.** The companion terminates the target request without acknowledging the cancellation ID. That ID is removed when the target terminates, or on disconnect/drain timeout; five completed cancellations leave no retained IDs. Fixtures use the real target-only terminal protocol.
 

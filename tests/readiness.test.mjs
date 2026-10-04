@@ -4,7 +4,7 @@ import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {installController} from '../extension/lib/controller.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
-import {requireReady, LINK_IDLE, PREPARE_INTERVAL, READINESS} from '../extension/lib/policy.mjs';
+import {requireReady, LINK_IDLE, PREPARE_INTERVAL, READINESS, PHASES} from '../extension/lib/policy.mjs';
 import {fakeNative, fakeChrome, broker, sent, probed, turnOf, READY, waitFor} from './fixtures/extension-api.mjs';
 import {closeNativeFixtures} from './fixtures/extension-api.mjs';
 test.afterEach(closeNativeFixtures);
@@ -298,4 +298,55 @@ test('a companion without the readiness API is not prepared, and stays unprepare
   let clock = 100000; const f = fakeChrome({legacy: true}); installController(f.api, {now: () => clock});
   assert.deepEqual(await f.rpc('prepare', null, f.sender), {ok: true, value: 'skipped'}); assert.deepEqual(methods(f), ['prepare']);
   clock += PREPARE_INTERVAL; assert.deepEqual(await f.rpc('prepare', null, f.sender), {ok: true, value: 'skipped'}); assert.deepEqual(methods(f), ['prepare'], 'it is not asked again');
+});
+
+// Ignore cancel entirely: preparation must not retain a drain timer on the
+// connection used by foreground work, even when Seatline never answers it.
+for (const foreground of ['writing', 'diagnostic']) test(`unfinished preparation detaches before ${foreground} and cannot time it out`, async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = fakeChrome(); let turn;
+  f.api.runtime.connectNative = () => {
+    const port = fakeNative((m, p) => {
+      f.calls.push(m);
+      if (m.method === 'prepare' || m.method === 'cancel') return;
+      broker(m, p, {send: (m, p) => { turn = [m, p]; }});
+    });
+    f.ports.push(port); return port;
+  };
+  installController(f.api);
+  const preparing = f.rpc('prepare', null, f.sender); await settle();
+  assert.equal(methods(f)[0], 'prepare');
+  const writer = f.connect();
+  let checking;
+  if (foreground === 'writing') start(writer);
+  else checking = f.rpc('check-connection');
+  await settle();
+  assert.equal(f.ports[0].closed, true);
+  assert.equal(f.ports.length, 2);
+  assert.deepEqual(await preparing, {ok: true, value: 'skipped'});
+  t.mock.timers.tick(PHASES.status); await settle();
+  t.mock.timers.tick(PHASES.drain + 1); await settle();
+  assert.equal(f.ports[1].closed, false, 'abandoned preparation cannot close the new foreground port');
+  if (foreground === 'writing') {
+    assert.ok(turn); assert.equal(failure(writer), undefined);
+    const [m, p] = turn;
+    p.reply(m.id, {type: 'delta', text: '{"corrections":[]}'}); p.reply(m.id, {type: 'completed'});
+    await settle(); assert.ok(result(writer));
+  } else assert.equal((await checking).ok, true);
+});
+
+test('foreground work aborts preparation before its native handshake can send on a replacement port', async () => {
+  const f = fakeChrome();
+  f.api.runtime.connectNative = () => {
+    const first = f.ports.length === 0;
+    const port = fakeNative((m, p) => { f.calls.push(m); broker(m, p); }, first ? null : {type: 'ready', version: 1});
+    f.ports.push(port); return port;
+  };
+  installController(f.api);
+  const preparing = f.rpc('prepare', null, f.sender); await settle();
+  assert.equal(f.ports.length, 1); assert.equal(frames(f).length, 0);
+  const writer = f.connect(); start(writer); await settle();
+  assert.deepEqual(await preparing, {ok: true, value: 'skipped'});
+  assert.equal(f.ports[0].closed, true); assert.equal(f.ports.length, 2);
+  assert.deepEqual(methods(f), ['readiness', 'send_ready_with_policy']); assert.ok(result(writer));
 });
