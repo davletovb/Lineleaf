@@ -120,7 +120,7 @@ test('Seatline refusing before a turn starts earns one fresh check and send; a s
     installController(f.api); const port = f.connect(); start(port); await waitFor(() => result(port));
     assert.deepEqual(methods(f), ['readiness', 'send_ready', 'readiness', 'send_ready'], reason);
     assert.deepEqual(f.calls.filter(probed).map(m => m.params.mode), ['cached', 'fresh'], reason);
-    assert.deepEqual(f.calls.filter(sent).map(m => m.params.freshness.mode), ['cached', 'fresh'], reason);
+    assert.deepEqual(f.calls.filter(sent).map(m => m.params.freshness.mode), ['cached', 'cached'], reason); // the retry's send reuses the fresh check just made
   }
   const f = fakeChrome(); let attempts = 0;
   f.api.runtime.connectNative = () => fakeNative((m, p) => { if (sent(m)) attempts++; broker(m, p, {send: (m, p) => p.reply(m.id, {type: 'failed', reason: 'READINESS_CHANGED'})}); });

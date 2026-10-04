@@ -110,10 +110,10 @@ export function installController(api, {now = Date.now} = {}) {
       if (signal.aborted) throw new LineleafError('CANCELLED');
       connection = native(); peer.connection = connection;
       send(peer.port, {type: 'progress', id: request.id, stage: 'connecting'});
-      let freshness = READINESS.cached, answer;
+      let verification = READINESS.cached, answer;
       for (let attempt = 0; ; attempt++) {
         // Lineleaf's own policy (subscription sign-in, no-tools requests) is enforced here, from Seatline's readiness, before anything is sent.
-        const {status, modern} = await readiness(connection, signal, freshness);
+        const {status, modern} = await readiness(connection, signal, verification);
         requireReady(status);
         // Permissions/settings may have changed while readiness was being checked.
         const latest = await eligible(peer.sender);
@@ -125,11 +125,11 @@ export function installController(api, {now = Date.now} = {}) {
         try {
           // `send_ready` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
           // evidence has changed or lapsed, and the status it reports is checked again as it arrives.
-          answer = await (modern ? connection.request('send_ready', {turn, freshness}, {signal, timeout, onStatus: requireReady}) : connection.request('send', turn, {signal, timeout}));
+          answer = await (modern ? connection.request('send_ready', {turn, freshness: READINESS.cached}, {signal, timeout, onStatus: requireReady}) : connection.request('send', turn, {signal, timeout}));
           break;
         } catch (error) {
-          // Nothing was started, so one more attempt from a fresh check is safe.
-          if (modern && attempt === 0 && READINESS_REFUSALS.has(errorCode(error))) { freshness = READINESS.fresh; continue; }
+          // Nothing was started, so one more attempt is safe: from a fresh readiness, which the send then reuses (it is the cached evidence now).
+          if (modern && attempt === 0 && READINESS_REFUSALS.has(errorCode(error))) { verification = READINESS.fresh; continue; }
           throw error;
         }
       }
