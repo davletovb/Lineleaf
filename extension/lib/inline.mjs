@@ -165,6 +165,8 @@ class InlineView {
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
   hide() { this.card.hidden = true; this.draw(); this.field.focus({preventScroll: true}); this.restore(); }
+  // Focus went elsewhere on the page: close the card, keep the underlines, and leave the focus where the user put it.
+  fold() { if (this.card.hidden) return; this.card.hidden = true; this.draw(); }
   rects(edit) { return this.capture.rects ? this.capture.rects(edit) : suggestionRects(this.field, this.capture.snapshot.source, this.capture.offset + edit.start, this.capture.offset + edit.end, this.mirror); }
   draw() {
     const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
@@ -201,23 +203,32 @@ class InlineView {
 }
 
 export function mountInline(api) {
-  let field, adapter, view, capture, edits = [], port, timer, expiry, watchdog, frame, policy = null, epoch = 0, generation = 0;
+  let field, adapter, view, capture, edits = [], port, timer, watchdog, frame, policy = null, epoch = 0, generation = 0;
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
   let mode = 'edit', settling = 0, before; // 'rich' = no adapter: caret-paragraph capture; Accept only in a verified editor family
   let held = null; // proofreading suggestions set aside while an explicit rewrite is shown
   let working = false; // a request to the provider is in flight
   let clarityDue = false, clarityFor = null; // an optional clearer-wording check is waiting for the shared automatic interval, for this paragraph key
+  // What a check found outlives the user moving on: a field they left for another one keeps its suggestions, and they come back when that same, unchanged
+  // paragraph is in front of the user again. There is no time limit: they last as long as the text they describe is unchanged, and are dropped the moment it
+  // changes. In memory only (never saved or sent), per page, and gone with the page.
+  let saved = new WeakMap(), wordingDoneFor = null;
   const compositions = new WeakSet();
-  // `available`: the site is enabled and not paused (site-state answered). `permitted`: automatic checking is also on. Without it the
-  // assistant stays out of sight and reads nothing until the user asks with Alt Shift L, then sends only what an explicit action names.
-  const available = () => policy !== null && document.visibilityState === 'visible';
+  // `policy` is known once the site is enabled and not paused (site-state answered). `permitted`: automatic checking is also on, on a visible page. Without
+  // it the assistant stays out of sight and reads nothing until the user asks with Alt Shift L, then sends only what an explicit action names.
   const permitted = () => policy?.automatic === true && document.visibilityState === 'visible';
   const active = () => deepActive() === field;
   const stop = () => {
     generation++; working = false; clearTimeout(timer); clearTimeout(watchdog); timer = null;
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
   };
-  function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); held = null; clarityDue = false; clarityFor = null; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
+  // Sets the field's suggestions aside for when the user comes back to it (see `resume`), if there is anything worth keeping.
+  function shelve() {
+    if (!field || !capture || !edits.length || edits.some(edit => edit.rewrite) || copyOnly || !capture.valid()) return;
+    const key = keyFor(capture);
+    saved.set(field, {key, offset: capture.offset, block: capture.block ?? null, edits, owed: policy?.clarity === true && wordingDoneFor !== key});
+  }
+  function drop(keep = false) { if (keep === true) shelve(); stop(); adapter?.dispose(); view?.close(); held = null; clarityDue = false; clarityFor = null; wordingDoneFor = null; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
   function update(message, problem = false) { view?.update(capture, edits, message, undo, copyOnly, working, problem); }
   // Bring back the proofreading suggestions that were set aside for a rewrite, if their text is still the current text.
   function restoreHeld(message) {
@@ -229,7 +240,7 @@ export function mountInline(api) {
   // alone and opens the card with the reason. Only a failed proofreading check pauses further automatic checks.
   function failed(code, rewriteMode, wording = false, explicit = Boolean(rewriteMode)) {
     working = false;
-    if (wording) clarityDue = false; // Optional extra check: say why, keep the corrections on screen, never pause automatic checking.
+    if (wording) { clarityDue = false; wordingDoneFor = clarityFor; } // Optional extra check: say why, keep the corrections on screen, never pause automatic checking.
     else if (rewriteMode) restoreHeld(messageFor(code)); else blocked = true;
     update(messageFor(code), code !== 'CANCELLED'); if (explicit) view?.open(); // The user asked for something, so say why it did not happen.
   }
@@ -257,14 +268,18 @@ export function mountInline(api) {
   async function refresh() {
     const ticket = ++epoch, result = await rpc('site-state'); if (ticket !== epoch) return;
     policy = result.ok ? result.value : null;
-    if (!permitted()) { drop(); return; }
+    if (policy === null) { drop(); return; }
+    if (!permitted()) return; // Without automatic checking nothing is built here; a card the user opened keeps what it shows.
     choose(deepActive());
   }
-  function eligibleDOM() {
-    if (!field?.isConnected || !embeddingAllowed() || excluded(field) || field.disabled || field.readOnly || visibleEditorRect(field) === null) return false;
+  // The field is still there and still one Lineleaf may use. Being scrolled out of view or covered for a while is not a reason to forget what was found.
+  function usable() {
+    if (!field?.isConnected || !embeddingAllowed() || excluded(field) || field.disabled || field.readOnly) return false;
     // Rich editors legitimately contain inline code or islands elsewhere; their paragraph is checked at capture time.
     return mode === 'rich' ? previewAllowed(field) : !field.querySelector('[data-lineleaf-ignore], [aria-hidden="true"], pre, code');
   }
+  // Usable and on screen: what anything that reads or sends text requires.
+  const eligibleDOM = () => usable() && visibleEditorRect(field) !== null;
   const capturePara = () => mode === 'rich' ? captureRichParagraph(field, {editable: richReplacementAllowed(field)}) : captureParagraph(field, adapter);
   // Explicit rewrites: the selection when there is one, otherwise the caret paragraph.
   // Only an empty selection falls back to the paragraph: a selection Lineleaf cannot use is refused, never widened to more text.
@@ -278,12 +293,18 @@ export function mountInline(api) {
   const replaceable = () => mode === 'edit' || (Boolean(field) && richReplacementAllowed(field));
   function choose(target, invoked = false) {
     if (applying || target === view?.host) return;
-    if (!available()) { drop(); return; }
-    if (!permitted() && !invoked) { if (!field || editorOf(target) !== field) drop(); return; } // Focus alone builds nothing without the opt-in.
+    if (policy === null) { drop(); return; }
+    if (document.visibilityState !== 'visible') return;
+    if (!permitted() && !invoked) { // Focus alone builds nothing without the opt-in.
+      const other = editorOf(target);
+      if (!field) drop(); else if (!other) view?.fold(); else if (other !== field) drop(true);
+      return;
+    }
     const next = editorOf(target);
-    if (!next || excluded(next)) { drop(); return; }
+    if (!next) { view?.fold(); queue(); return; } // Focus went to something that is not a text field: what was found stays where it is, and a pending wording check goes on.
+    if (excluded(next)) { drop(true); return; }
     if (next !== field) {
-      drop(); field = next; composing = compositions.has(field);
+      drop(true); field = next; composing = compositions.has(field);
       if (replacementSupported(field)) {
         adapter = new EditorAdapter(field);
         if (!adapter.usable() || !eligibleDOM()) { drop(); return; } // Eligibility only: the text is read when an action names what to check.
@@ -296,15 +317,28 @@ export function mountInline(api) {
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});
-      update(idleMessage()); prepare();
+      update(idleMessage()); prepare(); resume();
     }
     queue();
   }
+  // Brings back what was found in this field before the user left it, if its paragraph is still exactly as it was checked.
+  function resume() {
+    const kept = saved.get(field); saved.delete(field);
+    if (!kept) return;
+    let again;
+    try { again = mode === 'rich' ? captureRichParagraph(field, {editable: richReplacementAllowed(field), at: {block: kept.block, index: kept.offset}}) : captureParagraph(field, adapter, kept.offset); }
+    catch { return; }
+    if (keyFor(again) !== kept.key) return;
+    capture = again; edits = kept.edits; lastKey = kept.key; clarityFor = kept.key; clarityDue = kept.owed; wordingDoneFor = kept.owed ? null : kept.key;
+    update(countMessage());
+  }
   const keyFor = value => `${value.id ?? ''}:${value.offset}:${value.text}`;
   function queue(delay = AUTO_IDLE) {
-    clearTimeout(timer); if (!permitted() || !navigator.onLine || !active() || composing || blocked || !eligibleDOM()) return;
-    // A change that has not been checked yet (its paragraph key differs from the last one checked) comes before the optional wording check.
-    if (dirty && pendingKey !== lastKey) timer = setTimeout(() => { timer = null; void run(true); }, Math.max(delay, nextAt - Date.now()));
+    clearTimeout(timer); if (!permitted() || !navigator.onLine || composing || blocked || !eligibleDOM()) return;
+    // A change that has not been checked yet (its paragraph key differs from the last one checked) comes before the optional wording check. The user typing
+    // is what arms it, so it waits for the field the user is in.
+    if (dirty && pendingKey !== lastKey) { if (active()) timer = setTimeout(() => { timer = null; void run(true); }, Math.max(delay, nextAt - Date.now())); }
+    // The wording check belongs to text that was already sent for its corrections: it finishes even when the user has moved on to read them.
     else if (clarityDue) timer = setTimeout(() => { timer = null; void run(true, null, true); }, Math.max(0, nextAt - Date.now())); // After the corrections, on the shared interval.
   }
   async function run(automatic, rewriteMode = null, wording = false) {
@@ -317,12 +351,13 @@ export function mountInline(api) {
       }
       return;
     }
-    if (automatic && (!permitted() || !active() || blocked)) return;
+    if (automatic && (!permitted() || (!wording && !active()) || blocked)) return;
     if (!navigator.onLine) { failed('OFFLINE', rewriteMode, wording, !automatic); return; }
     // Explicit Check now restores the field focus before capturing its current paragraph.
     if (!automatic) { field.focus({preventScroll: true}); view?.restore(); blocked = false; clarityDue = false; }
     let next;
-    try { next = rewriteMode ? captureScope() : capturePara(); }
+    // The wording check reads the paragraph that was checked for corrections, not wherever the caret is now (the field may no longer be focused).
+    try { next = rewriteMode ? captureScope() : wording && capture?.valid() && keyFor(capture) === clarityFor ? capture : capturePara(); }
     catch {
       if (wording) { clarityDue = false; return; }
       if (rewriteMode) { update('Rewrites need 1–2,000 characters of text with letters inside one paragraph. Select text within a single paragraph, or put the caret in one.'); view?.open(); return; }
@@ -338,7 +373,6 @@ export function mountInline(api) {
     if (!state.ok || (automatic && !state.value.automatic)) { failed(state.code ?? 'AUTOMATIC_DISABLED', rewriteMode, wording, !automatic); return; }
     if (rewriteMode) held = capture && !edits.some(edit => edit.rewrite) ? {capture, edits} : held; // Set the suggestions aside; Back restores them.
     policy = state.value; capture = next; if (!wording) { edits = []; if (!rewriteMode) lastKey = keyFor(next); } copyOnly = false; clarityDue = false; // `undo` stays: the adapter refuses it once the text has changed
-    clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
     working = true;
     update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with Codex… You can keep typing.` : wording ? 'Looking for clearer wording with Codex… You can keep typing.' : 'Checking with Codex… You can keep typing.');
@@ -350,30 +384,29 @@ export function mountInline(api) {
       current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { port = null; clearTimeout(watchdog); failed('UNAVAILABLE', rewriteMode, wording, !automatic); } });
       current.onMessage.addListener(message => {
         if (port !== current || message.id !== id || ticket !== generation) return;
-        if (!eligibleDOM() || !capture?.valid()) { stop(); capture = null; edits = []; held = null; queue(); update(messageFor('STALE')); return; }
+        if (!usable() || !capture?.valid()) { stop(); capture = null; edits = []; held = null; queue(); update(messageFor('STALE')); return; }
         if (message.type === 'result') {
           finish(); if (!Array.isArray(message.edits)) { failed('INVALID_OUTPUT', rewriteMode, wording, !automatic); return; }
           if (rewriteMode) {
-            edits = message.edits; clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
+            edits = message.edits;
             const label = REWRITE_LABELS[rewriteMode];
             if (edits.length) update(`${label}: review the suggested text. ${replaceable() ? 'Replace it or try again.' : 'Copy it; this editor is not changed.'}`);
             else if (!restoreHeld(`${label}: no change suggested. This already reads well.`)) update(`${label}: no change suggested. This already reads well.`);
             view.open(); return;
           }
-          if (wording) { addWording(message.edits); update(edits.length ? countMessage() : 'No corrections or clearer wording suggested.'); }
+          if (wording) { addWording(message.edits); wordingDoneFor = clarityFor; update(edits.length ? countMessage() : 'No corrections or clearer wording suggested.'); }
           else {
             edits = message.edits; update(edits.length ? countMessage() : 'No corrections suggested.');
             if (!automatic && !edits.length) view?.open(); // An explicit Check now with nothing to show still answers.
             // With the optional setting on, the same paragraph gets one more automatic request for clearer wording, after the shared interval.
-            if (automatic && policy?.clarity === true) { clarityDue = true; clarityFor = keyFor(capture); queue(); }
+            if (policy?.clarity === true) { clarityDue = true; clarityFor = keyFor(capture); wordingDoneFor = null; queue(); } // After a check the user asked for as well as after an automatic one.
           }
-          clearTimeout(expiry); expiry = setTimeout(drop, 5 * 60 * 1000);
-        } else if (message.type === 'error') {
+              } else if (message.type === 'error') {
           finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED', 'AUTO_PAUSED'].includes(message.code);
           // A refusal that says when to come back is retried then; AUTO_PAUSED (another tab's timeout) may be several minutes away.
           const retryDelay = Math.max(1000, Math.min(message.code === 'AUTO_PAUSED' ? AUTOMATIC_HOLD : 60000, message.retryAfterMs || (message.code === 'PROVIDER_RATE_LIMITED' ? 60000 : 5000)));
           if (wording) { // Optional and best-effort: wait out a shared-interval refusal once more, otherwise give up on this text; corrections stay and automatic checking goes on.
-            if (retryable) { clarityDue = true; nextAt = Date.now() + retryDelay; queue(); } else clarityDue = false;
+            if (retryable) { clarityDue = true; nextAt = Date.now() + retryDelay; queue(); } else { clarityDue = false; wordingDoneFor = clarityFor; }
             if (!retryable) update(messageFor(message.code));
             return;
           }
@@ -516,26 +549,29 @@ export function mountInline(api) {
   const paint = () => { if (!frame) frame = requestAnimationFrame(() => { frame = null; view?.draw(); }); };
   document.addEventListener('scroll', paint, {capture: true, passive: true}); window.addEventListener('resize', paint);
   let route = navigationToken();
-  const navigated = () => { const next = navigationToken(); if (next !== route) { route = next; epoch++; drop(); void refresh(); } };
+  const navigated = () => { const next = navigationToken(); if (next !== route) { route = next; epoch++; drop(); saved = new WeakMap(); void refresh(); } };
   observeNavigation(navigated);
   window.visualViewport?.addEventListener('resize', paint); window.visualViewport?.addEventListener('scroll', paint);
   const poll = setInterval(() => {
     navigated(); if (!field || applying) return;
-    if (!available() || !eligibleDOM() || !view?.host.isConnected) { drop(); return; }
+    if (policy === null || !usable() || !view?.host.isConnected) { drop(); return; }
+    if (document.visibilityState !== 'visible') return; // Switched to another tab: nothing to draw or check, and nothing to forget.
     if (capture && !capture.valid()) { changed({target: field}); }
+    if (clarityDue && !timer && !port) queue(); // A wording check that could not start (field out of view, offline) starts when it can.
     const r = field.getBoundingClientRect(), clip = visibleEditorRect(field), position = [r.x, r.y, r.width, r.height, clip?.left, clip?.top, clip?.right, clip?.bottom, field.scrollTop, field.scrollLeft, adapter?.layoutRevision ?? 0, capture?.layout?.() ?? ''].join(':');
     if (position !== geometry) { geometry = position; paint(); }
   }, 250);
   api.runtime.onMessage.addListener((message, sender) => {
     if (sender.id !== api.runtime.id) return;
-    if (message.type === 'lineleaf-policy-changed') { epoch++; policy = null; drop(); void refresh(); }
+    if (message.type === 'lineleaf-policy-changed') { epoch++; policy = null; drop(); saved = new WeakMap(); void refresh(); }
     if (message.type === 'lineleaf-open') drop();
   });
-  document.addEventListener('visibilitychange', () => { epoch++; drop(); if (document.visibilityState === 'visible') void refresh(); });
+  // Switching to another tab or application changes nothing here: a request that is running finishes, and what was found stays for when the user is back.
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') return; epoch++; void refresh(); });
   window.addEventListener('offline', () => { stop(); blocked = true; update(messageFor('OFFLINE')); });
   window.addEventListener('online', () => { if (blocked) view?.status('Connection restored. Choose Check now when ready.'); });
-  window.addEventListener('pagehide', () => { epoch++; policy = null; drop(); });
+  window.addEventListener('pagehide', () => { epoch++; policy = null; drop(); saved = new WeakMap(); });
   window.addEventListener('pageshow', () => { void refresh(); });
   void refresh();
-  return {close: () => { epoch++; policy = null; drop(); clearInterval(poll); cancelAnimationFrame(frame); }};
+  return {close: () => { epoch++; policy = null; drop(); saved = new WeakMap(); clearInterval(poll); cancelAnimationFrame(frame); }};
 }
