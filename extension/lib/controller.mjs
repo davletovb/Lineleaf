@@ -11,6 +11,11 @@ export function installController(api, {now = Date.now} = {}) {
   // usually, a new provider probe. `readinessApi` is what the companion at the other end has shown: Seatline's readiness API (true), a
   // companion that predates it (false), or not yet known (null). It is forgotten whenever the connection closes, so an updated companion is noticed.
   let link = null, linkTimer = 0, readinessApi = null, warming = null, warmedAt = -Infinity;
+  // Whether the companion has refused to receive writing: it lacks Seatline's protected send. Its readiness answers say nothing about that,
+  // so Check Seatline would report "ready" for a companion that can never check text. A refusal is remembered (also across a worker restart)
+  // until a protected send is accepted, which only an updated and restarted companion does.
+  let outdated = false;
+  const remember = value => { if (outdated === value) return; outdated = value; api.storage.session.set({companionOutdated: value}).catch(() => {}); };
   const native = () => link ??= new NativeSeatline(host => {
     const port = api.runtime.connectNative(host);
     port.onDisconnect.addListener(() => { void api.runtime.lastError; });
@@ -52,10 +57,11 @@ export function installController(api, {now = Date.now} = {}) {
       return 'skipped';
     } finally { if (warming === attempt) warming = null; idleLink(); }
   }
-  const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get(['providerBackoff', 'automaticHold'])])
+  const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get(['providerBackoff', 'automaticHold', 'companionOutdated'])])
     .then(([, saved]) => {
       if (Number.isFinite(saved.providerBackoff) && saved.providerBackoff > now()) backoffUntil = Math.min(saved.providerBackoff, now() + 60000);
       if (Number.isFinite(saved.automaticHold) && saved.automaticHold > now()) automaticHold = Math.min(saved.automaticHold, now() + AUTOMATIC_HOLD);
+      outdated = saved.companionOutdated === true;
     });
   const ui = sender => sender.id === api.runtime.id && !sender.incognito && !sender.tab?.incognito
     && [`chrome-extension://${api.runtime.id}/popup.html`, `chrome-extension://${api.runtime.id}/options.html`].includes(sender.url);
@@ -141,11 +147,14 @@ export function installController(api, {now = Date.now} = {}) {
         try {
           // `send_ready_with_policy` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
           // evidence has changed or lapsed, and the status it reports is checked again as it arrives.
-          if (!modern) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
-          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']}, {signal, timeout, onStatus: requireReady});
+          if (!modern) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
+          // The status Seatline reports ahead of the turn shows that it accepted the protected send: from then on the companion is not the
+          // problem, whatever the turn or the sign-in check does next.
+          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']},
+            {signal, timeout, onStatus: status => { remember(false); requireReady(status); }});
           break;
         } catch (error) {
-          if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
+          if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
           // Nothing was started, so one more attempt is safe: from a fresh readiness, which the send then reuses (it is the cached evidence now).
           if (modern && attempt === 0 && READINESS_REFUSALS.has(errorCode(error))) { verification = READINESS.fresh; continue; }
           throw error;
@@ -271,8 +280,10 @@ export function installController(api, {now = Date.now} = {}) {
     if (message.type === 'check-connection' && p === null) {
       if (active || diagnostic) throw new LineleafError('BUSY'); diagnostic = true;
       stopPreparation();
-      try { return statusView((await readiness(native(), undefined, READINESS.fresh)).status); } // The user asked: always a fresh probe, which later checks may then reuse.
-      finally { diagnostic = false; idleLink(); }
+      try { // The user asked: always a fresh probe, which later checks may then reuse. A companion that cannot receive writing is not "ready".
+        const {status, modern} = await readiness(native(), undefined, READINESS.fresh);
+        return {...statusView(status), update_required: !modern || outdated};
+      } finally { diagnostic = false; idleLink(); }
     }
     throw new LineleafError('INVALID_REQUEST');
   }

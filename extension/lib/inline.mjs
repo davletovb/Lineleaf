@@ -38,14 +38,15 @@ class InlineView {
   }
   focused() { return document.activeElement === this.host; }
   announce(message) { if (this.announcer.textContent !== message) this.announcer.textContent = message; }
-  update(capture, edits, message, undo = false, copyOnly = false, busy = false) {
+  // `problem`: the message says why nothing could be done. With no suggestions to show, the badge says so instead of looking idle.
+  update(capture, edits, message, undo = false, copyOnly = false, busy = false, problem = false) {
     clearInterval(this.ticker); this.busySince = busy ? this.busySince || Date.now() : 0; this.busy = busy;
     this.capture = capture; this.edits = edits; this.message = message; this.undo = undo; this.copyOnly = copyOnly; this.index = Math.min(this.index, Math.max(0, edits.length - 1)); this.anchored = false;
     this.announce(message);
     const rewrite = edits.some(edit => edit.rewrite), wording = edits.filter(edit => edit.category === 'clarity').length, working = busy || /^(Checking|Working)/.test(message);
-    this.badge.dataset.state = rewrite ? 'rewrite' : !edits.length ? 'idle' : wording === edits.length ? 'clarity' : 'fix';
+    this.badge.dataset.state = rewrite ? 'rewrite' : !edits.length ? (problem ? 'attention' : 'idle') : wording === edits.length ? 'clarity' : 'fix';
     this.badge.dataset.busy = working ? 'true' : 'false';
-    this.badge.dataset.tip = rewrite ? 'Rewrite ready' : edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : working ? 'Checking…' : 'Lineleaf';
+    this.badge.dataset.tip = rewrite ? 'Rewrite ready' : edits.length ? `${edits.length} suggestion${edits.length === 1 ? '' : 's'}` : working ? 'Checking…' : problem ? 'Needs attention' : 'Lineleaf';
     this.badge.replaceChildren(node('span', '', {class: 'ring', 'aria-hidden': 'true'}), icon(rewrite ? 'sparkle' : 'leaf', {size: 18}),
       ...(edits.length && !rewrite ? [node('span', String(edits.length), {class: 'count', 'aria-hidden': 'true'})] : []));
     this.badge.setAttribute('aria-label', `${message} Alt Shift L opens Lineleaf.`);
@@ -217,7 +218,7 @@ export function mountInline(api) {
     if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
   };
   function drop() { stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); held = null; clarityDue = false; clarityFor = null; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
-  function update(message) { view?.update(capture, edits, message, undo, copyOnly, working); }
+  function update(message, problem = false) { view?.update(capture, edits, message, undo, copyOnly, working, problem); }
   // Bring back the proofreading suggestions that were set aside for a rewrite, if their text is still the current text.
   function restoreHeld(message) {
     const previous = held; held = null;
@@ -230,7 +231,7 @@ export function mountInline(api) {
     working = false;
     if (wording) clarityDue = false; // Optional extra check: say why, keep the corrections on screen, never pause automatic checking.
     else if (rewriteMode) restoreHeld(messageFor(code)); else blocked = true;
-    update(messageFor(code)); if (explicit) view?.open(); // The user asked for something, so say why it did not happen.
+    update(messageFor(code), code !== 'CANCELLED'); if (explicit) view?.open(); // The user asked for something, so say why it did not happen.
   }
   // The corrections and the clearer-wording suggestions share one list; wording never overlaps a correction.
   function addWording(found) {
@@ -379,7 +380,7 @@ export function mountInline(api) {
           if (retryable && automatic) { lastKey = null; nextAt = Date.now() + retryDelay; queue(nextAt - Date.now()); }
           else blocked = !rewriteMode && message.code !== 'CANCELLED';
           if (rewriteMode) restoreHeld(messageFor(message.code));
-          update(messageFor(message.code)); if (!automatic) view?.open();
+          update(messageFor(message.code), !(retryable && automatic) && message.code !== 'CANCELLED'); if (!automatic) view?.open(); // Only an automatic check is retried.
         }
       });
       watchdog = setTimeout(() => { stop(); failed('PROVIDER_TIMEOUT', rewriteMode, wording, !automatic); }, WATCHDOG[automatic ? 'automatic' : 'manual']);

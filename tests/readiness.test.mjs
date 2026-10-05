@@ -152,6 +152,58 @@ test('a companion without policy enforcement can show status but cannot receive 
   refuse = true; const bad = g.connect({documentId: 'bad'}); start(bad); await waitFor(() => failure(bad));
   assert.equal(failure(bad).code, 'INVALID_REQUEST'); assert.deepEqual(methods(g), ['readiness', 'send_ready_with_policy', 'readiness']); assert.equal(g.ports.length, 1);
 });
+// Check Seatline only exercises `readiness`, which exists in companions older than the protected send, so on its own it says "ready" for a
+// companion that will refuse every check. What the companion refused is remembered, and a companion without readiness is reported at once.
+test('Check Seatline does not call a companion ready that cannot receive writing', async () => {
+  const f = fakeChrome(); let protectedSend = false;
+  f.api.runtime.connectNative = () => fakeNative((m, p) => {
+    f.calls.push(m);
+    if (!protectedSend && m.method === 'send_ready_with_policy') p.reply(m.id, {type: 'failed', reason: 'INVALID_REQUEST'});
+    else broker(m, p);
+  });
+  installController(f.api);
+  // Nothing has been refused yet, so only the provider's state is known.
+  assert.equal((await f.rpc('check-connection')).value.update_required, false);
+  const refused = f.connect(); start(refused); await waitFor(() => failure(refused));
+  assert.equal(failure(refused).code, 'COMPANION_UPDATE_REQUIRED');
+  const view = (await f.rpc('check-connection')).value;
+  assert.equal(view.update_required, true); assert.equal(view.sign_in, 'subscription', 'the provider status is still reported');
+  assert.equal(f.sessionData.companionOutdated, true);
+  // The worker restarts (its memory is gone) and the refusal is still known.
+  const restarted = fakeChrome(); restarted.api.storage.session.set({companionOutdated: true}); installController(restarted.api);
+  assert.equal((await restarted.rpc('check-connection')).value.update_required, true);
+  // The companion is updated and restarted: one accepted check clears the note.
+  protectedSend = true; const accepted = f.connect({documentId: 'document-two'}); start(accepted); await waitFor(() => result(accepted));
+  assert.equal((await f.rpc('check-connection')).value.update_required, false); assert.equal(f.sessionData.companionOutdated, false);
+  assert.ok(!methods(f).some(method => ['send', 'send_ready'].includes(method)), 'the refusal never fell back to an unprotected send');
+  // A companion that predates the readiness API cannot receive writing either, whatever it has been asked so far.
+  const old = fakeChrome({legacy: true}); installController(old.api);
+  assert.equal((await old.rpc('check-connection')).value.update_required, true);
+});
+// The marker says the companion cannot receive writing. A companion that accepts the protected send has shown it can, whatever the
+// turn does next: the status it reports ahead of the turn is the proof, not the turn's success.
+test('an accepted protected send clears the update note even when the turn then fails or the sign-in is refused', async () => {
+  const f = fakeChrome(); let behaviour = 'refuse';
+  f.api.runtime.connectNative = () => fakeNative((m, p) => {
+    f.calls.push(m);
+    if (m.method !== 'send_ready_with_policy') broker(m, p);
+    else if (behaviour === 'refuse') p.reply(m.id, {type: 'failed', reason: 'INVALID_REQUEST'});
+    else if (behaviour === 'fail') { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'failed', reason: 'PROVIDER_FAILED'}); }
+    else broker(m, p, {state: API_KEY});
+  });
+  installController(f.api);
+  const refused = f.connect(); start(refused); await waitFor(() => failure(refused));
+  assert.equal((await f.rpc('check-connection')).value.update_required, true);
+  behaviour = 'fail'; const failed = f.connect({documentId: 'document-two'}); start(failed); await waitFor(() => failure(failed));
+  assert.equal(failure(failed).code, 'PROVIDER_FAILED');
+  assert.equal((await f.rpc('check-connection')).value.update_required, false, 'the companion accepted the send');
+  // And again for a sign-in the app refuses after the send was accepted.
+  behaviour = 'refuse'; const again = f.connect({documentId: 'document-three'}); start(again); await waitFor(() => failure(again));
+  assert.equal((await f.rpc('check-connection')).value.update_required, true);
+  behaviour = 'api-key'; const denied = f.connect({documentId: 'document-four'}); start(denied); await waitFor(() => failure(denied));
+  assert.equal(failure(denied).code, 'SUBSCRIPTION_REQUIRED');
+  assert.equal((await f.rpc('check-connection')).value.update_required, false);
+});
 test('a readiness-capable companion without protected sends fails closed without a fallback turn', async () => {
   const f = fakeChrome();
   f.api.runtime.connectNative = () => fakeNative((m, p) => {

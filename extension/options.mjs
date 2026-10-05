@@ -1,6 +1,6 @@
 import {command} from './lib/ui-api.mjs';
 import {errorCode, dictionaryWord} from './lib/policy.mjs';
-import {messageFor} from './lib/messages.mjs';
+import {messageFor, connectionSummary} from './lib/messages.mjs';
 const query = x => document.querySelector(x), show = text => { query('#status').textContent = text; };
 let loaded;
 async function load() {
@@ -47,7 +47,7 @@ query('#paused').addEventListener('change', async () => {
 });
 query('#connection').addEventListener('click', async () => {
   query('#connection').disabled = true; show('Checking Seatline…');
-  try { const s = await command('check-connection'); show(`Codex: ${s.availability}, ${s.authentication}, ${s.sign_in}. No-tools requests: ${s.tool_isolation ? 'supported' : 'unavailable'}.`); }
+  try { const s = await command('check-connection'); show(connectionSummary(s)); }
   catch (error) { show(messageFor(errorCode(error))); }
   finally { query('#connection').disabled = false; }
 });

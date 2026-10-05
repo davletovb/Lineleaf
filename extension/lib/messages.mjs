@@ -1,6 +1,6 @@
 export const MESSAGES = {
   NATIVE_UNAVAILABLE: 'Seatline is unavailable. Install the shared companion and authorize the Lineleaf extension ID.',
-  COMPANION_UPDATE_REQUIRED: 'Update Seatline before checking text. This companion cannot enforce the subscription sign-in policy before launch.',
+  COMPANION_UPDATE_REQUIRED: 'The Seatline that is running cannot enforce the subscription sign-in policy, so nothing was sent. Run “seatline-companion install” from the updated Seatline, quit the Seatline that is still running (it stays up while any app uses it), then try again.',
   PROTOCOL_ERROR: 'Seatline returned an unsupported response. Check the companion version.',
   EXECUTABLE_NOT_FOUND: 'Codex was not found by Seatline. Install the supported Codex CLI.',
   LOGIN_REQUIRED: 'Sign in to Codex, then try again.', AUTH_REJECTED: 'Codex sign-in was rejected. Sign in again.',
@@ -31,3 +31,9 @@ export const MESSAGES = {
   RESTRICTED_PAGE: 'Lineleaf is available on ordinary HTTP and HTTPS pages and eligible same-origin frames. This page or frame is unavailable.',
 };
 export const messageFor = code => MESSAGES[code] ?? MESSAGES.UNAVAILABLE;
+// What Check Seatline shows. "Ready" describes the provider; a companion that cannot receive writing is said so, because it would otherwise
+// look healthy while every check is refused.
+export function connectionSummary(state) {
+  const line = `Codex: ${state.availability}, ${state.authentication}, ${state.sign_in}. No-tools requests: ${state.tool_isolation ? 'supported' : 'unavailable'}.`;
+  return state.update_required === true ? `${line} ${MESSAGES.COMPANION_UPDATE_REQUIRED}` : line;
+}
