@@ -7,7 +7,9 @@ import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
 import {messageFor} from '../extension/lib/messages.mjs';
 import {EXCLUDED} from '../extension/lib/editor-policy.mjs';
-import {fakeNative, fakeChrome, READY, waitFor} from './fixtures/extension-api.mjs';
+import {fakeNative, fakeChrome, broker, sent, probed, turnOf, READY, waitFor} from './fixtures/extension-api.mjs';
+import {closeNativeFixtures} from './fixtures/extension-api.mjs';
+test.afterEach(closeNativeFixtures);
 const correction = (before = 'go', after = 'goes', left = '', right = '') => ({before, after, left, right, category: 'grammar', explanation: 'Subject agreement'});
 const output = corrections => JSON.stringify({corrections});
 const rejects = fn => assert.throws(fn, /INVALID_OUTPUT/);
@@ -129,6 +131,23 @@ test('cancellation targets the original ID, drains stopped, and ignores cancel a
   const result = native.request('send', {}, {signal: abort.signal}); await waitFor(() => port.sent.length === 1); abort.abort();
   await assert.rejects(result, /CANCELLED/); assert.equal(port.sent[1].target, port.sent[0].id); assert.equal(native.pending.size, 0); native.close();
 });
+test('completed cancellations retain no cancel IDs when Seatline acknowledges only the target', async () => {
+  let port;
+  const native = new NativeSeatline(() => port = fakeNative((m, p) => {
+    if (m.method === 'cancel') p.reply(m.target, {type: 'stopped'});
+  }));
+  for (let i = 0; i < 5; i++) {
+    const abort = new AbortController();
+    const done = native.request('send', {}, {signal: abort.signal});
+    await waitFor(() => native.pending.size === 1);
+    abort.abort();
+    await assert.rejects(done, /CANCELLED/);
+    assert.equal(native.pending.size, 0);
+    assert.equal(native.ignored.size, 0, 'cancel IDs must not accumulate on the retained port');
+    assert.equal(port.closed, false);
+  }
+  native.close();
+});
 test('timeout with no stopped event force-closes after the bounded drain', async () => {
   let port; const native = new NativeSeatline(() => port = fakeNative(), {drainTimeout: 10});
   await assert.rejects(native.request('send', {}, {timeout: 10}), /PROVIDER_TIMEOUT/);
@@ -150,14 +169,14 @@ const start = port => port.onMessage.emit({type: 'start', id: crypto.randomUUID(
 test('worker delivers validated suggestions and never persists draft content', async () => {
   const f = fakeChrome(); installController(f.api); const port = f.connect(); start(port);
   await waitFor(() => port.received.some(m => m.type === 'result'));
-  const request = f.calls.find(m => m.method === 'send'); assert.equal(request.params.session, 'ephemeral'); assert.equal(request.params.tools, 'none');
+  const request = turnOf(f.calls.find(m => sent(m))); assert.equal(request.session, 'ephemeral'); assert.equal(request.tools, 'none');
   assert.equal(port.received.find(m => m.type === 'result').edits[0].start, 3);
-  assert.equal(JSON.stringify(f.data).includes('He go'), false); assert.equal(f.ports[0].closed, true);
+  assert.equal(JSON.stringify(f.data).includes('He go'), false); assert.equal(f.ports[0].closed, false); // the native connection stays for the next request
 });
 test('disabled sites and API-key/unknown sign-in never issue a writing send', async () => {
   for (const options of [{sites: []}, {state: {...READY, sign_in: 'api_key'}}, {state: {...READY, sign_in: null}}, {state: {...READY, capabilities: {tool_isolation: false}}}]) {
     const f = fakeChrome(options); installController(f.api); const port = f.connect(); start(port);
-    await waitFor(() => port.received.some(m => m.type === 'error')); assert.equal(f.calls.some(m => m.method === 'send'), false);
+    await waitFor(() => port.received.some(m => m.type === 'error')); assert.equal(f.calls.some(m => sent(m)), false);
   }
 });
 test('untrusted senders, invalid frame IDs and incognito ports are rejected immediately', () => {
@@ -171,7 +190,7 @@ test('same-origin permitted frame validates its exact document before provider w
   const sender = {...f.sender, frameId: 4, documentId: 'frame-document', url: 'https://writing.test/frame'};
   assert.equal((await f.rpc('site-state', null, sender)).ok, true);
   const port = f.connect(sender); start(port); await waitFor(() => port.received.some(x => x.type === 'result'));
-  assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+  assert.equal(f.calls.filter(x => sent(x)).length, 1);
 });
 test('cross-origin, sandboxed, removed and navigated frame documents cannot send text', async () => {
   for (const changed of ['cross-origin', 'sandboxed', 'removed', 'navigated', 'wrong-frame']) {
@@ -183,7 +202,7 @@ test('cross-origin, sandboxed, removed and navigated frame documents cannot send
         url: changed === 'navigated' ? 'https://writing.test/other' : sender.url, topOrigin: 'https://writing.test'}}];
     const port = f.connect(sender); start(port); await waitFor(() => port.received.some(x => x.type === 'error'));
     assert.equal(port.received.find(x => x.type === 'error').code, ['navigated', 'removed', 'wrong-frame'].includes(changed) ? 'STALE_DOCUMENT' : 'RESTRICTED_PAGE');
-    assert.equal(f.calls.some(x => x.method === 'send'), false);
+    assert.equal(f.calls.some(x => sent(x)), false);
   }
 });
 test('navigation between status and writing is refused and never submitted', async () => {
@@ -191,14 +210,14 @@ test('navigation between status and writing is refused and never submitted', asy
   f.api.scripting.executeScript = async () => [{documentId: f.sender.documentId, frameId: 0,
     result: {url: ++checks === 1 ? f.sender.url : 'https://writing.test/new-draft', topOrigin: 'https://writing.test'}}];
   const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'STALE_DOCUMENT'));
-  assert.equal(f.calls.some(x => x.method === 'send'), false);
+  assert.equal(f.calls.some(x => sent(x)), false);
 });
 test('a document changed after provider submission cannot receive validated suggestions', async () => {
   const f = fakeChrome(); installController(f.api); let checks = 0;
   f.api.scripting.executeScript = async () => [{documentId: f.sender.documentId, frameId: 0,
     result: {url: ++checks < 3 ? f.sender.url : 'https://writing.test/new-draft', topOrigin: 'https://writing.test'}}];
   const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.code === 'STALE_DOCUMENT'));
-  assert.equal(f.calls.filter(x => x.method === 'send').length, 1); assert.equal(port.received.some(x => x.type === 'result'), false);
+  assert.equal(f.calls.filter(x => sent(x)).length, 1); assert.equal(port.received.some(x => x.type === 'result'), false);
 });
 test('open panel targets only the focused document and refuses ambiguous focus', async () => {
   for (const ambiguous of [false, true]) {
@@ -237,16 +256,20 @@ test('site registration includes matching frames without opaque-origin inheritan
   assert.equal(messages[0].length, 2);
 });
 test('one global request prevents duplicate work; disconnect cancels the target', async () => {
-  const f = fakeChrome({hang: true}); installController(f.api); const first = f.connect(); start(first);
-  await waitFor(() => f.calls.some(m => m.method === 'send'));
+  const f = fakeChrome({hang: true}); const controller = installController(f.api); const first = f.connect(); start(first);
+  await waitFor(() => f.calls.some(m => sent(m)));
   const second = f.connect({documentId: 'document-two'}); start(second);
-  await waitFor(() => second.received.some(m => m.code === 'BUSY')); assert.equal(f.calls.filter(m => m.method === 'send').length, 1);
-  first.disconnect(); await waitFor(() => f.calls.some(m => m.method === 'cancel')); await waitFor(() => f.ports[0].closed);
+  await waitFor(() => second.received.some(m => m.code === 'BUSY')); assert.equal(f.calls.filter(m => sent(m)).length, 1);
+  first.disconnect(); await waitFor(() => f.calls.some(m => m.method === 'cancel'));
+  // The target is cancelled on the connection, which stays open and serves the next request.
+  await waitFor(() => controller.active === null); f.hold = false;
+  const third = f.connect({documentId: 'document-three'}); start(third);
+  await waitFor(() => third.received.some(m => m.type === 'result')); assert.equal(f.ports.length, 1); assert.equal(f.ports[0].closed, false);
 });
 test('pausing, permission removal and navigation cancel active work', async () => {
   for (const change of ['pause', 'permission', 'navigate']) {
     const f = fakeChrome({hang: true}); installController(f.api); const port = f.connect(); start(port);
-    await waitFor(() => f.calls.some(m => m.method === 'send'));
+    await waitFor(() => f.calls.some(m => sent(m)));
     if (change === 'pause') await f.rpc('set-pause', {paused: true});
     else if (change === 'permission') await f.api.permissions.remove({origins: ['https://writing.test/*']});
     else f.api.tabs.onUpdated.emit(7, {status: 'loading'});
@@ -264,7 +287,7 @@ test('automatic checking requires a separate opt-in; old enabled sites keep it o
   const f = fakeChrome(); installController(f.api); const port = f.connect();
   port.onMessage.emit({type: 'start', kind: 'automatic', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
   await waitFor(() => port.received.some(x => x.code === 'AUTOMATIC_DISABLED'));
-  assert.equal(f.calls.some(x => x.method === 'status' || x.method === 'send'), false);
+  assert.equal(f.calls.some(x => probed(x) || sent(x)), false);
 });
 test('dictionary is bounded, normalized, spelling-only and included as untrusted data', () => {
   const settings = preferences({dictionary: ['Café', 'CAFE\u0301', 'go', 'run shell', 'x'.repeat(65)], variant: 'UK'});
@@ -281,11 +304,11 @@ test('automatic budget is shared across documents and survives a worker restart 
   const f = fakeChrome({automatic: true}); installController(f.api, {now: () => clock}); const first = f.connect(); autoStart(first);
   await waitFor(() => first.received.some(x => x.type === 'result'));
   const second = f.connect({documentId: 'document-two'}); autoStart(second);
-  await waitFor(() => second.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+  await waitFor(() => second.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(f.calls.filter(x => sent(x)).length, 1);
   assert.equal(second.received.find(x => x.code === 'AUTO_WAIT').retryAfterMs, 10000);
   const restarted = fakeChrome({automatic: true}); restarted.api.storage.session = f.api.storage.session;
   installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third);
-  await waitFor(() => third.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(restarted.calls.some(x => x.method === 'send'), false);
+  await waitFor(() => third.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(restarted.calls.some(x => sent(x)), false);
   assert.deepEqual(f.sessionData, {automaticBudget: [100000]});
   clock += 10000; const later = restarted.connect(); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result'));
 });
@@ -293,23 +316,23 @@ test('automatic rolling budget permits six starts per minute and expires old tim
   let clock = 100000; const f = fakeChrome({automatic: true}); installController(f.api, {now: () => clock});
   for (let i = 0; i < 6; i++) { clock = 100000 + i * 10000; const p = f.connect(); autoStart(p); await waitFor(() => p.received.some(x => x.type === 'result')); }
   clock = 155000; const limited = f.connect(); autoStart(limited); await waitFor(() => limited.received.some(x => x.code === 'AUTO_WAIT'));
-  assert.equal(f.calls.filter(x => x.method === 'send').length, 6);
+  assert.equal(f.calls.filter(x => sent(x)).length, 6);
   clock = 160000; const next = f.connect(); autoStart(next); await waitFor(() => next.received.some(x => x.type === 'result'));
   assert.equal(f.sessionData.automaticBudget.length, 6);
 });
 test('explicit writing preempts automatic work after confirmed cancellation, without duplicate sends', async () => {
   const f = fakeChrome({automatic: true, hang: true}); installController(f.api);
-  const automatic = f.connect(); autoStart(automatic); await waitFor(() => f.calls.some(x => x.method === 'send'));
+  const automatic = f.connect(); autoStart(automatic); await waitFor(() => f.calls.some(x => sent(x)));
   f.hold = false; const manual = f.connect({documentId: 'manual-document'}); start(manual);
   await waitFor(() => manual.received.some(x => x.type === 'result'));
   assert.equal(automatic.received.some(x => x.code === 'CANCELLED'), true);
-  assert.equal(f.calls.filter(x => x.method === 'send').length, 2); assert.equal(f.ports[0].closed, true);
+  assert.equal(f.calls.filter(x => sent(x)).length, 2); assert.equal(f.ports.length, 1); assert.equal(f.ports[0].closed, false); // the preempting request reuses the connection
 });
 test('automatic rewrites and unknown kinds are refused before provider access', async () => {
   for (const change of [{kind: 'automatic', mode: 'formal'}, {kind: 'automatic', mode: 'improve'}, {kind: 'automatic', mode: 'paraphrase'}, {kind: 'background'}]) {
     const f = fakeChrome({automatic: true}); installController(f.api); const p = f.connect();
     p.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', ...change});
-    await waitFor(() => p.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(f.calls.some(x => x.method === 'send'), false);
+    await waitFor(() => p.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(f.calls.some(x => sent(x)), false);
   }
 });
 test('content controls are site-scoped; dictionary additions serialize and reset clears all preferences', async () => {
@@ -330,10 +353,7 @@ test('dictionary filters actual worker results without suppressing grammar corre
 });
 test('provider backoff survives worker restart and local refusals do not extend it', async () => {
   let clock = 100000; const f = fakeChrome();
-  f.api.runtime.connectNative = () => fakeNative((m, p) => {
-    if (m.method === 'status') { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }
-    if (m.method === 'send') p.reply(m.id, {type: 'failed', reason: 'PROVIDER_RATE_LIMITED'});
-  });
+  f.api.runtime.connectNative = () => fakeNative((m, p) => broker(m, p, {send: (m, p) => p.reply(m.id, {type: 'failed', reason: 'PROVIDER_RATE_LIMITED'})}));
   installController(f.api, {now: () => clock}); const first = f.connect(); start(first);
   await waitFor(() => first.received.some(x => x.code === 'PROVIDER_RATE_LIMITED'));
   assert.equal(f.sessionData.providerBackoff, 160000);
@@ -341,7 +361,7 @@ test('provider backoff survives worker restart and local refusals do not extend 
   installController(restarted.api, {now: () => clock}); const second = restarted.connect(); start(second);
   await waitFor(() => second.received.some(x => x.code === 'PROVIDER_RATE_LIMITED'));
   assert.equal(second.received.find(x => x.code === 'PROVIDER_RATE_LIMITED').retryAfterMs, 40000);
-  assert.equal(f.sessionData.providerBackoff, 160000); assert.equal(restarted.calls.some(x => x.method === 'send'), false);
+  assert.equal(f.sessionData.providerBackoff, 160000); assert.equal(restarted.calls.some(x => sent(x)), false);
   clock = 160000; const next = restarted.connect(); start(next); await waitFor(() => next.received.some(x => x.type === 'result'));
 });
 test('pause changes only pause and concurrent site/dictionary mutations preserve opt-in consent', async () => {
@@ -443,13 +463,13 @@ test('clearer wording is off by default, needs automatic checking, and turning a
 });
 test('automatic clearer-wording requests are refused unless their own setting is on, and are never made by hand', async () => {
   const off = fakeChrome({automatic: true}); installController(off.api); const refused = off.connect(); clarityStart(refused);
-  await waitFor(() => refused.received.some(x => x.code === 'CLARITY_DISABLED')); assert.equal(off.calls.some(x => x.method === 'status' || x.method === 'send'), false);
+  await waitFor(() => refused.received.some(x => x.code === 'CLARITY_DISABLED')); assert.equal(off.calls.some(x => probed(x) || sent(x)), false);
   const manual = fakeChrome({automatic: true, clarity: true}); installController(manual.api); const hand = manual.connect();
   hand.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: 'We met in order to plan.', mode: 'clarity'});
-  await waitFor(() => hand.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(manual.calls.some(x => x.method === 'send'), false);
+  await waitFor(() => hand.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(manual.calls.some(x => sent(x)), false);
   const noKind = manual.connect({documentId: 'document-two'});
   noKind.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'We met in order to plan.', mode: 'clarity'});
-  await waitFor(() => noKind.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(manual.calls.some(x => x.method === 'send'), false);
+  await waitFor(() => noKind.received.some(x => x.code === 'INVALID_REQUEST')); assert.equal(manual.calls.some(x => sent(x)), false);
 });
 test('a clearer-wording check spends the shared automatic budget and returns separately labelled suggestions', async () => {
   let clock = 100000;
@@ -457,7 +477,7 @@ test('a clearer-wording check spends the shared automatic budget and returns sep
   const proof = f.connect(); autoStart(proof); await waitFor(() => proof.received.some(x => x.type === 'result' || x.type === 'error'));
   const second = f.connect({documentId: 'document-two'}); clarityStart(second);
   await waitFor(() => second.received.some(x => x.code === 'AUTO_WAIT')); // the same ten-second interval
-  assert.equal(second.received.find(x => x.code === 'AUTO_WAIT').retryAfterMs, 10000); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+  assert.equal(second.received.find(x => x.code === 'AUTO_WAIT').retryAfterMs, 10000); assert.equal(f.calls.filter(x => sent(x)).length, 1);
   clock += 10000; const third = f.connect({documentId: 'document-three'}); clarityStart(third);
   await waitFor(() => third.received.some(x => x.type === 'result'));
   assert.deepEqual(third.received.find(x => x.type === 'result').edits.map(x => [x.category, x.before, x.after]), [['clarity', 'in order to', 'to']]);
@@ -474,10 +494,10 @@ test('an explicit request waits ninety seconds for the provider, a background ch
   mock.timers.enable({apis: ['setTimeout']});
   try {
     const f = fakeChrome({automatic: true, hang: true}); installController(f.api, {now: () => 0});
-    const background = f.connect(); autoStart(background); await settle(); assert.equal(f.calls.filter(x => x.method === 'send').length, 1);
+    const background = f.connect(); autoStart(background); await settle(); assert.equal(f.calls.filter(x => sent(x)).length, 1);
     mock.timers.tick(29000); await settle(); assert.equal(background.received.some(x => x.type === 'error'), false);
     mock.timers.tick(2000); await settle(); assert.equal(background.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT'); // 31 s
-    const explicit = f.connect({documentId: 'explicit'}); start(explicit); await settle(); assert.equal(f.calls.filter(x => x.method === 'send').length, 2);
+    const explicit = f.connect({documentId: 'explicit'}); start(explicit); await settle(); assert.equal(f.calls.filter(x => sent(x)).length, 2);
     mock.timers.tick(31000); await settle(); assert.equal(explicit.received.some(x => x.type === 'error'), false); // still waiting at 31 s
     mock.timers.tick(58000); await settle(); assert.equal(explicit.received.some(x => x.type === 'error'), false); // and at 89 s
     mock.timers.tick(2000); await settle(); assert.equal(explicit.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT'); // 91 s
@@ -487,9 +507,8 @@ test('after a provider timeout background checks stop (across restarts) until an
   let clock = 100000; const f = fakeChrome({automatic: true});
   let slow = true; const sends = [];
   f.api.runtime.connectNative = () => fakeNative((m, p) => {
-    if (m.method === 'send') sends.push(m);
-    if (m.method === 'status') { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }
-    if (m.method === 'send') { if (slow) p.reply(m.id, {type: 'failed', reason: 'PROVIDER_TIMEOUT'}); else { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); } }
+    if (sent(m)) sends.push(m);
+    broker(m, p, {send: (m, p) => { if (slow) p.reply(m.id, {type: 'failed', reason: 'PROVIDER_TIMEOUT'}); else { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); } }});
   });
   installController(f.api, {now: () => clock}); const first = f.connect(); autoStart(first);
   await waitFor(() => first.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
@@ -515,8 +534,11 @@ test('the page watchdog outlasts the worker’s whole sequence, so a slow but he
     const f = fakeChrome({automatic: true}); const sends = [];
     f.api.runtime.connectNative = () => {
       const port = fakeNative((m, p) => {
-        if (m.method === 'status') setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 14000);
-        if (m.method === 'send') { sends.push(m); setTimeout(() => { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); }, 85000); }
+        if (probed(m)) setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 14000);
+        if (sent(m)) {
+          sends.push(m); if (m.method === 'send_ready_with_policy') p.reply(m.id, {type: 'status', status: READY});
+          setTimeout(() => { p.reply(m.id, {type: 'delta', text: output([])}); p.reply(m.id, {type: 'completed'}); }, 85000);
+        }
       }, null);
       setTimeout(() => port.onMessage.emit({type: 'ready', version: 1}), 9000); // each phase just inside its own limit
       return port;
@@ -528,7 +550,7 @@ test('the page watchdog outlasts the worker’s whole sequence, so a slow but he
     assert.ok(108000 > 105000 && 108000 < WATCHDOG.manual);
     // The phases really are bounded where the watchdog assumes: a status probe that takes 20 seconds is cut off at fifteen (plus the cancel drain).
     const g = fakeChrome({automatic: true});
-    g.api.runtime.connectNative = () => fakeNative((m, p) => { if (m.method === 'status') setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 20000); });
+    g.api.runtime.connectNative = () => fakeNative((m, p) => { if (probed(m)) setTimeout(() => { p.reply(m.id, {type: 'status', status: READY}); p.reply(m.id, {type: 'completed'}); }, 20000); });
     installController(g.api, {now: () => 0}); const slow = g.connect(); start(slow); await settle();
     mock.timers.tick(14000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false);
     mock.timers.tick(2000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false); // the limit hit at 15 s; the unanswered cancel drains for 3 s

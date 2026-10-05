@@ -1,5 +1,5 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 
@@ -7,11 +7,51 @@ export function installController(api, {now = Date.now} = {}) {
   let active = null, diagnostic = false, backoffUntil = 0, automaticHold = 0; // automaticHold: no background requests after the provider failed to answer in time
   const peers = new Set();
   const read = async () => preferences((await api.storage.local.get('preferences')).preferences);
-  const native = () => new NativeSeatline(host => {
+  // One native connection serves every request until it has been idle for LINK_IDLE, so a check pays for neither a new companion process nor,
+  // usually, a new provider probe. `readinessApi` is what the companion at the other end has shown: Seatline's readiness API (true), a
+  // companion that predates it (false), or not yet known (null). It is forgotten whenever the connection closes, so an updated companion is noticed.
+  let link = null, linkTimer = 0, readinessApi = null, warming = null, warmedAt = -Infinity;
+  const native = () => link ??= new NativeSeatline(host => {
     const port = api.runtime.connectNative(host);
     port.onDisconnect.addListener(() => { void api.runtime.lastError; });
     return port;
-  });
+  }, {onClose: () => { readinessApi = null; clearTimeout(linkTimer); }});
+  const idleLink = () => {
+    clearTimeout(linkTimer);
+    if (!link?.port) return;
+    linkTimer = setTimeout(() => { if (active || diagnostic || warming) idleLink(); else link?.close(); }, LINK_IDLE);
+  };
+  // The provider's readiness: from Seatline's cache when `freshness` allows, or, for a companion without the readiness API, a status probe.
+  async function readiness(connection, signal, freshness) {
+    if (readinessApi !== false) {
+      try { const status = await connection.request('readiness', freshness, {signal, timeout: PHASES.status}); readinessApi = true; return {status, modern: true}; }
+      catch (error) { if (readinessApi === true || errorCode(error) !== 'INVALID_REQUEST') throw error; readinessApi = false; }
+    }
+    return {status: await connection.request('status', null, {signal, timeout: PHASES.status}), modern: false};
+  }
+  // Foreground work starts only after optional preparation has detached. Closing
+  // its port removes timeout/drain callbacks before a new request can use it.
+  function stopPreparation() {
+    const attempt = warming;
+    if (!attempt) return;
+    warming = null;
+    attempt.abort.abort();
+    attempt.connection.close();
+  }
+  // Gets the provider ready without a prompt or model turn. Failure is silent.
+  async function prepare() {
+    if (active || diagnostic || warming || readinessApi === false || now() < backoffUntil || now() < automaticHold || now() - warmedAt < PREPARE_INTERVAL) return 'skipped';
+    const attempt = {connection: native(), abort: new AbortController()};
+    warming = attempt; warmedAt = now();
+    try {
+      await attempt.connection.request('prepare', READINESS.cached, {timeout: PHASES.status, signal: attempt.abort.signal});
+      if (warming !== attempt) return 'skipped';
+      readinessApi = true; return 'prepared';
+    } catch (error) {
+      if (warming === attempt && readinessApi !== true && errorCode(error) === 'INVALID_REQUEST') readinessApi = false;
+      return 'skipped';
+    } finally { if (warming === attempt) warming = null; idleLink(); }
+  }
   const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get(['providerBackoff', 'automaticHold'])])
     .then(([, saved]) => {
       if (Number.isFinite(saved.providerBackoff) && saved.providerBackoff > now()) backoffUntil = Math.min(saved.providerBackoff, now() + 60000);
@@ -83,16 +123,34 @@ export function installController(api, {now = Date.now} = {}) {
       active = peer;
       if (automatic) await automaticBudget();
       if (signal.aborted) throw new LineleafError('CANCELLED');
+      stopPreparation();
       connection = native(); peer.connection = connection;
       send(peer.port, {type: 'progress', id: request.id, stage: 'connecting'});
-      requireReady(await connection.request('status', null, {signal, timeout: PHASES.status}));
-      // Permissions/settings may have changed while status was being probed.
-      const latest = await eligible(peer.sender);
-      if (signal.aborted) throw new LineleafError('CANCELLED');
-      if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
-      if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
-      send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
-      const answer = await connection.request('send', writingTurn(request.text, request.mode, latest.settings), {signal, timeout: REQUEST_TIMEOUT[automatic ? 'automatic' : 'manual']});
+      let verification = READINESS.cached, answer;
+      for (let attempt = 0; ; attempt++) {
+        // Lineleaf's own policy (subscription sign-in, no-tools requests) is enforced here, from Seatline's readiness, before anything is sent.
+        const {status, modern} = await readiness(connection, signal, verification);
+        requireReady(status);
+        // Permissions/settings may have changed while readiness was being checked.
+        const latest = await eligible(peer.sender);
+        if (signal.aborted) throw new LineleafError('CANCELLED');
+        if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
+        if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
+        send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
+        const turn = writingTurn(request.text, request.mode, latest.settings, {checkSignIn: !modern}), timeout = REQUEST_TIMEOUT[automatic ? 'automatic' : 'manual'];
+        try {
+          // `send_ready_with_policy` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
+          // evidence has changed or lapsed, and the status it reports is checked again as it arrives.
+          if (!modern) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
+          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']}, {signal, timeout, onStatus: requireReady});
+          break;
+        } catch (error) {
+          if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
+          // Nothing was started, so one more attempt is safe: from a fresh readiness, which the send then reuses (it is the cached evidence now).
+          if (modern && attempt === 0 && READINESS_REFUSALS.has(errorCode(error))) { verification = READINESS.fresh; continue; }
+          throw error;
+        }
+      }
       const final = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
       const edits = filterDictionary(candidates(answer, request.text, request.mode), final.settings);
@@ -106,7 +164,8 @@ export function installController(api, {now = Date.now} = {}) {
       if (backoffUntil > now()) await api.storage.session.set({providerBackoff: backoffUntil}).catch(() => {});
       send(peer.port, {type: 'error', id: request.id, code, retryAfterMs: error.retryAfterMs ?? Math.max(0, backoffUntil - now())});
     } finally {
-      connection?.close(); peer.connection = null; peer.running = false; peer.abort = null;
+      if (connection) idleLink(); // The connection stays for the next request; a closed or failed one reconnects by itself.
+      peer.connection = null; peer.running = false; peer.abort = null;
       if (active === peer) active = null;
       peer.finish?.();
       request.text = ''; // Drafts/results exist only for this in-memory request.
@@ -125,6 +184,7 @@ export function installController(api, {now = Date.now} = {}) {
   });
   async function reconcile() {
     await initialized; const settings = await read(), matches = [];
+    if (settings.paused || !settings.sites.length) link?.close(); // Paused, reset or no site enabled: no companion process is kept.
     for (const site of settings.sites) if (!settings.paused && await api.permissions.contains({origins: [sitePattern(site)]})) matches.push(sitePattern(site));
     await api.scripting.unregisterContentScripts({ids: ['lineleaf-sites']}).catch(() => {});
     if (matches.length) await api.scripting.registerContentScripts([{id: 'lineleaf-sites', matches: [...new Set(matches)], js: ['content.js'], runAt: 'document_idle', allFrames: true, persistAcrossSessions: false}]);
@@ -203,10 +263,16 @@ export function installController(api, {now = Date.now} = {}) {
       await api.tabs.sendMessage(tab.id, {type: 'lineleaf-open'}, {documentId}); return true;
     }
     if (message.type === 'site-state' && p === null) return {enabled: allowed(settings, originOf(sender.url))};
+    if (message.type === 'prepare' && exactKeys(p, ['tabId']) && Number.isInteger(p.tabId)) {
+      const tab = await api.tabs.get(p.tabId), origin = originOf(tab.url);
+      if (!origin || tab.incognito || !allowed(settings, origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
+      return prepare();
+    }
     if (message.type === 'check-connection' && p === null) {
-      if (active || diagnostic) throw new LineleafError('BUSY'); diagnostic = true; const connection = native();
-      try { return statusView(await connection.request('status', null, {timeout: PHASES.status})); }
-      finally { connection.close(); diagnostic = false; }
+      if (active || diagnostic) throw new LineleafError('BUSY'); diagnostic = true;
+      stopPreparation();
+      try { return statusView((await readiness(native(), undefined, READINESS.fresh)).status); } // The user asked: always a fresh probe, which later checks may then reuse.
+      finally { diagnostic = false; idleLink(); }
     }
     throw new LineleafError('INVALID_REQUEST');
   }
@@ -230,6 +296,8 @@ export function installController(api, {now = Date.now} = {}) {
   api.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'site-state' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
       eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
+    } else if (message?.type === 'prepare' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
+      eligible(sender).then(prepare).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {
       changeFromContent(message, sender).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else {

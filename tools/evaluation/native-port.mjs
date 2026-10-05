@@ -2,8 +2,8 @@
 import {spawn} from 'node:child_process';
 import {strictJSON} from '../../extension/lib/candidates.mjs';
 const event = () => { const listeners = new Set(); return {addListener: fn => listeners.add(fn), emit: value => { for (const fn of listeners) fn(value); }}; };
-export function nativePort(command, args = ['connect', 'lineleaf']) {
-  const process = spawn(command, args, {stdio: ['pipe', 'pipe', 'ignore'], shell: false});
+export function nativePort(command, args = ['connect', 'lineleaf'], env = undefined) {
+  const process = spawn(command, args, {stdio: ['pipe', 'pipe', 'ignore'], shell: false, env});
   let buffer = Buffer.alloc(0), closed = false, reap;
   const port = {onMessage: event(), onDisconnect: event(),
     postMessage(value) {

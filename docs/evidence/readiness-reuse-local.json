@@ -1,0 +1,668 @@
+{
+  "kind": "local-native-stand-in",
+  "boundary": "Local runs in one Linux container, not CI. The provider is Seatline's fake Codex or a shell stand-in that records every launch, so counts are real process launches of a fake provider and milliseconds measure the extension, bridge, broker and process starts: not a live provider, not Chrome, and not a latency, quota or sign-in result for Codex. A single run of each; timings vary run to run.",
+  "reproduce": [
+    "python3 -m tools.validate_authorization --companion SEATLINE_COMPANION --fake-provider SEATLINE_FAKE_PROVIDER",
+    "python3 -m tools.validate_coexistence --companion SEATLINE_COMPANION --fake-provider SEATLINE_FAKE_PROVIDER",
+    "python3 -m tools.validate_readiness --companion SEATLINE_COMPANION --fake-provider SEATLINE_FAKE_PROVIDER",
+    "node tools/measure-readiness.mjs --companion SEATLINE_COMPANION --compare PRE_CHANGE_EXTENSION_LIB --checks 8 --json",
+    "node tools/measure-readiness.mjs --companion OLD_SEATLINE_COMPANION --checks 8 --expect legacy --json"
+  ],
+  "seatline_current": "0cb105e4c4d753abf8fb305d8ccedeeb64dd0ef4",
+  "seatline_minimum": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
+  "lineleaf_before": "8864205 (merge of PR 13): the controller as it was before this change",
+  "machine": "linux x64, 4 x Intel(R) Xeon(R) Processor @ 2.10GHz, node v22.22.0",
+  "unchanged_checks_at_current_revision": {
+    "authorization": {
+      "status": "passed",
+      "checks": {
+        "one_installation_two_consumers": true,
+        "registered_manifest": true,
+        "invalid_id_refused": true,
+        "unknown_origin_refused": true,
+        "provider_grant_enforced": true,
+        "other_consumer_still_connected": true,
+        "send_schema_missing_executable": true,
+        "send_schema_upstream_fixture": true,
+        "rate_limit_reason_mapping": true,
+        "top_level_cancel_stops_target": true,
+        "reauthorization_closes_old_connection": true,
+        "reauthorized_origin_reconnects": true,
+        "revocation_closes_connection": true,
+        "ambiguous_origin_refused": true,
+        "revocation_is_app_scoped": true
+      }
+    },
+    "coexistence": {
+      "status": "passed",
+      "checks": {
+        "one_installation_two_consumers": true,
+        "registered_manifest": true,
+        "invalid_id_refused": true,
+        "unknown_origin_refused": true,
+        "provider_grant_enforced": true,
+        "other_consumer_still_connected": true,
+        "send_schema_missing_executable": true,
+        "send_schema_upstream_fixture": true,
+        "rate_limit_reason_mapping": true,
+        "top_level_cancel_stops_target": true,
+        "reauthorization_closes_old_connection": true,
+        "reauthorized_origin_reconnects": true,
+        "revocation_closes_connection": true,
+        "ambiguous_origin_refused": true,
+        "revocation_is_app_scoped": true
+      },
+      "coexistence_checks": {
+        "concurrent_same_id_routing": true,
+        "no_cross_app_output": true,
+        "writing_turns_emit_no_persistent_session": true,
+        "foreign_continuation_refused": true,
+        "foreign_forget_refused": true,
+        "owner_session_survives_foreign_attempts": true,
+        "own_cancel_stops_target": true,
+        "same_id_other_app_not_cancelled": true,
+        "app_queue_rejects_overflow": true,
+        "running_turn_cap_observed": true,
+        "queued_and_active_cancel_drain": true,
+        "other_consumer_progress_after_pressure": true,
+        "lineleaf_recovers_without_replay": true
+      }
+    }
+  },
+  "benchmark_launch_counts": {
+    "expected_launches": {
+      "legacy": {
+        "status": 15,
+        "generation": 13
+      },
+      "cached": {
+        "status": 1,
+        "generation": 13
+      }
+    },
+    "checks": {
+      "legacy_completed": true,
+      "legacy_launch_counts": true,
+      "cached_completed": true,
+      "cached_launch_counts": true,
+      "cached_saves_status_probes_not_turns": true
+    },
+    "runs": {
+      "legacy": {
+        "launches": {
+          "status": 15,
+          "generation": 13
+        },
+        "phases": {
+          "first_request": {
+            "attempted": 2,
+            "completed": 2,
+            "completion_p50_ms": 22.53,
+            "first_delta_p50_ms": 17.427,
+            "provider_launches": {
+              "status": 2,
+              "generation": 2
+            }
+          },
+          "subsequent_request": {
+            "attempted": 10,
+            "completed": 10,
+            "completion_p50_ms": 22.592,
+            "first_delta_p50_ms": 17.404,
+            "provider_launches": {
+              "status": 10,
+              "generation": 10
+            }
+          }
+        }
+      },
+      "cached": {
+        "launches": {
+          "status": 1,
+          "generation": 13
+        },
+        "phases": {
+          "first_request": {
+            "attempted": 2,
+            "completed": 2,
+            "completion_p50_ms": 16.984,
+            "first_delta_p50_ms": 11.801,
+            "provider_launches": {
+              "status": 0,
+              "generation": 2
+            }
+          },
+          "subsequent_request": {
+            "attempted": 10,
+            "completed": 10,
+            "completion_p50_ms": 16.906,
+            "first_delta_p50_ms": 11.731,
+            "provider_launches": {
+              "status": 0,
+              "generation": 10
+            }
+          }
+        }
+      }
+    }
+  },
+  "controller_current_companion": {
+    "checks_per_run": 8,
+    "runs": [
+      {
+        "label": "baseline (per-request connection, status probe)",
+        "summary": {
+          "completed": 8,
+          "of": 8,
+          "first_check": {
+            "ms": 59.4,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1
+          },
+          "later_checks": {
+            "n": 7,
+            "median_ms": 40.8,
+            "hosts": 7,
+            "login": 14,
+            "exec": 7
+          },
+          "total": {
+            "hosts": 8,
+            "login": 16,
+            "exec": 8
+          }
+        },
+        "steps": [
+          {
+            "step": "check 1",
+            "outcome": "ok",
+            "ms": 59.4,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 2",
+            "outcome": "ok",
+            "ms": 41.7,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 3",
+            "outcome": "ok",
+            "ms": 39.6,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 4",
+            "outcome": "ok",
+            "ms": 43,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 5",
+            "outcome": "ok",
+            "ms": 40.8,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 6",
+            "outcome": "ok",
+            "ms": 40.6,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 7",
+            "outcome": "ok",
+            "ms": 41.8,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 8",
+            "outcome": "ok",
+            "ms": 40.2,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          }
+        ]
+      },
+      {
+        "label": "current",
+        "summary": {
+          "completed": 8,
+          "of": 8,
+          "first_check": {
+            "ms": 38.3,
+            "hosts": 1,
+            "login": 1,
+            "exec": 1
+          },
+          "later_checks": {
+            "n": 7,
+            "median_ms": 26,
+            "hosts": 0,
+            "login": 0,
+            "exec": 7
+          },
+          "total": {
+            "hosts": 1,
+            "login": 1,
+            "exec": 8
+          }
+        },
+        "steps": [
+          {
+            "step": "check 1",
+            "outcome": "ok",
+            "ms": 38.3,
+            "hosts": 1,
+            "login": 1,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 2",
+            "outcome": "ok",
+            "ms": 26.4,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 3",
+            "outcome": "ok",
+            "ms": 26.1,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 4",
+            "outcome": "ok",
+            "ms": 25.4,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 5",
+            "outcome": "ok",
+            "ms": 25.4,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 6",
+            "outcome": "ok",
+            "ms": 26,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 7",
+            "outcome": "ok",
+            "ms": 24.8,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 8",
+            "outcome": "ok",
+            "ms": 26.1,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          }
+        ]
+      },
+      {
+        "label": "current, prepared before the first check",
+        "summary": {
+          "completed": 8,
+          "of": 8,
+          "first_check": {
+            "ms": 26.9,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1
+          },
+          "later_checks": {
+            "n": 7,
+            "median_ms": 26,
+            "hosts": 0,
+            "login": 0,
+            "exec": 7
+          },
+          "total": {
+            "hosts": 1,
+            "login": 1,
+            "exec": 8
+          }
+        },
+        "steps": [
+          {
+            "step": "prepare",
+            "outcome": "prepared",
+            "ms": 15.8,
+            "hosts": 1,
+            "login": 1,
+            "exec": 0,
+            "frames": [
+              "prepare"
+            ]
+          },
+          {
+            "step": "check 1",
+            "outcome": "ok",
+            "ms": 26.9,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 2",
+            "outcome": "ok",
+            "ms": 25.5,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 3",
+            "outcome": "ok",
+            "ms": 26.4,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 4",
+            "outcome": "ok",
+            "ms": 24.9,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 5",
+            "outcome": "ok",
+            "ms": 26.2,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 6",
+            "outcome": "ok",
+            "ms": 25.1,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 7",
+            "outcome": "ok",
+            "ms": 27,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          },
+          {
+            "step": "check 8",
+            "outcome": "ok",
+            "ms": 26,
+            "hosts": 0,
+            "login": 0,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "send_ready"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "controller_minimum_companion_fallback": {
+    "checks_per_run": 8,
+    "seatline_revision": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
+    "expected": {
+      "kind": "legacy",
+      "mismatches": []
+    },
+    "runs": [
+      {
+        "label": "current",
+        "summary": {
+          "completed": 8,
+          "of": 8,
+          "first_check": {
+            "ms": 57.8,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1
+          },
+          "later_checks": {
+            "n": 7,
+            "median_ms": 36.8,
+            "hosts": 0,
+            "login": 14,
+            "exec": 7
+          },
+          "total": {
+            "hosts": 1,
+            "login": 16,
+            "exec": 8
+          }
+        },
+        "steps": [
+          {
+            "step": "check 1",
+            "outcome": "ok",
+            "ms": 57.8,
+            "hosts": 1,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "readiness",
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 2",
+            "outcome": "ok",
+            "ms": 35.6,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 3",
+            "outcome": "ok",
+            "ms": 36.5,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 4",
+            "outcome": "ok",
+            "ms": 37.7,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 5",
+            "outcome": "ok",
+            "ms": 35.2,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 6",
+            "outcome": "ok",
+            "ms": 37.6,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 7",
+            "outcome": "ok",
+            "ms": 37.2,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          },
+          {
+            "step": "check 8",
+            "outcome": "ok",
+            "ms": 36.8,
+            "hosts": 0,
+            "login": 2,
+            "exec": 1,
+            "frames": [
+              "status",
+              "send"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

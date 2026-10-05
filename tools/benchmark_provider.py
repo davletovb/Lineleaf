@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 import re
 import shutil
@@ -29,14 +30,18 @@ SYSTEM = (
 )
 
 
-def writing_turn(text, model=None):
+# Seatline's readiness API (additive, protocol 1): a verified sign-in result may be reused for this long (its own ceiling is 30 s).
+READINESS_CACHED = {"mode": "cached", "max_age_ms": 30000}
+
+
+def writing_turn(text, model=None, check_sign_in=True):
     if not isinstance(text, str) or len(text) > 2000 or "\0" in text:
         raise ValueError("writing input exceeds the bounded text contract")
     if model is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", model):
         raise ValueError("invalid model identifier")
     return {"system": SYSTEM, "messages": [{"role": "user", "text": json.dumps({"text": text}, ensure_ascii=False)}],
             "model": model, "tools": "none", "session": "ephemeral", "continuation": None,
-            "cleanup_group": None, "check_sign_in": True}
+            "cleanup_group": None, "check_sign_in": check_sign_in}
 
 
 def validates_corrections(answer, source):
@@ -84,15 +89,44 @@ def safe_failure(event):
     # No provider output is reflected; only the known diagnostic vocabulary of this investigation.
     known = {"EXECUTABLE_NOT_FOUND", "LOGIN_REQUIRED", "AUTH_REJECTED", "APP_NOT_AUTHORIZED",
              "QUEUE_FULL", "PROVIDER_RATE_LIMITED", "PROVIDER_UNAVAILABLE", "PROVIDER_TIMEOUT",
-             "TOOL_ISOLATION_UNAVAILABLE", "INVALID_REQUEST", "MODEL_NOT_SUPPORTED"}
+             "TOOL_ISOLATION_UNAVAILABLE", "INVALID_REQUEST", "MODEL_NOT_SUPPORTED",
+             "READINESS_CHANGED", "READINESS_EXPIRED", "READINESS_UNVERIFIED", "READINESS_TIMEOUT"}
     return reason if isinstance(reason, str) and reason in known else "PROVIDER_FAILED"
 
 
 WIRE_ERRORS = (OSError, EOFError, TimeoutError, ProtocolError, ValueError)
 
 
-def provider_ready(connection, provider, timeout, report):
-    events = connection.collect(connection.start(provider, "status"), timeout=min(timeout, 30))
+class LaunchLog:
+    """Counts the provider launches a fake provider recorded: `login` probes (sign-in/readiness) and `exec` turns (generations).
+
+    The fake Codex of Seatline's tests appends one line per launch to `codex-invocations`. A live provider records nothing, so a
+    live run has no log and reports no launch counts; the counts are real process launches, but only of a fake provider.
+    """
+
+    def __init__(self, path):
+        self.path = Path(path)
+
+    def count(self):
+        try:
+            lines = self.path.read_text().splitlines()
+        except FileNotFoundError:
+            lines = []
+        return {"status": sum(line.startswith("login") for line in lines),
+                "generation": sum(line.startswith("exec") for line in lines)}
+
+
+def launched(log, before):
+    """What launched since `before` (a `LaunchLog.count()`), or None without a log."""
+    if log is None:
+        return None
+    now = log.count()
+    return {key: now[key] - before[key] for key in now}
+
+
+def provider_ready(connection, provider, timeout, report, readiness="legacy"):
+    method, params = ("status", None) if readiness == "legacy" else ("readiness", READINESS_CACHED)
+    events = connection.collect(connection.start(provider, method, params), timeout=min(timeout, 30))
     state = next((x.get("status") for x in events if x["type"] == "status"), None)
     if events[-1]["type"] != "completed" or not isinstance(state, dict):
         return safe_failure(events[-1])
@@ -109,14 +143,23 @@ def provider_ready(connection, provider, timeout, report):
     return None
 
 
-def measure_turn(connection, provider, model, case, repetition, phase, timeout):
+def start_turn(connection, provider, source, model, readiness):
+    if readiness == "legacy":
+        return connection.start(provider, "send", writing_turn(source, model))
+    # Sent under the readiness just checked, so Seatline repeats no sign-in probe.
+    return connection.start(provider, "send_ready_with_policy", {"turn": writing_turn(source, model, check_sign_in=False),
+                                                      "freshness": READINESS_CACHED, "allowed_sign_in": ["subscription"]})
+
+
+def measure_turn(connection, provider, model, case, repetition, phase, timeout, readiness="legacy", log=None):
     case_id, source = case
+    before = log.count() if log else None
     started = time.monotonic()
     row = {"case": case_id, "sample": repetition + 1, "connection": repetition + 1,
            "phase": phase, "first_delta_ms": None, "terminal": "interrupted", "structured_valid": False}
     answer, request = "", None
     try:
-        request = connection.start(provider, "send", writing_turn(source, model))
+        request = start_turn(connection, provider, source, model, readiness)
         deadline = started + timeout
         for _ in range(4096):
             try:
@@ -153,6 +196,8 @@ def measure_turn(connection, provider, model, case, repetition, phase, timeout):
             except WIRE_ERRORS:
                 pass  # Closing this connection ends the investigation; never retry the turn.
     row["completion_ms"] = round((time.monotonic() - started) * 1000, 3)
+    if log:
+        row["launches"] = launched(log, before)
     return row
 
 
@@ -160,7 +205,9 @@ def phase_summary(rows):
     completed = [row for row in rows if row["terminal"] == "completed"]
     durations = [row["completion_ms"] for row in completed]
     deltas = [row["first_delta_ms"] for row in completed if row["first_delta_ms"] is not None]
+    launches = [row["launches"] for row in rows if row.get("launches")]
     return {"attempted": len(rows), "completed": len(completed),
+            "provider_launches": {key: sum(item[key] for item in launches) for key in ("status", "generation")} if launches else None,
             "structured_valid": sum(row["structured_valid"] for row in rows),
             "structured_valid_rate": sum(row["structured_valid"] for row in rows) / len(rows) if rows else None,
             "completion_p50_ms": percentile(durations, .50), "completion_p95_ms": percentile(durations, .95),
@@ -169,6 +216,12 @@ def phase_summary(rows):
 
 def finalize(report):
     rows = report["measurements"]
+    probes = report.get("readiness_launches")
+    extra = report["cancellation"].get("launches") or {"status": 0, "generation": 0}
+    report["provider_launches"] = None if probes is None else {
+        key: sum(item[key] for item in probes) + sum(row.get("launches", {}).get(key, 0) for row in rows) + extra[key]
+        for key in ("status", "generation")} | {
+        "note": "Launches of a fake provider counted from its own record: the readiness check, every turn and the cancellation probe. A live provider records none."}
     report["summary"] = {"attempted": len(rows), "expected": len(CASES) * report["samples_per_case"],
                          "structured_valid": sum(row["structured_valid"] for row in rows),
                          "structured_valid_rate": sum(row["structured_valid"] for row in rows) / len(rows) if rows else None,
@@ -179,10 +232,14 @@ def finalize(report):
     return report
 
 
-def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=30, cancel_after=0.1, fixture=False):
+def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=30, cancel_after=0.1, fixture=False,
+                  readiness="legacy", launch_log=None):
+    """`readiness`: "legacy" asks `status` and sends with `send` (Seatline probes sign-in again inside every turn); "cached" asks
+    `readiness` (reused for up to 30 s) and sends with `send_ready_with_policy`. `launch_log`: a fake provider's launch record, to count launches."""
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
+    log = LaunchLog(launch_log) if launch_log else None
     report = {"status": "blocked", "kind": "fixture" if fixture else "live",
-              "seatline_revision": contract["revision"], "provider": provider, "model": model,
+              "seatline_revision": os.environ.get("SEATLINE_REVISION") or contract["revision"], "provider": provider, "model": model, "readiness": readiness,
               "samples_per_case": samples, "measurements": [], "connections_opened": 0,
               "warming": "Fresh client connection/process per repetition; first vs subsequent is not model cold vs warm.",
               "case_order": "Rotates each repetition to avoid always measuring the same first case.",
@@ -192,14 +249,17 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
         for repetition in range(samples):
             with NativeConnection(command, timeout=min(timeout, 10)) as connection:
                 report["connections_opened"] += 1
-                reason = provider_ready(connection, provider, timeout, report)
+                before = log.count() if log else None
+                reason = provider_ready(connection, provider, timeout, report, readiness)
+                if log:
+                    report["readiness_launches"] = [*report.get("readiness_launches", []), launched(log, before)]
                 if reason:
                     report["reason"] = reason
                     return finalize(report)
                 at = repetition % len(CASES)
                 for index, case in enumerate(CASES[at:] + CASES[:at]):
                     row = measure_turn(connection, provider, model, case, repetition,
-                                       "first_request" if index == 0 else "subsequent_request", timeout)
+                                       "first_request" if index == 0 else "subsequent_request", timeout, readiness, log)
                     report["measurements"].append(row)
                     if row.get("reason") == "PROVIDER_RATE_LIMITED":
                         report["limits"]["rate_limit_observed"] = True
@@ -208,8 +268,9 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
                         return finalize(report)
                 # One extra cancellation probe after all measurements, on the final connection.
                 if repetition == samples - 1:
+                    before_cancel = log.count() if log else None
                     try:
-                        target = connection.start(provider, "send", writing_turn(CASES[0][1], model))
+                        target = start_turn(connection, provider, CASES[0][1], model, readiness)
                         time.sleep(cancel_after)
                         cancel_sent = time.monotonic()
                         connection.cancel(target)
@@ -217,6 +278,8 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
                         report["cancellation"] = {"status": "completed", "terminal": cancelled["type"],
                             "stopped": cancelled["type"] == "stopped",
                             "after_cancel_ms": round((time.monotonic() - cancel_sent) * 1000, 3)}
+                        if log:
+                            report["cancellation"]["launches"] = launched(log, before_cancel)
                     except WIRE_ERRORS as exc:
                         report["cancellation"] = {"status": "incomplete", "reason": type(exc).__name__}
                         raise
@@ -234,12 +297,15 @@ def main():
     parser.add_argument("--samples", type=int, choices=range(1, 11), default=1)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--cancel-after", type=float, default=0.1)
+    parser.add_argument("--readiness", choices=["legacy", "cached"], default="legacy",
+                        help="legacy: status then send (a second sign-in probe runs inside every turn); cached: Seatline's readiness API")
+    parser.add_argument("--launch-log", help="A fake provider's launch record (Seatline's fake Codex writes codex-invocations) to count launches")
     parser.add_argument("--fixture", action="store_true", help="Test metrics with synthetic responses; never live evidence")
     args = parser.parse_args()
     if not 1 <= args.timeout <= 120 or not 0 <= args.cancel_after <= 2:
         parser.error("timeout must be 1–120 seconds and cancel-after 0–2 seconds")
     if args.fixture:
-        command = [sys.executable, str(ROOT / "tests/fixtures/companion.py")]
+        command = [sys.executable, str(ROOT / "tests/fixtures/companion.py"), "--hold-turn", str(len(CASES) + 1)]
     else:
         binary = shutil.which(args.companion)
         if binary is None:
@@ -247,7 +313,8 @@ def main():
             return 2
         command = [binary, "connect", "lineleaf"]
     report = run_benchmark(command, provider=args.provider, model=args.model, samples=args.samples,
-                           timeout=args.timeout, cancel_after=args.cancel_after, fixture=args.fixture)
+                           timeout=args.timeout, cancel_after=args.cancel_after, fixture=args.fixture,
+                           readiness=args.readiness, launch_log=args.launch_log)
     print(json.dumps(report, indent=2))
     return 0 if report["status"] == "completed" else 2
 

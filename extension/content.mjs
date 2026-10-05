@@ -170,6 +170,7 @@ export function mountContent(api) {
     const openedRoot = root, selected = capture, state = await siteState();
     if (root !== openedRoot || capture !== selected) return;
     if (!state?.ok) { stop(); status(messageFor(state?.code ?? 'SITE_DISABLED')); query('#check').disabled = true; }
+    else try { void Promise.resolve(api.runtime.sendMessage({type: 'prepare', payload: null})).catch(() => {}); } catch { /* worker restarted */ } // The user is about to check: get the provider ready. No text goes with it.
     query('#mode').focus();
   }
   async function run() {

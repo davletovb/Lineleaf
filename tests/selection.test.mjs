@@ -116,7 +116,7 @@ test('bundled panel exchanges a complete check/result with the production worker
   await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
   await open(); await check();
   assert.equal(await panel.locator('.after').textContent(), 'goes');
-  const sends = await page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+  const sends = await page.evaluate(() => fixture.worker.turns);
   assert.equal(sends.length, 1); assert.deepEqual(sends[0].params.messages, [{role: 'user', text: JSON.stringify({text: 'He go to work.'})}]);
   assert.equal(sends[0].params.session, 'ephemeral'); assert.equal(sends[0].params.tools, 'none');
   await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He goes to work.');
@@ -132,7 +132,7 @@ test('the panel offers Improve it and Paraphrase through the production worker, 
   await panel.locator('#mode').selectOption('paraphrase'); await check();
   assert.equal(await panel.locator('.category').textContent(), 'Optional style');
   assert.match(await panel.locator('.explanation').evaluate((_, __, all) => all.map(el => el.textContent).join('|')), /Check this version: it changes a number or date\./);
-  const sends = await page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+  const sends = await page.evaluate(() => fixture.worker.turns);
   assert.match(sends.at(-1).params.system, /different words/); assert.equal(await page.locator('#textarea').inputValue(), 'Maya paid $1,250 on Monday.');
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Maya paid $1,250 on Monday.'}); });
   await panel.locator('#mode').selectOption('improve'); await panel.button('Check selection').click();
@@ -217,4 +217,15 @@ test('a site handler that removes formatting is rolled back to the original inli
   });
   await open('editable'); await check(); await panel.button('Accept').click();
   assert.equal(await page.locator('#editable').innerHTML(), 'He <!--kept--><strong>go</strong> to work.'); assert.match(await status(), /Original text restored/);
+});
+test('opening the panel prepares the provider with no text, and asking for a check reuses that connection', async () => {
+  await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
+  await open();
+  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'prepare'));
+  const prepared = await page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'prepare'));
+  assert.equal(prepared.length, 1); assert.deepEqual(prepared[0].params, {mode: 'cached', max_age_ms: 30000});
+  assert.equal(JSON.stringify(prepared).includes('He go'), false);
+  await check();
+  assert.deepEqual(await page.evaluate(() => fixture.worker.calls.filter(x => x.method).map(x => x.method)), ['prepare', 'readiness', 'send_ready_with_policy']);
+  assert.equal(await page.evaluate(() => fixture.worker.ports.length), 1);
 });

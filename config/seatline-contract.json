@@ -1,6 +1,8 @@
 {
   "repository": "https://github.com/davletovb/seatline",
-  "revision": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
+  "revision": "fdd237720a913963cb4df78817c41ee968a0ad2a",
+  "minimum_revision": "fdd237720a913963cb4df78817c41ee968a0ad2a",
+  "legacy_revision": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
   "version": "0.1.0-dev",
   "protocol": 1,
   "native_host": "com.seatline.host",
@@ -9,9 +11,9 @@
   "app": "lineleaf",
   "providers": ["codex", "claude", "gemini", "grok"],
   "frame": {"length_bytes": 4, "byte_order": "little", "encoding": "utf-8", "max_bytes": 1048576},
-  "methods": ["status", "send", "forget", "cleanup", "cancel"],
+  "methods": ["status", "send", "forget", "cleanup", "cancel", "readiness", "prepare", "send_ready", "send_ready_with_policy"],
   "cancel_target_location": "top-level",
   "events": ["launched", "started", "activity", "delta", "session", "session_lost", "usage", "source", "status", "completed", "stopped", "failed"],
-  "limits": {"running": 8, "running_per_app": 2, "running_per_provider": 2, "queued": 64, "queued_per_app": 8, "connections": 32, "sessions_per_app": 2000, "sessions_total": 10000, "max_turn_seconds": 900},
-  "writing_policy": {"tools": "none", "session": "ephemeral", "continuation": null, "check_sign_in": true}
+  "limits": {"running": 8, "running_per_app": 2, "running_per_provider": 2, "running_limits_per_class": true, "readiness_running": 2, "cleanup_running": 2, "queue_timeout_ms": 30000, "queued": 64, "queued_per_app": 8, "connections": 32, "sessions_per_app": 2000, "sessions_total": 10000, "max_turn_seconds": 900},
+  "writing_policy": {"tools": "none", "session": "ephemeral", "continuation": null, "check_sign_in": {"send": true, "send_ready_with_policy": false}, "allowed_sign_in": ["subscription"], "readiness": {"cached_max_age_ms": 30000, "since_revision": "57737e660480a8838e84c4ef461de404dcac248d"}}
 }

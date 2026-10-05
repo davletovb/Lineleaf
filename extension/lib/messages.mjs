@@ -1,5 +1,6 @@
 export const MESSAGES = {
   NATIVE_UNAVAILABLE: 'Seatline is unavailable. Install the shared companion and authorize the Lineleaf extension ID.',
+  COMPANION_UPDATE_REQUIRED: 'Update Seatline before checking text. This companion cannot enforce the subscription sign-in policy before launch.',
   PROTOCOL_ERROR: 'Seatline returned an unsupported response. Check the companion version.',
   EXECUTABLE_NOT_FOUND: 'Codex was not found by Seatline. Install the supported Codex CLI.',
   LOGIN_REQUIRED: 'Sign in to Codex, then try again.', AUTH_REJECTED: 'Codex sign-in was rejected. Sign in again.',
@@ -9,6 +10,10 @@ export const MESSAGES = {
   PROVIDER_RATE_LIMITED: 'The provider reached a limit. Wait a minute before trying again.',
   QUEUE_FULL: 'Seatline is busy. Wait briefly before trying again.', PROVIDER_TIMEOUT: 'Codex did not answer in time, so the request was cancelled and nothing was changed. Try again, choose a faster model in Settings, or use Check Seatline in Settings if it keeps happening.',
   PROVIDER_UNAVAILABLE: 'The provider is unavailable. Check Codex and Seatline.', PROVIDER_FAILED: 'The provider could not finish this request.',
+  READINESS_CHANGED: 'Your Codex sign-in or settings changed while Lineleaf was checking. Try again.',
+  READINESS_EXPIRED: 'Your Codex sign-in changed while Lineleaf was checking. Try again.',
+  READINESS_UNVERIFIED: 'Seatline could not confirm that Codex is ready, so nothing was sent. Use Check Seatline in Settings, then try again.',
+  READINESS_TIMEOUT: 'Codex did not confirm in time that it is ready, so nothing was sent. Try again.',
   MODEL_NOT_SUPPORTED: 'This model is not supported. Check the model setting.',
   INVALID_OUTPUT: 'The response could not be safely matched to your selection. No changes were made.',
   INVALID_REQUEST: 'Select between 1 and 2,000 characters in an eligible field.',

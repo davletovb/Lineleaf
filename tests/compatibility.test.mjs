@@ -33,7 +33,7 @@ async function check() { await panel.button('Check selection').click(); await pa
 async function automatic(id = 'textarea') {
   await page.locator(`#${id}`).fill('He go to work.'); await inline.locator('.underline').waitFor();
 }
-const sends = () => page.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send'));
+const sends = () => page.evaluate(() => fixture.worker.turns);
 async function slotted() {
   await page.evaluate(() => {
     const host = document.createElement('section'); host.id = 'slotted'; document.body.prepend(host);
@@ -90,7 +90,7 @@ for (const [name, url, id, canApply] of [
     await panel.button('✕').click(); await page.locator(`#${id}`).focus(); await page.keyboard.press('End'); await page.keyboard.type(' ');
     if (!canApply) {
       // Rich composers now get an opt-in, copy-only inline preview: one more request, a card without Accept, no edit.
-      await page.waitForFunction(() => fixture.worker.calls.filter(x => x.method === 'send').length === 2, null, {timeout: 14000});
+      await page.waitForFunction(() => fixture.worker.turns.length === 2, null, {timeout: 14000});
       await inline.locator('.underline').waitFor(); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
       assert.equal(await inline.button('Accept').count(), 0);
       assert.match(await page.locator(`#${id}`).evaluate(el => el.textContent), /^He go to work\.[ \u00a0]$/); // Only the user's own typed space was added.
@@ -123,7 +123,7 @@ for (const marker of ['class="ProseMirror"', 'class="ql-editor"', 'class="public
 test('SPA push/replace/ABA/hash navigation cancels old drafts and removes previews', async () => {
   for (const kind of ['push', 'replace', 'ABA', 'hash']) {
     await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
-    await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+    await page.waitForFunction(() => fixture.worker.turns.length > 0);
     await page.evaluate(kind => {
       const old = location.href;
       if (kind === 'hash') location.hash = 'another-draft';
@@ -137,11 +137,11 @@ test('SPA push/replace/ABA/hash navigation cancels old drafts and removes previe
 });
 test('inline SPA navigation cancels the old request, ignores late output and stays idle until a new explicit check', async () => {
   await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await page.locator('#textarea').fill('He go to work.');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+  await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.evaluate(() => history.pushState({}, '', '/new-compose?automatic'));
   await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'cancel'));
   await page.evaluate(() => {
-    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy');
     port.reply(request.id, {type: 'delta', text: '{"corrections":[]}'}); port.reply(request.id, {type: 'completed'}); fixture.worker.hold = false;
   });
   await page.waitForTimeout(1700); assert.equal((await sends()).length, 1);
@@ -151,7 +151,7 @@ test('inline SPA navigation cancels the old request, ignores late output and sta
 });
 test('replaced field with identical text cannot receive a late response or the old edit', async () => {
   await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+  await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.locator('#textarea').evaluate(el => { const next = el.cloneNode(true); next.value = el.value; el.replaceWith(next); });
   await panel.locator('#status').waitFor(el => /changed/.test(el.textContent));
   assert.equal((await sends()).length, 1); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
@@ -316,10 +316,10 @@ test('harmless body, wrapper and field class changes retain inline suggestions a
 });
 test('harmless ancestor classes retain a pending response and completed manual suggestion', async () => {
   await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'));
+  await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.evaluate(() => {
     document.body.classList.add('is-scrolled'); document.querySelector('#textarea').classList.add('focused');
-    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send');
+    const port = fixture.worker.ports[0], request = port.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy');
     port.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
     port.reply(request.id, {type: 'completed'});
   });
@@ -355,7 +355,7 @@ test('serialized worker frame probe honors all shared code-editor embedding excl
     await page.locator('#frame-wrapper').evaluate((el, name) => { el.className = name; }, name);
     assert.equal((await state()).code, 'RESTRICTED_PAGE');
   }
-  assert.equal(await frame.evaluate(() => fixture.worker.calls.some(x => x.method === 'send')), false);
+  assert.equal(await frame.evaluate(() => fixture.worker.turns.length > 0), false);
 });
 test('same-origin frame inherits parent navigation, hidden/excluded embedding and sandbox guards', async () => {
   await load(); await page.evaluate(() => {
@@ -368,10 +368,10 @@ test('same-origin frame inherits parent navigation, hidden/excluded embedding an
   const framePanel = panelFor(page, {attribute: 'data-lineleaf-inline'}); await framePanel.locator('.underline').waitFor();
   await page.evaluate(() => history.pushState({}, '', '/other-parent?automatic'));
   await framePanel.locator('.underline').waitFor((_, __, lines) => lines.length === 0);
-  await frame.waitForTimeout(1700); assert.equal(await frame.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send').length), 1);
+  await frame.waitForTimeout(1700); assert.equal(await frame.evaluate(() => fixture.worker.turns.length), 1);
   await page.locator('#child').evaluate(el => el.setAttribute('aria-hidden', 'true'));
   await page.frameLocator('#child').locator('#textarea').fill('He go to work. Again.');
-  await frame.waitForTimeout(1700); assert.equal(await frame.evaluate(() => fixture.worker.calls.filter(x => x.method === 'send').length), 1);
+  await frame.waitForTimeout(1700); assert.equal(await frame.evaluate(() => fixture.worker.turns.length), 1);
   await page.locator('#child').evaluate(el => { el.removeAttribute('aria-hidden'); el.style.display = 'none'; });
   await frame.evaluate(() => { fixture.runtimeMessages.emit({type: 'lineleaf-open'}, {id: chrome.runtime.id}); });
   assert.equal(await panelFor(page).locator('#selected').textContent(), '');

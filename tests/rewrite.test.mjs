@@ -117,7 +117,7 @@ test('a rewrite that changes a number, a name or a negation says so', async () =
 test('"already reads well" shows no preview and keeps the proofreading suggestions; Back restores them too', async () => {
   await load(); await proofreadAnswer();
   await useTextarea('He go to work.'); await typeAtEnd(' ');
-  await page.waitForFunction(() => fixture.worker.calls.some(x => x.method === 'send'), null, {timeout: 8000}); await inline.locator('.underline').waitFor();
+  await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000}); await inline.locator('.underline').waitFor();
   await rewriteAnswer('He go to work. '.trimEnd() + ' ');
   await openCard(); await press('Improve it');
   await inline.locator('#status').waitFor(el => /no change suggested/.test(el.textContent));

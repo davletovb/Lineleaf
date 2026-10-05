@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from tools.authorize_lineleaf import origin
-from tools.benchmark_provider import (CASES, percentile, phase_summary, run_benchmark, safe_failure,
+from tools.benchmark_provider import (CASES, READINESS_CACHED, LaunchLog, percentile, phase_summary, run_benchmark, safe_failure,
                                       validates_corrections, writing_turn)
 from tools.seatline_wire import MAX_FRAME, NativeConnection, ProtocolError, read_frame, write_frame
 from tools import benchmark_provider, validate_authorization
@@ -163,7 +163,9 @@ class ConnectionTests(unittest.TestCase):
                 connection.start("codex", "status")
 
     def test_fixture_benchmark_labels_and_no_draft_content_in_report(self):
-        report = run_benchmark(FIXTURE, fixture=True, timeout=3)
+        # The final synthetic generation stays active until cancellation;
+        # scheduler delays must not let its 180 ms answer win this assertion.
+        report = run_benchmark(FIXTURE + ["--hold-turn", str(len(CASES) + 1)], fixture=True, timeout=3, cancel_after=0.3)
         self.assertEqual(report["kind"], "fixture")
         self.assertEqual(report["status"], "completed")
         self.assertEqual(report["summary"]["attempted"], len(CASES))
@@ -173,6 +175,95 @@ class ConnectionTests(unittest.TestCase):
         for _, draft in CASES:
             self.assertNotIn(draft, serialized)
         self.assertNotIn("corrections", serialized)
+
+
+class RecordingConnection(NativeConnection):
+    """A fixture connection that records what was asked of the companion and, like a fake provider, what it would have launched."""
+    asked = []
+    log = None
+    warm = False
+
+    def start(self, provider, method, params=None):
+        RecordingConnection.asked.append((method, params))
+        launches = {"status": ["login status"], "readiness": [] if RecordingConnection.warm else ["login status"],
+                    "send": ["login status", "exec --json"], "send_ready_with_policy": ["exec --json"]}.get(method, [])
+        if method == "readiness":
+            RecordingConnection.warm = True  # Seatline's cache: later checks within the window launch nothing.
+        if RecordingConnection.log:
+            with open(RecordingConnection.log, "a") as handle:
+                handle.writelines(line + "\n" for line in launches)
+        return super().start(provider, method, params)
+
+
+class ReadinessModeTests(unittest.TestCase):
+    def run_mode(self, readiness, log=None):
+        RecordingConnection.asked, RecordingConnection.log, RecordingConnection.warm = [], log, False
+        with patch("tools.benchmark_provider.NativeConnection", RecordingConnection):
+            return run_benchmark(FIXTURE, fixture=True, samples=2, timeout=3, readiness=readiness, launch_log=log)
+
+    def test_legacy_mode_probes_status_and_lets_every_turn_probe_again(self):
+        report = self.run_mode("legacy")
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["readiness"], "legacy")
+        methods = [method for method, _ in RecordingConnection.asked]
+        self.assertEqual(methods.count("status"), 2)            # one per connection
+        self.assertEqual(methods.count("send"), 2 * len(CASES) + 1)  # every case, and the cancellation probe
+        self.assertNotIn("readiness", methods)
+        self.assertTrue(all(params["check_sign_in"] for method, params in RecordingConnection.asked if method == "send"))
+
+    def test_cached_mode_asks_readiness_and_sends_under_it(self):
+        report = self.run_mode("cached")
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["readiness"], "cached")
+        methods = [method for method, _ in RecordingConnection.asked]
+        self.assertEqual(methods.count("readiness"), 2)
+        self.assertEqual(methods.count("send_ready_with_policy"), 2 * len(CASES) + 1)
+        self.assertNotIn("status", methods)
+        self.assertNotIn("send", methods)
+        for method, params in RecordingConnection.asked:
+            if method == "readiness":
+                self.assertEqual(params, READINESS_CACHED)
+            if method == "send_ready_with_policy":
+                self.assertEqual(params["freshness"], READINESS_CACHED)
+                self.assertFalse(params["turn"]["check_sign_in"])
+                self.assertEqual((params["turn"]["tools"], params["turn"]["session"], params["turn"]["continuation"]),
+                                 ("none", "ephemeral", None))
+
+    def test_launch_counts_come_only_from_the_provider_record_and_split_status_from_generation(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            for readiness, expected in (("legacy", {"status": 2 + 2 * len(CASES) + 1, "generation": 2 * len(CASES) + 1}),
+                                        ("cached", {"status": 1, "generation": 2 * len(CASES) + 1})):
+                log = Path(directory) / f"{readiness}-invocations"
+                report = self.run_mode(readiness, str(log))
+                counted = {key: report["provider_launches"][key] for key in ("status", "generation")}
+                self.assertEqual(counted, expected, readiness)
+                self.assertEqual(report["summary"]["phases"]["first_request"]["provider_launches"]["generation"], 2)
+                self.assertEqual(len(report["readiness_launches"]), 2)
+                self.assertIsNotNone(report["cancellation"]["launches"])
+        report = self.run_mode("cached")
+        self.assertIsNone(report["provider_launches"], "no record, no counts")
+        self.assertNotIn("launches", report["measurements"][0])
+
+    def test_launch_log_counts_login_probes_and_executions(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "codex-invocations"
+            self.assertEqual(LaunchLog(path).count(), {"status": 0, "generation": 0})
+            path.write_text("login status\tPATH0=/x\nexec --json -\nlogin status\tPATH0=/x\nexec --json -\nexec --json -\n")
+            self.assertEqual(LaunchLog(path).count(), {"status": 2, "generation": 3})
+
+    def test_readiness_refusals_use_the_safe_vocabulary(self):
+        for reason in ("READINESS_CHANGED", "READINESS_EXPIRED", "READINESS_UNVERIFIED", "READINESS_TIMEOUT"):
+            self.assertEqual(safe_failure({"reason": reason}), reason)
+        self.assertEqual(safe_failure({"reason": "READINESS_PRIVATE"}), "PROVIDER_FAILED")
+
+    def test_an_older_companion_refuses_cached_mode_without_a_measurement(self):
+        with patch("tools.benchmark_provider.NativeConnection", RecordingConnection):
+            report = run_benchmark(FIXTURE + ["--legacy"], fixture=True, samples=1, timeout=3, readiness="cached")
+        self.assertEqual(report["status"], "blocked")
+        self.assertEqual(report["reason"], "INVALID_REQUEST")
+        self.assertEqual(report["measurements"], [])
 
 
 class BenchmarkRegressionTests(unittest.TestCase):
