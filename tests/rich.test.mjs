@@ -126,10 +126,12 @@ test('focusing text, moving the caret, or leaving the typed paragraph before the
   await load();
   await caretAfter('#draft', 'work.'); await page.keyboard.press('ArrowUp'); await caretAfter('#draft', 'Intro paragraph.'); await idle();
   assert.equal((await sends()).length, 0); assert.equal(await inline.locator('.underline').count().catch(() => 0), 0);
-  // Type in the first paragraph, then move into the second before the idle window ends: neither is sent.
-  await page.keyboard.type(' '); await page.keyboard.press('ArrowDown'); await idle();
+  // Type in the first paragraph, then move into the second before the idle window ends: neither is sent. The page's clock is held still between the
+  // two key presses, so a slow machine cannot let the pause run out in between (which is a different, legitimate case: the caret was still there).
+  await page.clock.install();
+  await page.keyboard.type(' '); await page.keyboard.press('ArrowDown'); await page.clock.runFor(1900);
   assert.equal((await sends()).length, 0);
-  await caretAfter('#draft', 'work.'); await page.keyboard.type(' ');
+  await caretAfter('#draft', 'work.'); await page.keyboard.type(' '); await page.clock.runFor(1900);
   await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000});
   assert.deepEqual((await requestTexts()).map(x => x.trim()), ['He go to work.']);
 });
