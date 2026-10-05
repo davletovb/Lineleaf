@@ -3,7 +3,7 @@ import {EditorAdapter, validSpan, replacementSupported} from '../../prototypes/e
 import {captureRichParagraph} from './rich-text.mjs';
 import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
 import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selection.mjs';
-import {suggestionRects, visibleEditorRect} from './geometry.mjs';
+import {badgeSpot, suggestionRects, visibleEditorRect} from './geometry.mjs';
 import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, PREPARE_INTERVAL, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
 import {messageFor} from './messages.mjs';
 import {icon, iconLabel} from './icons.mjs';
@@ -21,7 +21,7 @@ const trusted = fn => event => { if (event.isTrusted) void fn(event); };
 // a header, the suggestion (or rewrite preview), the rewrite tools, a status strip and a quiet footer of everyday actions.
 class InlineView {
   constructor(field, actions) {
-    this.field = field; this.actions = actions; this.edits = []; this.index = 0; this.anchored = false;
+    this.field = field; this.actions = actions; this.edits = []; this.index = 0; this.anchored = false; this.spot = {}; // the badge's remembered place
     this.host = node('div', '', {'data-lineleaf-inline': ''}); this.root = this.host.attachShadow({mode: 'closed'});
     const sheet = new CSSStyleSheet(); sheet.replaceSync(tokens + base + styles); this.root.adoptedStyleSheets = [sheet];
     this.layer = node('div', '', {class: 'layer'}); this.lines = node('div');
@@ -175,8 +175,11 @@ class InlineView {
     if (valid) for (let i = 0; i < this.edits.length; i++) if (!this.edits[i].rewrite) found.set(i, this.rects(this.edits[i]));
     // A translated document root also translates fixed-position containing blocks.
     const origin = this.layer.getBoundingClientRect();
-    this.badge.style.left = `${Math.max(8, Math.min(innerWidth - this.badge.offsetWidth - 8, r.right - this.badge.offsetWidth)) - origin.left}px`;
-    this.badge.style.top = `${Math.max(8, Math.min(innerHeight - this.badge.offsetHeight - 4, r.bottom + 4)) - origin.top}px`;
+    const spot = badgeSpot(field, r, this.host, this.spot); // a clear place by the input box; see geometry.mjs
+    this.badge.style.left = `${spot.left - origin.left}px`; this.badge.style.top = `${spot.top - origin.top}px`;
+    this.badge.dataset.place = spot.place; // The tooltip opens toward the room there is.
+    if (spot.left < 140) this.badge.dataset.tipAlign = 'start'; else delete this.badge.dataset.tipAlign;
+    if (spot.top < 44) this.badge.dataset.tipFlip = 'below'; else delete this.badge.dataset.tipFlip;
     if (shown) {
       const width = this.card.offsetWidth, height = this.card.offsetHeight, word = this.anchored ? found.get(this.index)?.[0] : null;
       let left = Math.max(12, Math.min(innerWidth - width - 12, r.right - width)), top = Math.max(12, Math.min(innerHeight - height - 12, r.bottom + 8));

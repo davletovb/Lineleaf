@@ -4,7 +4,8 @@
 .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2147483646; }
 .mirror { position: fixed; left: -100000px; top: 0; visibility: hidden; border: 0; margin: 0; box-sizing: border-box; }
 
-/* Badge: a quiet leaf by the field that turns into a count when there is something to review. */
+/* Badge: a quiet leaf by the field that turns into a count when there is something to review. Its 30 px is also BADGE in lib/geometry.mjs,
+   which finds it a clear place beside the field. */
 .badge { position: fixed; pointer-events: auto; width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: var(--ll-pill); border-color: var(--ll-line); background: var(--ll-bg); color: var(--ll-brand); box-shadow: var(--ll-shadow-1); }
 .badge:hover:not(:disabled) { background: var(--ll-brand-soft); border-color: var(--ll-brand); }
 .badge[data-state="fix"] { color: var(--ll-fix-ink); } .badge[data-state="clarity"] { color: var(--ll-clear-ink); } .badge[data-state="rewrite"] { color: var(--ll-style-ink); }
@@ -15,6 +16,8 @@
 .badge[data-busy="true"] .ring { border-top-color: var(--ll-brand); border-right-color: var(--ll-brand); animation: ll-spin .9s linear infinite; }
 .badge::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 8px); padding: 4px 9px; border-radius: var(--ll-r-sm); background: var(--ll-ink); color: var(--ll-bg); font-size: 12px; font-weight: 500; white-space: nowrap; opacity: 0; transform: translateY(2px); pointer-events: none; transition: opacity var(--ll-fast) var(--ll-ease), transform var(--ll-fast) var(--ll-ease); }
 .badge:hover::after, .badge:focus-visible::after { opacity: 1; transform: none; }
+.badge[data-tip-align="start"]::after { left: 0; right: auto; }
+.badge[data-tip-flip="below"]::after { top: calc(100% + 8px); bottom: auto; }
 @keyframes ll-spin { to { transform: rotate(360deg); } }
 
 /* Underlines: a thin target at the foot of the word so clicking the text itself still places the caret. Solid is a correction,
