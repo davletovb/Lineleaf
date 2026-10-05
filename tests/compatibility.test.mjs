@@ -265,8 +265,12 @@ test('nested scroll clipping, container resize and unsupported transforms do not
     const r = line.getBoundingClientRect(); return r.left >= bounds.x && r.right <= bounds.x + bounds.width + 1 && r.bottom <= bounds.y + bounds.height;
   }), bounds), true);
   await page.locator('#scroller').evaluate(el => { el.scrollTop = 190; });
-  await page.waitForSelector('[data-lineleaf-inline]', {state: 'detached'});
-  await page.locator('#scroller').evaluate(el => { el.scrollTop = 0; el.style.transform = 'rotate(180deg)'; });
+  await inline.locator('.layer').waitFor(el => el.hidden === true); // clipped out of its container: nothing is drawn, and nothing is forgotten
+  assert.equal(await inline.locator('.underline').count(), 0);
+  await page.locator('#scroller').evaluate(el => { el.scrollTop = 0; });
+  await inline.locator('.layer').waitFor(el => el.hidden === false); // and back in view, the suggestion is where it was
+  assert.equal(await inline.locator('.underline').count(), 1);
+  await page.locator('#scroller').evaluate(el => { el.style.transform = 'rotate(180deg)'; });
   await page.locator('#textarea').fill('He go to work. Again.'); await page.waitForTimeout(1700); assert.equal((await sends()).length, 1);
   assert.equal(await page.locator('#textarea').inputValue(), 'He go to work. Again.');
 });

@@ -71,6 +71,41 @@ test('with clearer wording on, the corrections come first, then one separate wor
   assert.equal(await page.locator('#textarea').inputValue(), 'He go to work to earn money. ');
 });
 
+// The wording request is the second half of a check whose text has already been sent: the user clicking elsewhere to read the corrections must not end it.
+test('the wording suggestions still arrive when the user moves to another part of the page before they are due', async () => {
+  await load(); await answers(wording(['in order to', 'to', 'work ', ' earn']));
+  await typeInField(TEXT); await underlineCount(1);
+  await page.evaluate(() => { const b = document.createElement('button'); b.id = 'elsewhere'; b.textContent = 'Elsewhere'; document.body.append(b); b.focus({preventScroll: true}); });
+  await page.waitForTimeout(600);
+  assert.equal(await underlines('grammar'), 1, 'the corrections stay on screen');
+  await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 10000; const b = document.querySelector('#elsewhere'); b.blur(); b.focus({preventScroll: true}); }); // the interval has passed
+  await underlineCount(2);
+  assert.equal(await underlines('clarity'), 1);
+  assert.deepEqual((await requests()).map(x => x.mode), ['proofread', 'clarity']);
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'elsewhere', 'focus stayed where the user put it');
+});
+
+test('suggestions survive the field being scrolled out of view and back', async () => {
+  await load(CORRECTIONS_ONLY); await answers(wording(['in order to', 'to', 'work ', ' earn']));
+  await typeInField(TEXT); await underlineCount(1);
+  const top = await page.evaluate(() => scrollY);
+  await page.evaluate(() => { const spacer = document.createElement('div'); spacer.style.height = '4000px'; document.body.append(spacer); scrollTo(0, 3000); });
+  await page.waitForTimeout(700); // several polls with the field off screen
+  await page.evaluate(top => scrollTo(0, top), top);
+  await underlineCount(1);
+  assert.deepEqual((await requests()).map(x => x.mode), ['proofread'], 'nothing was asked again');
+});
+
+test('a manual Check now with clearer wording on brings the wording suggestions too', async () => {
+  await load(); await answers(wording(['in order to', 'to', 'work ', ' earn']));
+  await page.evaluate(value => { const t = document.querySelector('#textarea'); t.value = value; t.focus(); t.setSelectionRange(value.length, value.length); }, TEXT);
+  await inline.locator('.badge').waitFor();
+  await openCard(); await inline.button('Check now').click();
+  await underlineCount(2);
+  assert.equal(await underlines('grammar'), 1); assert.equal(await underlines('clarity'), 1);
+  assert.deepEqual(await requests(), [{mode: 'proofread', kind: 'manual', text: TEXT}, {mode: 'clarity', kind: 'automatic', text: TEXT}]);
+});
+
 test('a wording suggestion that overlaps a correction is not shown', async () => {
   await load(); await answers(wording(['go to work', 'work', 'He ', ' in order'], ['in order to', 'to', 'work ', ' earn']));
   await typeInField(TEXT); await underlineCount(1); await skipInterval(); await underlineCount(2);

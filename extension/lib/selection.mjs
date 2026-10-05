@@ -52,11 +52,12 @@ export function captureSelection(focused) {
   return {text, adapter: guard.current(snapshot) ? guard : null, guard, snapshot, offset: start, field: element,
     valid: () => guard.currentCapture(snapshot)};
 }
-export function captureParagraph(element, adapter) {
+// `at`: the text offset whose paragraph to read, instead of the caret's (to find again a paragraph that was checked earlier).
+export function captureParagraph(element, adapter, at = null) {
   if (!element || !embeddingAllowed() || excluded(element) || element.querySelector(EXCLUDED) || !element.isConnected
       || element.disabled || element.readOnly || (element.value ?? element.textContent).length > 100000) throw new LineleafError('INVALID_REQUEST');
   const snapshot = adapter.snapshot(); if (!snapshot) throw new LineleafError('INVALID_REQUEST');
-  let caret = element.selectionStart;
+  let caret = Number.isInteger(at) ? at : element.selectionStart;
   if (!Number.isInteger(caret)) {
     const selection = selectionFor(element);
     if (!selection?.focusNode || !element.contains(selection.focusNode)) throw new LineleafError('INVALID_REQUEST');

@@ -88,6 +88,73 @@ test('typing cancels in-flight work, drops late output, and explicit retry uses 
   await open(); await inline.button('Check now').click(); await result();
   assert.deepEqual(JSON.parse((await sends()).at(-1).params.messages[0].text), {text: 'He go to work. Now.'});
 });
+// What a check found stays where it is when the user clicks elsewhere, and comes back with them.
+const elsewhere = () => page.evaluate(() => { const b = document.createElement('button'); b.id = 'elsewhere'; b.textContent = 'Elsewhere'; document.body.append(b); b.focus(); });
+test('suggestions stay on screen when the user clicks a control elsewhere on the page, and are there when they return', async () => {
+  await type(); await result();
+  await elsewhere(); await page.waitForTimeout(700); // longer than the 250 ms poll that clears a stale view
+  assert.equal(await inline.locator('.underline').count(), 1);
+  await page.locator('#textarea').focus(); await page.waitForTimeout(300);
+  assert.equal(await inline.locator('.underline').count(), 1);
+  assert.equal((await sends()).length, 1, 'no new request to see them again');
+});
+test('suggestions come back, without a new request, when the user returns to a field after another one', async () => {
+  await type(); await result();
+  await page.locator('#input').focus(); await page.waitForTimeout(400);
+  assert.equal(await inline.locator('.underline').count(), 0, 'the other field has none of its own');
+  await page.locator('#textarea').focus(); await inline.locator('.underline').waitFor();
+  assert.equal((await sends()).length, 1);
+  await open(); assert.equal(await inline.locator('.explanation').textContent(), 'Subject agreement');
+  // The text changed while the user was away: the old suggestions no longer describe it.
+  await page.keyboard.press('Escape'); await page.locator('#input').focus();
+  await page.evaluate(() => { document.querySelector('#textarea').value = 'Different text now.'; });
+  await page.locator('#textarea').focus(); await page.waitForTimeout(500);
+  assert.equal(await inline.locator('.underline').count(), 0);
+});
+const visibility = state => page.evaluate(state => { Object.defineProperty(document, 'visibilityState', {configurable: true, get: () => state}); document.dispatchEvent(new Event('visibilitychange')); }, state);
+test('suggestions are still there after switching to another tab and back, with no new request', async () => {
+  await type(); await result();
+  await visibility('hidden'); await page.waitForTimeout(700); // several polls while the tab is hidden
+  assert.equal(await page.locator('[data-lineleaf-inline]').count(), 1, 'nothing was torn down');
+  await visibility('visible'); await page.waitForTimeout(300);
+  assert.equal(await inline.locator('.underline').count(), 1);
+  assert.equal((await sends()).length, 1);
+});
+test('a check that finishes while the tab is hidden is there when the user returns', async () => {
+  await page.evaluate(() => { fixture.worker.hold = true; }); await type();
+  await page.waitForFunction(() => fixture.worker.turns.length > 0);
+  await visibility('hidden');
+  await page.evaluate(() => { const p = fixture.worker.ports[0], request = p.sent.find(x => x.method === 'send' || x.method === 'send_ready_with_policy');
+    p.reply(request.id, {type: 'delta', text: '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'});
+    p.reply(request.id, {type: 'completed'}); fixture.worker.hold = false; });
+  await page.waitForTimeout(300); await visibility('visible'); await inline.locator('.underline').waitFor();
+  assert.equal((await sends()).length, 1);
+});
+// The five-minute limit on how long a result is kept counts the time the user is here: not while the tab is hidden or the window is behind another app.
+const typeUnderFakeClock = async () => { await page.clock.install(); await page.locator('#textarea').fill('He go to work.'); await page.locator('#textarea').pressSequentially(' '); await page.clock.runFor(2000); await inline.locator('.underline').waitFor(); };
+test('a result is dropped five minutes after it was found', async () => {
+  await typeUnderFakeClock();
+  await page.clock.runFor(4 * 60 * 1000); assert.equal(await inline.locator('.underline').count(), 1);
+  await page.clock.runFor(2 * 60 * 1000); await page.waitForTimeout(100);
+  assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0);
+});
+test('a result waits for the user while the window is behind another application, and the five minutes start again when they return', async () => {
+  await typeUnderFakeClock();
+  await page.evaluate(() => { document.hasFocus = () => false; }); // the user switched to another application: the page stays visible
+  await page.clock.runFor(30 * 60 * 1000); await page.waitForTimeout(100);
+  assert.equal(await inline.locator('.underline').count(), 1, 'half an hour away costs nothing');
+  await page.evaluate(() => { document.hasFocus = () => true; window.dispatchEvent(new Event('focus')); });
+  await page.clock.runFor(4 * 60 * 1000); assert.equal(await inline.locator('.underline').count(), 1);
+  await page.clock.runFor(2 * 60 * 1000); await page.waitForTimeout(100);
+  assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0);
+});
+test('suggestions are not kept for more than the five minutes a result stays on screen', async () => {
+  await type(); await result();
+  await page.locator('#input').focus(); await page.waitForTimeout(300);
+  await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 6 * 60 * 1000; });
+  await page.locator('#textarea').focus(); await page.waitForTimeout(500);
+  assert.equal(await inline.locator('.underline').count(), 0);
+});
 test('a companion that cannot receive writing is shown on the badge, not as an idle one, and recovers once it is updated', async () => {
   await page.evaluate(() => { fixture.worker.legacy = true; }); await type();
   await inline.locator('.badge').waitFor(el => el.dataset.state === 'attention');
