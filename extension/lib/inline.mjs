@@ -380,7 +380,7 @@ export function mountInline(api) {
           if (retryable && automatic) { lastKey = null; nextAt = Date.now() + retryDelay; queue(nextAt - Date.now()); }
           else blocked = !rewriteMode && message.code !== 'CANCELLED';
           if (rewriteMode) restoreHeld(messageFor(message.code));
-          update(messageFor(message.code), !retryable && message.code !== 'CANCELLED'); if (!automatic) view?.open();
+          update(messageFor(message.code), !(retryable && automatic) && message.code !== 'CANCELLED'); if (!automatic) view?.open(); // Only an automatic check is retried.
         }
       });
       watchdog = setTimeout(() => { stop(); failed('PROVIDER_TIMEOUT', rewriteMode, wording, !automatic); }, WATCHDOG[automatic ? 'automatic' : 'manual']);

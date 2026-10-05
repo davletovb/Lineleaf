@@ -148,8 +148,10 @@ export function installController(api, {now = Date.now} = {}) {
           // `send_ready_with_policy` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
           // evidence has changed or lapsed, and the status it reports is checked again as it arrives.
           if (!modern) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
-          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']}, {signal, timeout, onStatus: requireReady});
-          remember(false);
+          // The status Seatline reports ahead of the turn shows that it accepted the protected send: from then on the companion is not the
+          // problem, whatever the turn or the sign-in check does next.
+          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']},
+            {signal, timeout, onStatus: status => { remember(false); requireReady(status); }});
           break;
         } catch (error) {
           if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
