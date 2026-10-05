@@ -112,7 +112,8 @@
         <ul class="facts">
           <li>Lineleaf saves preferences, dictionary words, and enabled site origins.</li>
           <li>Only automatic-request and provider-backoff timestamps are kept in session storage, to preserve the shared cap across worker restarts.</li>
-          <li>Check field snapshots expire after five minutes or when focus or site state changes.</li>
+          <li>Suggestions from a check stay in that page's memory only, for as long as the text they describe is unchanged. They are dropped when you edit that text, leave or close the page, pause Lineleaf, or turn the site off, and are never saved.</li>
+          <li>The writing panel clears its selection and results after five minutes.</li>
           <li>No draft history, provider credentials, or telemetry is stored.</li>
         </ul>
         <div class="actions-row"><button id="reset" type="button" class="danger">Reset preferences and site access</button></div>

@@ -465,9 +465,9 @@ test('a Check now that times out reopens the card with the reason, and the next 
 // The hold that follows a provider timeout is temporary: an editor refused during it must try again by itself afterwards.
 test('an automatic check refused during the provider hold is retried after it, instead of leaving the editor blocked', async () => {
   await load(); await proofreadAnswer(); await useTextarea('He go to work.');
-  await page.evaluate(() => { // the worker's 90-second turn limit becomes 50 ms; retries that would wait minutes wait three seconds (the card's own 300000 expiry is left alone)
+  await page.evaluate(() => { // the worker's 90-second turn limit becomes 50 ms; retries that would wait minutes wait three seconds
     fixture.worker.hold = true; const real = window.setTimeout;
-    window.setTimeout = (fn, ms, ...args) => real(fn, ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args); // not the 300000 expiry
+    window.setTimeout = (fn, ms, ...args) => real(fn, ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args);
   });
   await openCard(); await press('Check now');
   await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time')); // sets the hold

@@ -203,21 +203,16 @@ class InlineView {
 }
 
 export function mountInline(api) {
-  let field, adapter, view, capture, edits = [], port, timer, expiry, watchdog, frame, policy = null, epoch = 0, generation = 0;
+  let field, adapter, view, capture, edits = [], port, timer, watchdog, frame, policy = null, epoch = 0, generation = 0;
   let composing = false, applying = false, blocked = false, lastKey = null, pendingKey = null, dirty = false, nextAt = 0, undo = false, copyOnly = false, geometry = '';
   let mode = 'edit', settling = 0, before; // 'rich' = no adapter: caret-paragraph capture; Accept only in a verified editor family
   let held = null; // proofreading suggestions set aside while an explicit rewrite is shown
   let working = false; // a request to the provider is in flight
   let clarityDue = false, clarityFor = null; // an optional clearer-wording check is waiting for the shared automatic interval, for this paragraph key
-  // What a check found outlives the user moving on: a field they left for another one, or a tab that was hidden, keeps its suggestions, and they come back
-  // when that same, unchanged paragraph is in front of the user again. In memory only, never longer than a result stays on screen, and gone with the page.
-  const LIFETIME = 5 * 60 * 1000;
-  let saved = new WeakMap(), wordingDoneFor = null, resultAt = 0, lapsed = false;
-  // The limit counts the time the user spends here: while the tab is hidden or the window is behind another app, results wait for them, and the clock starts again when they are back.
-  const away = () => document.visibilityState !== 'visible' || !document.hasFocus();
-  const lapse = () => { if (away()) lapsed = true; else drop(); };
-  const hold = () => { clearTimeout(expiry); lapsed = false; resultAt = Date.now(); expiry = setTimeout(lapse, LIFETIME); };
-  const back = () => { if (lapsed && field) hold(); };
+  // What a check found outlives the user moving on: a field they left for another one keeps its suggestions, and they come back when that same, unchanged
+  // paragraph is in front of the user again. There is no time limit: they last as long as the text they describe is unchanged, and are dropped the moment it
+  // changes. In memory only (never saved or sent), per page, and gone with the page.
+  let saved = new WeakMap(), wordingDoneFor = null;
   const compositions = new WeakSet();
   // `policy` is known once the site is enabled and not paused (site-state answered). `permitted`: automatic checking is also on, on a visible page. Without
   // it the assistant stays out of sight and reads nothing until the user asks with Alt Shift L, then sends only what an explicit action names.
@@ -231,9 +226,9 @@ export function mountInline(api) {
   function shelve() {
     if (!field || !capture || !edits.length || edits.some(edit => edit.rewrite) || copyOnly || !capture.valid()) return;
     const key = keyFor(capture);
-    saved.set(field, {until: resultAt + LIFETIME, key, offset: capture.offset, block: capture.block ?? null, edits, owed: policy?.clarity === true && wordingDoneFor !== key});
+    saved.set(field, {key, offset: capture.offset, block: capture.block ?? null, edits, owed: policy?.clarity === true && wordingDoneFor !== key});
   }
-  function drop(keep = false) { if (keep === true) shelve(); stop(); clearTimeout(expiry); adapter?.dispose(); view?.close(); held = null; clarityDue = false; clarityFor = null; wordingDoneFor = null; lapsed = false; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
+  function drop(keep = false) { if (keep === true) shelve(); stop(); adapter?.dispose(); view?.close(); held = null; clarityDue = false; clarityFor = null; wordingDoneFor = null; field = adapter = view = capture = null; mode = 'edit'; settling++; before = undefined; edits = []; lastKey = pendingKey = null; dirty = false; blocked = false; undo = false; copyOnly = false; composing = false; geometry = ''; }
   function update(message, problem = false) { view?.update(capture, edits, message, undo, copyOnly, working, problem); }
   // Bring back the proofreading suggestions that were set aside for a rewrite, if their text is still the current text.
   function restoreHeld(message) {
@@ -329,13 +324,12 @@ export function mountInline(api) {
   // Brings back what was found in this field before the user left it, if its paragraph is still exactly as it was checked.
   function resume() {
     const kept = saved.get(field); saved.delete(field);
-    if (!kept || kept.until <= Date.now()) return;
+    if (!kept) return;
     let again;
     try { again = mode === 'rich' ? captureRichParagraph(field, {editable: richReplacementAllowed(field), at: {block: kept.block, index: kept.offset}}) : captureParagraph(field, adapter, kept.offset); }
     catch { return; }
     if (keyFor(again) !== kept.key) return;
     capture = again; edits = kept.edits; lastKey = kept.key; clarityFor = kept.key; clarityDue = kept.owed; wordingDoneFor = kept.owed ? null : kept.key;
-    clearTimeout(expiry); lapsed = false; resultAt = kept.until - LIFETIME; expiry = setTimeout(lapse, kept.until - Date.now());
     update(countMessage());
   }
   const keyFor = value => `${value.id ?? ''}:${value.offset}:${value.text}`;
@@ -379,7 +373,6 @@ export function mountInline(api) {
     if (!state.ok || (automatic && !state.value.automatic)) { failed(state.code ?? 'AUTOMATIC_DISABLED', rewriteMode, wording, !automatic); return; }
     if (rewriteMode) held = capture && !edits.some(edit => edit.rewrite) ? {capture, edits} : held; // Set the suggestions aside; Back restores them.
     policy = state.value; capture = next; if (!wording) { edits = []; if (!rewriteMode) lastKey = keyFor(next); } copyOnly = false; clarityDue = false; // `undo` stays: the adapter refuses it once the text has changed
-    hold();
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
     working = true;
     update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with Codex… You can keep typing.` : wording ? 'Looking for clearer wording with Codex… You can keep typing.' : 'Checking with Codex… You can keep typing.');
@@ -395,7 +388,7 @@ export function mountInline(api) {
         if (message.type === 'result') {
           finish(); if (!Array.isArray(message.edits)) { failed('INVALID_OUTPUT', rewriteMode, wording, !automatic); return; }
           if (rewriteMode) {
-            edits = message.edits; hold();
+            edits = message.edits;
             const label = REWRITE_LABELS[rewriteMode];
             if (edits.length) update(`${label}: review the suggested text. ${replaceable() ? 'Replace it or try again.' : 'Copy it; this editor is not changed.'}`);
             else if (!restoreHeld(`${label}: no change suggested. This already reads well.`)) update(`${label}: no change suggested. This already reads well.`);
@@ -408,8 +401,7 @@ export function mountInline(api) {
             // With the optional setting on, the same paragraph gets one more automatic request for clearer wording, after the shared interval.
             if (policy?.clarity === true) { clarityDue = true; clarityFor = keyFor(capture); wordingDoneFor = null; queue(); } // After a check the user asked for as well as after an automatic one.
           }
-          hold();
-        } else if (message.type === 'error') {
+              } else if (message.type === 'error') {
           finish(); const retryable = ['AUTO_WAIT', 'BUSY', 'QUEUE_FULL', 'PROVIDER_RATE_LIMITED', 'AUTO_PAUSED'].includes(message.code);
           // A refusal that says when to come back is retried then; AUTO_PAUSED (another tab's timeout) may be several minutes away.
           const retryDelay = Math.max(1000, Math.min(message.code === 'AUTO_PAUSED' ? AUTOMATIC_HOLD : 60000, message.retryAfterMs || (message.code === 'PROVIDER_RATE_LIMITED' ? 60000 : 5000)));
@@ -575,8 +567,7 @@ export function mountInline(api) {
     if (message.type === 'lineleaf-open') drop();
   });
   // Switching to another tab or application changes nothing here: a request that is running finishes, and what was found stays for when the user is back.
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') return; epoch++; back(); void refresh(); });
-  window.addEventListener('focus', back);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState !== 'visible') return; epoch++; void refresh(); });
   window.addEventListener('offline', () => { stop(); blocked = true; update(messageFor('OFFLINE')); });
   window.addEventListener('online', () => { if (blocked) view?.status('Connection restored. Choose Check now when ready.'); });
   window.addEventListener('pagehide', () => { epoch++; policy = null; drop(); saved = new WeakMap(); });

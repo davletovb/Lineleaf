@@ -130,30 +130,22 @@ test('a check that finishes while the tab is hidden is there when the user retur
   await page.waitForTimeout(300); await visibility('visible'); await inline.locator('.underline').waitFor();
   assert.equal((await sends()).length, 1);
 });
-// The five-minute limit on how long a result is kept counts the time the user is here: not while the tab is hidden or the window is behind another app.
+// There is no time limit: what a check found lasts while the text it describes is unchanged, and goes the moment that text changes.
 const typeUnderFakeClock = async () => { await page.clock.install(); await page.locator('#textarea').fill('He go to work.'); await page.locator('#textarea').pressSequentially(' '); await page.clock.runFor(2000); await inline.locator('.underline').waitFor(); };
-test('a result is dropped five minutes after it was found', async () => {
+test('suggestions are still there hours later, and go as soon as the text changes', async () => {
   await typeUnderFakeClock();
-  await page.clock.runFor(4 * 60 * 1000); assert.equal(await inline.locator('.underline').count(), 1);
-  await page.clock.runFor(2 * 60 * 1000); await page.waitForTimeout(100);
-  assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0);
-});
-test('a result waits for the user while the window is behind another application, and the five minutes start again when they return', async () => {
-  await typeUnderFakeClock();
-  await page.evaluate(() => { document.hasFocus = () => false; }); // the user switched to another application: the page stays visible
-  await page.clock.runFor(30 * 60 * 1000); await page.waitForTimeout(100);
-  assert.equal(await inline.locator('.underline').count(), 1, 'half an hour away costs nothing');
-  await page.evaluate(() => { document.hasFocus = () => true; window.dispatchEvent(new Event('focus')); });
-  await page.clock.runFor(4 * 60 * 1000); assert.equal(await inline.locator('.underline').count(), 1);
-  await page.clock.runFor(2 * 60 * 1000); await page.waitForTimeout(100);
-  assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0);
-});
-test('suggestions are not kept for more than the five minutes a result stays on screen', async () => {
-  await type(); await result();
-  await page.locator('#input').focus(); await page.waitForTimeout(300);
-  await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 6 * 60 * 1000; });
-  await page.locator('#textarea').focus(); await page.waitForTimeout(500);
+  await page.clock.fastForward('08:00:00'); await page.waitForTimeout(300);
+  assert.equal(await inline.locator('.underline').count(), 1, 'a working day later');
+  assert.equal((await sends()).length, 1);
+  await page.locator('#textarea').pressSequentially('x'); await page.waitForTimeout(100);
   assert.equal(await inline.locator('.underline').count(), 0);
+});
+test('suggestions set aside for another field are still there hours later', async () => {
+  await typeUnderFakeClock();
+  await page.locator('#input').focus(); await page.waitForTimeout(300);
+  await page.clock.fastForward('08:00:00');
+  await page.locator('#textarea').focus(); await inline.locator('.underline').waitFor();
+  assert.equal((await sends()).length, 1);
 });
 test('a companion that cannot receive writing is shown on the badge, not as an idle one, and recovers once it is updated', async () => {
   await page.evaluate(() => { fixture.worker.legacy = true; }); await type();
