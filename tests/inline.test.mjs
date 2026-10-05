@@ -88,6 +88,17 @@ test('typing cancels in-flight work, drops late output, and explicit retry uses 
   await open(); await inline.button('Check now').click(); await result();
   assert.deepEqual(JSON.parse((await sends()).at(-1).params.messages[0].text), {text: 'He go to work. Now.'});
 });
+test('a companion that cannot receive writing is shown on the badge, not as an idle one, and recovers once it is updated', async () => {
+  await page.evaluate(() => { fixture.worker.legacy = true; }); await type();
+  await inline.locator('.badge').waitFor(el => el.dataset.state === 'attention');
+  assert.equal(await inline.locator('.badge').evaluate(el => el.dataset.tip), 'Needs attention');
+  assert.match(await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label')), /cannot enforce the subscription sign-in policy/);
+  assert.equal((await sends()).length, 0, 'nothing was sent to the provider');
+  // Seatline is updated and restarted; Check now works again without reloading the page.
+  await page.evaluate(() => { fixture.worker.legacy = false; fixture.worker.ports[0].disconnect(); });
+  await open(); await inline.button('Check now').click(); await result();
+  assert.equal(await inline.locator('.badge').evaluate(el => el.dataset.state), 'fix');
+});
 test('dictionary, UK variant, global pause and reset change the production checking path', async () => {
   await page.evaluate(() => { fixture.worker.answer = '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"spelling","explanation":"Synthetic spelling example"}]}'; });
   await type(); await result(); await open(); await inline.button('Add to dictionary').click();

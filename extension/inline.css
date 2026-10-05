@@ -8,6 +8,7 @@
 .badge { position: fixed; pointer-events: auto; width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: var(--ll-pill); border-color: var(--ll-line); background: var(--ll-bg); color: var(--ll-brand); box-shadow: var(--ll-shadow-1); }
 .badge:hover:not(:disabled) { background: var(--ll-brand-soft); border-color: var(--ll-brand); }
 .badge[data-state="fix"] { color: var(--ll-fix-ink); } .badge[data-state="clarity"] { color: var(--ll-clear-ink); } .badge[data-state="rewrite"] { color: var(--ll-style-ink); }
+.badge[data-state="attention"] { color: var(--ll-warn-ink); background: var(--ll-warn-soft); border-color: var(--ll-warn); }
 .badge .count { position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ll-fix); color: var(--ll-on-accent); font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; box-shadow: 0 0 0 2px var(--ll-bg); }
 .badge[data-state="clarity"] .count { background: var(--ll-clear); }
 .badge .ring { position: absolute; inset: -4px; border: 2px solid transparent; border-radius: var(--ll-pill); pointer-events: none; }

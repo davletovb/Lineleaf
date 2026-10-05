@@ -56,7 +56,7 @@ const TYPES = {'.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascrip
 const stub = ({sites = [], paused = false, automatic = false, clarity = false, url = 'https://mail.example.com/compose'} = {}) => `
   const settings = {variant: 'US', model: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
   window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type}) {
-      if (type === 'check-connection') return {ok: true, value: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', tool_isolation: true}};
+      if (type === 'check-connection') return {ok: true, value: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', tool_isolation: true, update_required: window.outdated === true}};
       return {ok: true, value: settings};
     }}, tabs: {async query() { return [{id: 1, url: ${JSON.stringify(url)}, incognito: false}]; }}, permissions: {async request() { return true; }}};`;
 async function extensionPage(file, options = {}, {scheme = 'light', viewport = {width: 360, height: 640}, reducedMotion = 'no-preference'} = {}) {
@@ -119,6 +119,17 @@ test('settings: every control is named, the side navigation follows the section,
   await context.close();
   const empty = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}}); await settled(empty.page, '#authorize');
   assert.match(await empty.page.locator('#sites li.empty').textContent(), /No sites enabled yet/); await empty.context.close();
+});
+test('Check Seatline does not call a companion that cannot receive writing ready, in settings or in the toolbar menu', async () => {
+  for (const [file, options] of [['options.html', {}], ['popup.html', {sites: ['https://mail.example.com']}]]) {
+    const {page, context} = await extensionPage(file, options, {viewport: {width: 1100, height: 700}});
+    await settled(page, file === 'options.html' ? '#authorize' : '#state');
+    await page.evaluate(() => { window.outdated = true; });
+    await page.getByRole('button', {name: 'Check Seatline'}).click();
+    await page.waitForFunction(() => /seatline-companion install/.test(document.querySelector('#status').textContent));
+    assert.match(await page.locator('#status').textContent(), /^Codex: available, authenticated, subscription\. .*nothing was sent/);
+    await context.close();
+  }
 });
 test('settings: the authorization command can be copied', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
