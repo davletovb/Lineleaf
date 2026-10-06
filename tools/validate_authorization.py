@@ -32,11 +32,9 @@ def connection_closed(connection, timeout=3):
 def protocol_turn(text):
     # Authorization/coexistence fixtures exercise the common protocol on both
     # the current and audited legacy companion. Production writing/benchmarks
-    # send an explicit speed and require its capability; these generic probes
+    # require the capability for explicit speed choices; these generic probes
     # deliberately retain the old omitted-tier schema.
-    turn = writing_turn(text)
-    turn.pop("service_tier")
-    return turn
+    return writing_turn(text, speed="")
 
 
 def probe_turns(connection, directory, fake_provider, checks, diagnostics):

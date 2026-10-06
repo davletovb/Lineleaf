@@ -54,7 +54,7 @@ const CONTRAST = '(' + function (el) {
 }.toString() + ')';
 const TYPES = {'.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascript', '.js': 'text/javascript', '.png': 'image/png', '.svg': 'image/svg+xml'};
 const stub = ({sites = [], paused = false, automatic = false, clarity = false, url = 'https://mail.example.com/compose'} = {}) => `
-  const settings = {variant: 'US', model: '', effort: 'low', speed: 'standard', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
+  const settings = {variant: 'US', model: '', effort: 'low', speed: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
   window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type, payload}) {
       if (type === 'save-settings') Object.assign(settings, payload.changes);
       if (type === 'get-check-timing') return {ok: true, value: window.lastTiming ?? null};
@@ -144,7 +144,7 @@ test('settings: saved model, effort and speed stay together and timings label th
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
   await settled(page, '#authorize');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'low');
-  assert.equal(await page.getByLabel('Speed', {exact: true}).inputValue(), 'standard');
+  assert.equal(await page.getByLabel('Speed', {exact: true}).inputValue(), '');
   const model = await page.locator('#model').boundingBox(), effort = await page.locator('#effort').boundingBox();
   assert.equal(Math.round(model.y), Math.round(effort.y));
   await page.locator('#model').fill('gpt-6-luna'); await page.getByLabel('Reasoning effort').selectOption('xhigh');
@@ -153,7 +153,8 @@ test('settings: saved model, effort and speed stay together and timings label th
   await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'xhigh');
   assert.equal(await page.getByLabel('Speed', {exact: true}).inputValue(), 'fast');
-  assert.match(await page.locator('#speed-help').textContent(), /2\.5×/);
+  assert.match(await page.locator('#speed-help').textContent(), /more subscription allowance/);
+  assert.equal(await page.getByRole('link', {name: 'current Codex speed and usage'}).getAttribute('href'), 'https://learn.chatgpt.com/docs/agent-configuration/speed');
   await page.evaluate(() => { window.lastTiming = {kind: 'manual', mode: 'proofread', requested_model: 'gpt-6-luna', reasoning_effort: 'xhigh', requested_service_tier: 'fast', outcome: 'completed', total_ms: 3420, readiness_ms: 8, finish_ms: 17}; });
   await page.getByText('Last manual check timing', {exact: true}).click(); await page.getByRole('button', {name: 'Refresh timing'}).click();
   await page.waitForFunction(() => document.querySelector('#timing-summary').textContent.includes('gpt-6-luna'));
@@ -165,6 +166,17 @@ test('settings: saved model, effort and speed stay together and timings label th
   await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#speed').value === 'standard');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'xhigh');
   assert.equal(await page.locator('#model').inputValue(), 'gpt-6-luna');
+  await page.getByLabel('Speed', {exact: true}).selectOption('');
+  await page.getByRole('button', {name: 'Save preferences'}).click();
+  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#speed').value === '');
+  assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'xhigh');
+  assert.equal(await page.locator('#model').inputValue(), 'gpt-6-luna');
+  await page.evaluate(() => { window.lastTiming = {version: 2, kind: 'manual', mode: 'proofread', requested_service_tier: null, attempts: 1, outcome: 'completed'}; });
+  await page.getByRole('button', {name: 'Refresh timing'}).click();
+  await page.waitForFunction(() => document.querySelector('#timing-summary').textContent.includes('provider default speed'));
+  await page.evaluate(() => { window.lastTiming = {version: 1, kind: 'manual', mode: 'proofread', attempts: 1, outcome: 'completed'}; });
+  await page.getByRole('button', {name: 'Refresh timing'}).click();
+  await page.waitForFunction(() => document.querySelector('#timing-summary').textContent.includes('speed unavailable'));
   await context.close();
 });
 test('keyboard focus is visible on switches and buttons, and reduced motion removes the animations', async () => {

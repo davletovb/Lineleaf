@@ -298,17 +298,21 @@ test('evaluation evidence hashes explicit effort and keeps historical configurat
   assert.throws(() => validateRun(corpus, run));
 });
 test('evaluation fixes speed for the whole run and binds it to the evidence hash', async () => {
-  for (const speed of ['standard', 'fast']) {
+  for (const speed of ['', 'standard', 'fast']) {
     const settings = {...config, model: 'gpt-6-luna', effort: 'xhigh', speed}, turns = [];
     const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
       const c = corpus.cases[turns.length];
       return {async request(method, turn) {
-        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}};
+        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, ...(speed ? {service_tier: true} : {})}};
         turns.push(turn); return JSON.stringify(c.proposal);
       }, close() {}};
     }});
     assert.equal(turns.length, corpus.cases.length);
-    for (const turn of turns) { assert.equal(turn.service_tier, speed); assert.equal(turn.reasoning_effort, 'xhigh'); }
+    for (const turn of turns) {
+      if (speed) assert.equal(turn.service_tier, speed);
+      else assert.equal(Object.hasOwn(turn, 'service_tier'), false);
+      assert.equal(turn.reasoning_effort, 'xhigh');
+    }
     assert.equal(run.configuration.speed, speed); validateRun(corpus, run);
     run.configuration.speed = speed === 'fast' ? 'standard' : 'fast';
     assert.throws(() => validateRun(corpus, run));

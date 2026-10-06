@@ -104,26 +104,28 @@ test('saved effort is bounded and applies to every writing mode; provider defaul
   rejects(() => candidates(output([correction()]), 'go go', 'proofread')); // Compact responses still need unique source matches.
 });
 test('speed choices apply to every writing mode without changing the model, effort or prompt', () => {
-  assert.equal(preferences(null).speed, 'standard');
-  for (const speed of ['standard', 'fast']) {
+  assert.equal(preferences(null).speed, '');
+  for (const speed of ['', 'standard', 'fast']) {
     const settings = preferences({model: 'gpt-6-luna', effort: 'xhigh', speed});
     for (const mode of ['proofread', 'clarity', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']) {
       const turn = writingTurn('He go.', mode, settings);
-      assert.equal(turn.service_tier, speed);
+      if (speed) assert.equal(turn.service_tier, speed);
+      else assert.equal(Object.hasOwn(turn, 'service_tier'), false);
       assert.equal(turn.model, 'gpt-6-luna'); assert.equal(turn.reasoning_effort, 'xhigh');
-      const other = writingTurn('He go.', mode, preferences({...settings, speed: speed === 'fast' ? 'standard' : 'fast'}));
-      assert.deepEqual({...turn, service_tier: other.service_tier}, other);
+      const {service_tier: _tier, ...body} = turn;
+      const {service_tier: _otherTier, ...otherBody} = writingTurn('He go.', mode, preferences({...settings, speed: 'standard'}));
+      assert.deepEqual(body, otherBody);
     }
   }
-  for (const speed of ['', 'priority', 'fast";run-command', null, true]) assert.equal(preferences({speed}).speed, 'standard');
+  for (const speed of ['priority', 'fast";run-command', null, true]) assert.equal(preferences({speed}).speed, '');
 });
 test('saved speed survives reload, rejects stale/per-request overrides and records the requested tier', async () => {
   const f = fakeChrome(); installController(f.api);
   assert.equal((await f.rpc('save-settings', {changes: {model: 'gpt-6-luna', effort: 'xhigh'}, expected: {model: '', effort: 'low'}, dictionary: {add: [], remove: []}})).ok, true);
   const save = (speed, expected) => f.rpc('save-settings', {changes: {speed}, expected: {speed: expected}, dictionary: {add: [], remove: []}});
-  const saved = await save('fast', 'standard'); assert.equal(saved.ok, true);
+  const saved = await save('fast', ''); assert.equal(saved.ok, true);
   assert.equal(saved.value.effort, 'xhigh'); assert.equal(saved.value.model, 'gpt-6-luna');
-  assert.equal((await save('standard', 'standard')).code, 'SETTINGS_CHANGED');
+  assert.equal((await save('standard', '')).code, 'SETTINGS_CHANGED');
   assert.equal((await save('priority', 'fast')).code, 'INVALID_REQUEST');
   const restarted = fakeChrome(); restarted.api.storage.local = f.api.storage.local; installController(restarted.api);
   assert.equal((await restarted.rpc('get-settings')).value.speed, 'fast');
@@ -143,6 +145,12 @@ test('saved speed survives reload, rejects stale/per-request overrides and recor
   const next = restarted.connect(); next.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
   await waitFor(() => next.received.some(x => x.type === 'result'));
   assert.equal(restarted.turns.at(-1).params.service_tier, 'standard'); assert.equal(restarted.turns.at(-1).params.reasoning_effort, 'xhigh');
+  assert.equal((await restarted.rpc('save-settings', {changes: {speed: ''}, expected: {speed: 'standard'}, dictionary: {add: [], remove: []}})).ok, true);
+  const inherited = restarted.connect(); inherited.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+  await waitFor(() => inherited.received.some(x => x.type === 'result'));
+  assert.equal(Object.hasOwn(restarted.turns.at(-1).params, 'service_tier'), false);
+  assert.equal(restarted.turns.at(-1).params.reasoning_effort, 'xhigh');
+  await waitFor(() => restarted.sessionData.lastCheckTiming?.requested_service_tier === null);
 });
 test('substring ambiguity keeps the original whole-response refusal; explicit context preserves the valid edits', () => {
   const source = 'He go to work. I think the weather is nice, teh end.';
@@ -242,7 +250,7 @@ test('settings permit only exact HTTP(S) origins and safe provider models', () =
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
   assert.equal(sitePattern('https://writing.test:8443'), 'https://writing.test/*');
   assert.deepEqual(preferences({provider: 'other', model: 'bad\nmodel', sites: ['https://writing.test', 'https://writing.test/path', 'file:///tmp']}),
-    {provider: 'codex', model: '', effort: 'low', speed: 'standard', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: ['https://writing.test']});
+    {provider: 'codex', model: '', effort: 'low', speed: '', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: ['https://writing.test']});
 });
 test('packaged manifest has optional site access, no automatic/all-site content script or exposed resources', async () => {
   const m = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url)));

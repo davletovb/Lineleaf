@@ -311,7 +311,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
       stopPreparation();
       try { // The user asked: always a fresh probe, which later checks may then reuse. A companion that cannot receive writing is not "ready".
         const {status, modern} = await readiness(native(), undefined, READINESS.fresh);
-        return {...statusView(status), update_required: !modern || outdated || Boolean((settings.effort && status?.capabilities?.reasoning_effort !== true) || status?.capabilities?.service_tier !== true)};
+        return {...statusView(status), update_required: !modern || outdated || Boolean((settings.effort && status?.capabilities?.reasoning_effort !== true) || (settings.speed && status?.capabilities?.service_tier !== true))};
       } finally { diagnostic = false; idleLink(); }
     }
     throw new LineleafError('INVALID_REQUEST');

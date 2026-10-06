@@ -31,9 +31,12 @@ class Fragmented(io.BytesIO):
 
 class FramingTests(unittest.TestCase):
     def test_benchmark_speed_preserves_effort_and_records_the_requested_tier(self):
-        for speed in ("standard", "fast"):
+        for speed in ("", "standard", "fast"):
             turn = writing_turn("He go.", model="gpt-6-luna", effort="xhigh", speed=speed)
-            self.assertEqual(turn["service_tier"], speed)
+            if speed:
+                self.assertEqual(turn["service_tier"], speed)
+            else:
+                self.assertNotIn("service_tier", turn)
             self.assertEqual(turn["reasoning_effort"], "xhigh")
             self.assertEqual(turn["model"], "gpt-6-luna")
         with self.assertRaises(ValueError):
@@ -42,6 +45,38 @@ class FramingTests(unittest.TestCase):
         self.assertEqual(report["requested_service_tier"], "fast")
         self.assertEqual(report["reasoning_effort"], "xhigh")
         self.assertEqual(report["status"], "completed")
+
+    def test_benchmark_only_requires_tier_forwarding_for_an_explicit_speed(self):
+        sends = []
+        def tierless(command, **kwargs):
+            peer = NativeConnection(command, **kwargs)
+            collect, start = peer.collect, peer.start
+            def collect_without_tier(request, **kwargs):
+                events = collect(request, **kwargs)
+                for event in events:
+                    if event["type"] == "status":
+                        event["status"]["capabilities"].pop("service_tier", None)
+                return events
+            def record_start(provider, method, params=None):
+                if method in ("send", "send_ready_with_policy"):
+                    sends.append(params)
+                return start(provider, method, params)
+            peer.collect, peer.start = collect_without_tier, record_start
+            return peer
+        with patch.object(benchmark_provider, "NativeConnection", tierless):
+            inherited = run_benchmark(FIXTURE, fixture=True, model="gpt-6-luna", effort="xhigh")
+            self.assertEqual(inherited["status"], "completed")
+            self.assertIsNone(inherited["requested_service_tier"])
+            self.assertTrue(sends)
+            for turn in sends:
+                self.assertNotIn("service_tier", turn)
+                self.assertEqual(turn["reasoning_effort"], "xhigh")
+            sends.clear()
+            for speed in ("standard", "fast"):
+                explicit = run_benchmark(FIXTURE, fixture=True, effort="xhigh", speed=speed)
+                self.assertEqual(explicit["status"], "blocked")
+                self.assertEqual(explicit["reason"], "COMPANION_UPDATE_REQUIRED")
+                self.assertEqual(sends, [])
 
     def test_benchmark_effort_is_explicit_bounded_and_absent_for_provider_default(self):
         self.assertNotIn("reasoning_effort", writing_turn("He go."))

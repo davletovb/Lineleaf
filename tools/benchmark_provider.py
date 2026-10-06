@@ -33,10 +33,10 @@ SYSTEM = (
 # Seatline's readiness API (additive, protocol 1): a verified sign-in result may be reused for this long (its own ceiling is 30 s).
 READINESS_CACHED = {"mode": "cached", "max_age_ms": 30000}
 EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
-SPEEDS = ("standard", "fast")
+SPEEDS = ("", "standard", "fast")
 
 
-def writing_turn(text, model=None, check_sign_in=True, effort=None, speed="standard"):
+def writing_turn(text, model=None, check_sign_in=True, effort=None, speed=""):
     if not isinstance(text, str) or len(text) > 2000 or "\0" in text:
         raise ValueError("writing input exceeds the bounded text contract")
     if model is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}", model):
@@ -47,7 +47,7 @@ def writing_turn(text, model=None, check_sign_in=True, effort=None, speed="stand
         raise ValueError("invalid speed")
     return {"system": SYSTEM, "messages": [{"role": "user", "text": json.dumps({"text": text}, ensure_ascii=False)}],
             "model": model, "tools": "none", "session": "ephemeral", "continuation": None,
-            **({"reasoning_effort": effort} if effort else {}), "service_tier": speed,
+            **({"reasoning_effort": effort} if effort else {}), **({"service_tier": speed} if speed else {}),
             "cleanup_group": None, "check_sign_in": check_sign_in}
 
 
@@ -132,7 +132,7 @@ def launched(log, before):
     return {key: now[key] - before[key] for key in now}
 
 
-def provider_ready(connection, provider, timeout, report, readiness="legacy", effort=None):
+def provider_ready(connection, provider, timeout, report, readiness="legacy", effort=None, speed=""):
     method, params = ("status", None) if readiness == "legacy" else ("readiness", READINESS_CACHED)
     events = connection.collect(connection.start(provider, method, params), timeout=min(timeout, 30))
     state = next((x.get("status") for x in events if x["type"] == "status"), None)
@@ -148,12 +148,12 @@ def provider_ready(connection, provider, timeout, report, readiness="legacy", ef
         return "SUBSCRIPTION_SIGN_IN_REQUIRED"
     if not isinstance(state.get("capabilities"), dict) or state["capabilities"].get("tool_isolation") is not True:
         return "TOOL_ISOLATION_UNAVAILABLE"
-    if state["capabilities"].get("service_tier") is not True or (effort and state["capabilities"].get("reasoning_effort") is not True):
+    if (speed and state["capabilities"].get("service_tier") is not True) or (effort and state["capabilities"].get("reasoning_effort") is not True):
         return "COMPANION_UPDATE_REQUIRED"
     return None
 
 
-def start_turn(connection, provider, source, model, readiness, effort=None, speed="standard"):
+def start_turn(connection, provider, source, model, readiness, effort=None, speed=""):
     if readiness == "legacy":
         return connection.start(provider, "send", writing_turn(source, model, effort=effort, speed=speed))
     # Sent under the readiness just checked, so Seatline repeats no sign-in probe.
@@ -161,7 +161,7 @@ def start_turn(connection, provider, source, model, readiness, effort=None, spee
                                                       "freshness": READINESS_CACHED, "allowed_sign_in": ["subscription"]})
 
 
-def measure_turn(connection, provider, model, case, repetition, phase, timeout, readiness="legacy", log=None, effort=None, speed="standard"):
+def measure_turn(connection, provider, model, case, repetition, phase, timeout, readiness="legacy", log=None, effort=None, speed=""):
     case_id, source = case
     before = log.count() if log else None
     started = time.monotonic()
@@ -243,7 +243,7 @@ def finalize(report):
 
 
 def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=30, cancel_after=0.1, fixture=False,
-                  readiness="legacy", launch_log=None, effort=None, speed="standard"):
+                  readiness="legacy", launch_log=None, effort=None, speed=""):
     """`readiness`: "legacy" asks `status` and sends with `send` (Seatline probes sign-in again inside every turn); "cached" asks
     `readiness` (reused for up to 30 s) and sends with `send_ready_with_policy`. `launch_log`: a fake provider's launch record, to count launches."""
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
@@ -253,7 +253,7 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
         raise ValueError("invalid speed")
     log = LaunchLog(launch_log) if launch_log else None
     report = {"status": "blocked", "kind": "fixture" if fixture else "live",
-              "seatline_revision": os.environ.get("SEATLINE_REVISION") or contract["revision"], "provider": provider, "model": model, "reasoning_effort": effort, "requested_service_tier": speed, "readiness": readiness,
+              "seatline_revision": os.environ.get("SEATLINE_REVISION") or contract["revision"], "provider": provider, "model": model, "reasoning_effort": effort, "requested_service_tier": speed or None, "readiness": readiness,
               "samples_per_case": samples, "measurements": [], "connections_opened": 0,
               "warming": "Fresh client connection/process per repetition; first vs subsequent is not model cold vs warm.",
               "case_order": "Rotates each repetition to avoid always measuring the same first case.",
@@ -264,7 +264,7 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
             with NativeConnection(command, timeout=min(timeout, 10)) as connection:
                 report["connections_opened"] += 1
                 before = log.count() if log else None
-                reason = provider_ready(connection, provider, timeout, report, readiness, effort)
+                reason = provider_ready(connection, provider, timeout, report, readiness, effort, speed)
                 if log:
                     report["readiness_launches"] = [*report.get("readiness_launches", []), launched(log, before)]
                 if reason:
@@ -309,7 +309,7 @@ def main():
     parser.add_argument("--provider", choices=["codex", "claude", "gemini", "grok"], default="codex")
     parser.add_argument("--model")
     parser.add_argument("--effort", choices=EFFORTS, help="Reasoning budget for the whole run; omit to use the provider default")
-    parser.add_argument("--speed", choices=SPEEDS, default="standard", help="Requested processing speed for the whole run; defaults to Standard")
+    parser.add_argument("--speed", choices=SPEEDS, default="", help="Requested processing speed for the whole run; omit or pass an empty string for Provider default")
     parser.add_argument("--samples", type=int, choices=range(1, 11), default=1)
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--cancel-after", type=float, default=0.1)

@@ -1,4 +1,4 @@
-// One check's phase durations. Only static labels, requested model/effort and
+// One check's phase durations. Only static labels, requested model/effort/speed and
 // numbers leave this object; drafts, answers, origins and provider errors do not.
 export function checkTiming(mode, kind, clock = () => performance.now()) {
   const began = clock(), marks = {};
@@ -7,7 +7,7 @@ export function checkTiming(mode, kind, clock = () => performance.now()) {
   return {
     readiness(ms) { readiness += Math.max(0, ms); },
     sending(settings) {
-      attempts++; model = settings.model || null; effort = settings.effort || null; serviceTier = settings.speed; sendAt = clock();
+      attempts++; model = settings.model || null; effort = settings.effort || null; serviceTier = settings.speed || null; sendAt = clock();
       for (const key of Object.keys(marks)) delete marks[key];
     },
     event(type) {

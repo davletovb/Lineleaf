@@ -6,8 +6,10 @@ let loaded, lastTiming;
 async function loadTiming() {
   lastTiming = await command('get-check-timing');
   query('#timing-phases').replaceChildren(); query('#copy-timing').disabled = !lastTiming;
+  const speed = lastTiming?.requested_service_tier ? `requested ${lastTiming.requested_service_tier} speed`
+    : Object.hasOwn(lastTiming ?? {}, 'requested_service_tier') && lastTiming.attempts > 0 ? 'provider default speed' : 'speed unavailable';
   query('#timing-summary').textContent = lastTiming
-    ? `${lastTiming.kind} ${lastTiming.mode} · ${lastTiming.requested_model ?? 'provider default model'} · ${lastTiming.reasoning_effort ?? 'provider default effort'} · ${lastTiming.requested_service_tier ? `requested ${lastTiming.requested_service_tier} speed` : 'speed unavailable'} · ${lastTiming.outcome}`
+    ? `${lastTiming.kind} ${lastTiming.mode} · ${lastTiming.requested_model ?? 'provider default model'} · ${lastTiming.reasoning_effort ?? 'provider default effort'} · ${speed} · ${lastTiming.outcome}`
     : 'No manual check recorded in this browser session.';
   if (!lastTiming) return;
   for (const [key, label] of [['readiness_ms', 'Readiness'], ['launch_wait_ms', 'Wait for launch'], ['provider_init_ms', 'Startup'], ['answer_ms', 'Answer'], ['finish_ms', 'Completion'], ['validation_ms', 'Validation'], ['total_ms', 'Total']]) {
