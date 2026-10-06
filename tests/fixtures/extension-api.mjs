@@ -3,7 +3,7 @@ export class Event {
   addListener(listener) { this.listeners.push(listener); }
   emit(...args) { for (const listener of [...this.listeners]) listener(...args); }
 }
-export const READY = {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true}};
+export const READY = {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}};
 // A turn reached the companion, by either method; a provider probe did.
 export const sent = m => m.method === 'send' || m.method === 'send_ready_with_policy';
 export const probed = m => m.method === 'status' || m.method === 'readiness';

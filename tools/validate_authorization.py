@@ -29,9 +29,17 @@ def connection_closed(connection, timeout=3):
     return False
 
 
+def protocol_turn(text):
+    # Authorization/coexistence fixtures exercise the common protocol on both
+    # the current and audited legacy companion. Production writing/benchmarks
+    # require the capability for explicit speed choices; these generic probes
+    # deliberately retain the old omitted-tier schema.
+    return writing_turn(text, speed="")
+
+
 def probe_turns(connection, directory, fake_provider, checks, diagnostics):
     # The discovery override is an empty directory: no user provider executable/account can run.
-    turn = writing_turn("Synthetic schema probe.")
+    turn = protocol_turn("Synthetic schema probe.")
     missing = connection.collect(connection.start("codex", "send", turn), timeout=5)[-1]
     record_terminal(diagnostics, "missing_executable", missing)
     checks["send_schema_missing_executable"] = missing["type"] == "failed" and missing.get("reason") == "EXECUTABLE_NOT_FOUND"

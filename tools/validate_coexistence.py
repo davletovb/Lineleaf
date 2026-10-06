@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import time
 
-from tools.benchmark_provider import writing_turn
+from tools.validate_authorization import protocol_turn
 from tools.seatline_wire import ProtocolError, TERMINAL, EVENTS
 
 CHECKS = ('concurrent_same_id_routing', 'no_cross_app_output', 'writing_turns_emit_no_persistent_session',
@@ -38,13 +38,13 @@ def shared_probes(first, second, providers, other_providers, fake_provider, chec
     left, right = 'lineleaf-synthetic-only-42', 'other-consumer-synthetic-only-73'
     common = 'identical-client-request-id'
     for client, marker in ((first, left), (second, right)):
-        client.send({'id': common, 'provider': 'codex', 'method': 'send', 'params': writing_turn(marker)})
+        client.send({'id': common, 'provider': 'codex', 'method': 'send', 'params': protocol_turn(marker)})
     a, b = first.collect(common, timeout=8), second.collect(common, timeout=8)
     checks['concurrent_same_id_routing'] = a[-1]['type'] == b[-1]['type'] == 'completed'
     checks['no_cross_app_output'] = left in answer(a) and right not in answer(a) and right in answer(b) and left not in answer(b)
     checks['writing_turns_emit_no_persistent_session'] = not any(e['type'] in ('session', 'session_lost') for e in a + b)
 
-    persistent = {**writing_turn(right), 'session': 'persistent'}
+    persistent = {**protocol_turn(right), 'session': 'persistent'}
     owned = second.collect(second.start('codex', 'send', persistent), timeout=8)
     token = next((e.get('handle') for e in owned if e['type'] == 'session'), None)
     if not isinstance(token, str):
@@ -60,7 +60,7 @@ def shared_probes(first, second, providers, other_providers, fake_provider, chec
         (directory / 'codex-scenario').write_text('login=signed-in\nexec=goes-quiet\n')
     target = 'identical-cancel-target'
     for client, marker in ((first, left), (second, right)):
-        client.send({'id': target, 'provider': 'codex', 'method': 'send', 'params': writing_turn(marker)})
+        client.send({'id': target, 'provider': 'codex', 'method': 'send', 'params': protocol_turn(marker)})
     events_until_started(first, target); events_until_started(second, target)
     first.cancel(target)
     checks['own_cancel_stops_target'] = first.collect(target, timeout=8)[-1]['type'] == 'stopped'
@@ -88,19 +88,19 @@ def shared_probes(first, second, providers, other_providers, fake_provider, chec
         if sum(len(v) for v in states.values()) > 1024:
             raise ProtocolError('queue event bound')
     for target in targets[:2]:
-        first.send({'id': target, 'provider': 'codex', 'method': 'send', 'params': writing_turn(left)})
+        first.send({'id': target, 'provider': 'codex', 'method': 'send', 'params': protocol_turn(left)})
         deadline = time.monotonic() + 5
         while not any(e['type'] == 'started' for e in states[target]):
             next_event(deadline)
     for target in targets[2:]:
-        first.send({'id': target, 'provider': 'codex', 'method': 'send', 'params': writing_turn(left)})
+        first.send({'id': target, 'provider': 'codex', 'method': 'send', 'params': protocol_turn(left)})
     deadline = time.monotonic() + 5
     while sum(any(e.get('reason') == 'QUEUE_FULL' for e in es) for es in states.values()) < 2:
         next_event(deadline)
     checks['app_queue_rejects_overflow'] = True
     checks['running_turn_cap_observed'] = sum(any(e['type'] == 'started' for e in es) for es in states.values()) == 2
     (other_providers / 'codex-scenario').write_text('login=signed-in\nexec=answers\n')
-    other_request = second.start('codex', 'send', writing_turn(right))
+    other_request = second.start('codex', 'send', protocol_turn(right))
     for target in targets:
         first.cancel(target)
     deadline = time.monotonic() + 10
@@ -110,7 +110,7 @@ def shared_probes(first, second, providers, other_providers, fake_provider, chec
     other = second.collect(other_request, timeout=8)
     checks['other_consumer_progress_after_pressure'] = other[-1]['type'] == 'completed' and right in answer(other) and left not in answer(other)
     (providers / 'codex-scenario').write_text('login=signed-in\nexec=answers\n')
-    fresh = first.collect(first.start('codex', 'send', writing_turn(left)), timeout=8)
+    fresh = first.collect(first.start('codex', 'send', protocol_turn(left)), timeout=8)
     checks['lineleaf_recovers_without_replay'] = fresh[-1]['type'] == 'completed' and left in answer(fresh) and right not in answer(fresh)
 
 

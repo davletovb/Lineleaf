@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/davletovb/seatline",
-  "revision": "59c39234c09b1f44fb52d5117a15896075196fef",
+  "revision": "189e860235deb3933fed788d6e98451ed7ea198b",
   "minimum_revision": "59c39234c09b1f44fb52d5117a15896075196fef",
   "legacy_revision": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
   "version": "0.1.0-dev",
@@ -15,5 +15,5 @@
   "cancel_target_location": "top-level",
   "events": ["launched", "started", "activity", "delta", "session", "session_lost", "usage", "source", "status", "completed", "stopped", "failed"],
   "limits": {"running": 8, "running_per_app": 2, "running_per_provider": 2, "running_limits_per_class": true, "readiness_running": 2, "cleanup_running": 2, "queue_timeout_ms": 30000, "queued": 64, "queued_per_app": 8, "connections": 32, "sessions_per_app": 2000, "sessions_total": 10000, "max_turn_seconds": 900},
-  "writing_policy": {"reasoning_effort": {"setting": "effort", "default": "low", "provider_default": "omitted", "capability": "reasoning_effort"}, "tools": "none", "session": "ephemeral", "continuation": null, "check_sign_in": {"send": true, "send_ready_with_policy": false}, "allowed_sign_in": ["subscription"], "readiness": {"cached_max_age_ms": 30000, "since_revision": "57737e660480a8838e84c4ef461de404dcac248d"}}
+  "writing_policy": {"reasoning_effort": {"setting": "effort", "default": "low", "provider_default": "omitted", "capability": "reasoning_effort"}, "service_tier": {"setting": "speed", "default": "", "provider_default": "omitted", "values": ["", "standard", "fast"], "capability": "service_tier", "capability_required": "explicit"}, "tools": "none", "session": "ephemeral", "continuation": null, "check_sign_in": {"send": true, "send_ready_with_policy": false}, "allowed_sign_in": ["subscription"], "readiness": {"cached_max_age_ms": 30000, "since_revision": "57737e660480a8838e84c4ef461de404dcac248d"}}
 }

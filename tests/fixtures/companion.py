@@ -19,7 +19,7 @@ parser.add_argument("--hold-turn", type=int, help="Keep this generation running 
 args = parser.parse_args()
 sends = 0
 STATUS = {"availability": "available", "authentication": "authenticated", "sign_in": "subscription",
-          "capabilities": {"tool_isolation": True}, "models": []}
+          "capabilities": {"tool_isolation": True, "reasoning_effort": True, "service_tier": True}, "models": []}
 
 
 def emit(value):

@@ -12,7 +12,16 @@ python3 -m tools.benchmark_provider --companion /path/to/seatline-companion --pr
 
 Pass the same `--effort` to the benchmark and quality evaluator when comparing runs. The benchmark keeps its historical omitted-effort behavior (Provider default); the evaluator defaults to Low. Both record the selected budget for the whole run, so omission is not evidence of an equivalent comparison.
 
-The harness first requires available/authenticated/subscription status and tool isolation. An API-key, cloud, unknown, unavailable, or unclassified configuration is refused before writing. Each turn uses no tools, ephemeral context, and no continuation. Text is synthetic, limited to 2,000 characters, and wrapped as data. Six cases cover agreement, spelling, punctuation, correct text, facts/negation, and Unicode.
+`--speed standard|fast` selects an explicit requested tier for the entire run. Omission or `--speed ""` uses Provider default, matching Settings and omitting the tier override; its report records `requested_service_tier: null` and cannot establish which inherited tier was served. Keep the same model and `xhigh` when testing Fast against Standard, for example:
+
+```sh
+python3 -m tools.benchmark_provider --companion /path/to/seatline-companion --model gpt-6-luna --effort xhigh --speed standard --readiness cached --samples 5 --timeout 60 > standard.json
+python3 -m tools.benchmark_provider --companion /path/to/seatline-companion --model gpt-6-luna --effort xhigh --speed fast --readiness cached --samples 5 --timeout 60 > fast.json
+```
+
+Run only after confirming the installed Codex/model/account supports the choice. The report's `requested_service_tier` does not confirm which tier the backend served. Fast keeps the reasoning budget and may use more subscription allowance; check the [current official speed and usage guide](https://learn.chatgpt.com/docs/agent-configuration/speed) for the applicable multiplier. It is not a speed guarantee. Use the quality evaluator with matching model/effort/speed to compare recall and precision. These benchmark timings alone cannot establish equal error detection.
+
+The harness first requires available/authenticated/subscription status, tool isolation, forwarding support for an explicit tier and any explicit reasoning effort. An API-key, cloud, unknown, unavailable, or unclassified configuration is refused before writing. Each turn uses no tools, ephemeral context, and no continuation. Text is synthetic, limited to 2,000 characters, and wrapped as data. Six cases cover agreement, spelling, punctuation, correct text, facts/negation, and Unicode.
 
 Reports contain case IDs, connection/repetition IDs, model selection, first-delta/completion milliseconds, terminal states, structured validity, cancellation confirmation, and observed rate-limit failure. `summary.phases.first_request` and `summary.phases.subsequent_request` each contain completion and first-delta p50/p95; no latency percentile pools the phases. They exclude prompts, drafts, deltas, credentials, and raw provider errors. Metrics are structural/source-match reliability, not a grammatical-quality score. A syntactically valid empty correction set can still miss an error; human quality review belongs to E-01.
 
