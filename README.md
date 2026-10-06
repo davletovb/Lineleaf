@@ -13,6 +13,8 @@ Lineleaf is a browser writing assistant designed to help with grammar, spelling,
 - A personal dictionary, English variants, and controls for each site.
 - Conservative edits that preserve your intent and authorship.
 
+Choose Codex, Claude Code, Gemini through Antigravity, or Grok in Settings, using the corresponding installed Seatline adapter. Provider integrations remain development candidates pending live validation.
+
 Chrome desktop is the initial target. Support for individual websites and editors will be established through testing.
 
 ## Project status
@@ -22,7 +24,7 @@ The repository foundation and planning documents are in place. The first milesto
 ## Start here
 
 - [Product framework](docs/product/lineleaf-product-framework.md) — scope, experience, privacy, and quality targets.
-- [Implementation tracker](docs/product/lineleaf-implementation-tracker.md) — 21 work items, dependencies, and acceptance criteria.
+- [Implementation tracker](docs/product/lineleaf-implementation-tracker.md) — work items, dependencies, and acceptance criteria.
 - [Seatline integration](docs/architecture/seatline-integration.md) — ownership, transport, and editing requirements.
 - [Contributing](CONTRIBUTING.md) — how to work on a tracker item.
 

@@ -30,14 +30,22 @@
         <div class="content">
           <section class="card-section" id="writing" aria-labelledby="writing-title">
             <h2 id="writing-title">Writing</h2>
-            <p class="lede">How Lineleaf spells, and how Codex answers your checks.</p>
+            <p class="lede">How Lineleaf spells, and how your selected provider answers your checks.</p>
             <label class="switch-row setting" for="paused">
               <span class="switch-text"><strong>Pause Lineleaf on all sites</strong><span class="muted">Stops checks and hides suggestions until you turn it back on. Applies immediately.</span></span>
               <input id="paused" type="checkbox" role="switch">
             </label>
+            <div class="field">
+              <label for="provider">Provider</label>
+              <select id="provider"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini · Antigravity</option><option value="grok">Grok</option></select>
+            </div>
+            <label id="cloud-setting" class="switch-row setting" for="allow-cloud" hidden>
+              <span class="switch-text"><strong>Allow the Antigravity cloud route</strong><span class="muted">Seatline cannot verify this route as subscription sign-in. Processing and billing follow your Antigravity account. Enable only if you accept this route. If automatic checking is enabled, each check sends the active paragraph through this cloud route.</span></span>
+              <input id="allow-cloud" type="checkbox">
+            </label>
             <div class="grid2">
               <div class="field">
-                <label for="model">Codex model <span class="muted">(optional)</span></label>
+                <label for="model">Model <span class="muted">(optional)</span></label>
                 <input id="model" type="text" maxlength="128" autocomplete="off" spellcheck="false" placeholder="Leave empty for the provider default">
               </div>
               <div class="field">
@@ -65,7 +73,7 @@
                 <select id="variant"><option value="US">English · US</option><option value="UK">English · UK</option></select>
               </div>
             </div>
-            <p class="muted" style="margin-top:8px">Model, effort and speed apply to every check and rewrite after you save. Lower effort can answer faster; higher effort can help with difficult text. Use choices supported by your installed Codex runtime and model. Sign in with your subscription; Lineleaf stores no provider credentials.</p>
+            <p class="muted" style="margin-top:8px">Provider and model apply to every check and rewrite after you save. Each provider remembers its saved preferences. Effort and speed are available for Codex only. Lower effort can answer faster; higher effort can help with difficult text. Use a native model ID supported by your installed provider runtime, or leave Model empty for its default. Claude Code and Grok require subscription sign-in. Gemini uses Antigravity with the explicit cloud opt-in above; Lineleaf stores no provider credentials.</p>
             <p id="speed-help" class="muted">Provider default uses your Codex speed setting. Standard requests normal processing. Fast requests faster processing and may use more subscription allowance, keeping your model and reasoning effort. Availability depends on your Codex version, model and plan. See <a href="https://learn.chatgpt.com/docs/agent-configuration/speed" target="_blank" rel="noopener noreferrer">current Codex speed and usage</a>.</p>
           </section>
 
@@ -77,7 +85,7 @@
               <input id="automatic" type="checkbox" role="switch">
             </label>
             <ul class="facts">
-              <li>The active paragraph (up to 2,000 characters) goes through Seatline to Codex. Model processing may be remote.</li>
+              <li>The active paragraph (up to 2,000 characters) goes through Seatline to your selected provider. Model processing may be remote.</li>
               <li>Checks wait 1.5 seconds after typing, with a shared ten-second interval and a cap of six attempts per minute.</li>
               <li>A background check that gets no answer in 30 seconds (90 for something you ask for) is cancelled, and background checks then pause for five minutes.</li>
               <li>In rich editors such as X, only the paragraph you are typing in is sent and suggestions are underlined. Accept changes the text only after you press it, through the editor’s own editing, and the editor’s undo reverses it.</li>
@@ -117,20 +125,21 @@
 
       <section class="card-section" id="seatline" aria-labelledby="seatline-title">
         <h2 id="seatline-title">Seatline connection</h2>
-        <p class="lede">Lineleaf uses your existing shared Seatline companion. Authorize this extension ID for Codex:</p>
+        <p class="lede">Lineleaf uses your existing shared Seatline companion. Save your provider selection, then authorize this extension ID for that provider:</p>
+        <p class="muted">This command replaces Lineleaf’s grant with the saved provider only. After switching and saving a provider, authorize again. Include all retained origins or providers manually only if you intend to grant them.</p>
         <div class="command"><code id="authorize"></code><button id="copy-command" type="button" class="small">Copy</button></div>
         <div class="actions-row"><button id="connection" type="button">Check Seatline</button></div>
         <details class="check-timing">
           <summary>Last manual check timing</summary>
           <p id="timing-summary" class="muted">No check recorded in this browser session.</p>
           <table aria-label="Last check durations"><tbody id="timing-phases"></tbody></table>
-          <p class="muted">Measured from the extension worker receiving the check through answer validation. Startup includes waiting for Codex to report that its turn started. Answer time ends at the first complete message; completion includes remaining output and process cleanup. These phases may not add up to the total.</p>
+          <p class="muted">Measured from the extension worker receiving the check through answer validation. Startup includes waiting for the provider to report that its turn started. Answer time ends at the first complete message; completion includes remaining output and process cleanup. These phases may not add up to the total.</p>
           <div class="actions-row"><button id="refresh-timing" type="button" class="small">Refresh timing</button><button id="copy-timing" type="button" class="small" disabled>Copy timing</button></div>
         </details>
         <ul class="facts">
           <li>Manual checks send only your selection. Rewrites (Improve it, Paraphrase and tone options) run only when you press them.</li>
           <li>The writing panel sends your selection. The inline card, which you can open with Alt+Shift+L even when automatic checking is off, sends your selection or the active paragraph if nothing is selected.</li>
-          <li>Opt-in automatic checks send only the active bounded paragraph. The companion connects to Codex; model processing may be remote. Automatic checking stays off until you enable it above.</li>
+          <li>Opt-in automatic checks send only the active bounded paragraph. The companion connects to your selected provider; model processing may be remote. Automatic checking stays off until you enable it above.</li>
         </ul>
       </section>
 
@@ -139,7 +148,7 @@
         <p class="lede">What Lineleaf keeps on this browser.</p>
         <ul class="facts">
           <li>Lineleaf saves preferences, dictionary words, and enabled site origins.</li>
-          <li>Session storage keeps request-limit timestamps and the last manual check’s durations, requested model, effort and speed, and outcome. Automatic and cancelled checks do not replace it. Drafts, answers and site addresses are excluded from timing details.</li>
+          <li>Session storage keeps request-limit timestamps and the last manual check’s durations, requested provider and model, effort and speed, and outcome. Automatic and cancelled checks do not replace it. Drafts, answers and site addresses are excluded from timing details.</li>
           <li>Suggestions from a check stay in that page's memory only, for as long as the text they describe is unchanged. They are dropped when you edit that text, leave or close the page, pause Lineleaf, or turn the site off, and are never saved.</li>
           <li>The writing panel clears its selection and results after five minutes.</li>
           <li>No draft history, provider credentials, or telemetry is stored.</li>

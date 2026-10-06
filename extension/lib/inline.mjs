@@ -92,8 +92,8 @@ class InlineView {
     const check = this.button('Check now', () => this.actions.check(), {class: 'quiet small'}, 'refresh'); check.disabled = Boolean(this.busy);
     foot.append(check, this.button('Cancel check', () => this.actions.cancel(), {class: 'quiet small'}, 'stop'), this.button('Pause Lineleaf', () => this.actions.pause(), {class: 'quiet small'}, 'pause'),
       this.button('Settings', () => this.actions.settings(), {class: 'quiet small'}, 'sliders'));
-    this.card.append(foot, node('p', preview ? 'Codex via Seatline · model processing may be remote. Lineleaf does not change this editor.'
-      : 'Codex via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'privacy'}));
+    this.card.append(foot, node('p', preview ? 'Your selected provider via Seatline · model processing may be remote. Lineleaf does not change this editor.'
+      : 'Your selected provider via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'privacy'}));
     this.draw(); title.focus({preventScroll: true});
   }
   // One correction or wording suggestion: its kind, the change, the way to accept it, and where it sits among the others.
@@ -160,7 +160,7 @@ class InlineView {
   // While a request runs the card stays open and counts the seconds (visual only, so the live region is not read out every second).
   elapsed() {
     if (!this.busy) return [];
-    const line = node('p', '', {class: 'muted', 'aria-hidden': 'true', 'data-elapsed': ''}), tick = () => { line.textContent = `Waiting for Codex… ${Math.round((Date.now() - this.busySince) / 1000)} s. Choose Cancel check to stop.`; };
+    const line = node('p', '', {class: 'muted', 'aria-hidden': 'true', 'data-elapsed': ''}), tick = () => { line.textContent = `Waiting for the provider… ${Math.round((Date.now() - this.busySince) / 1000)} s. Choose Cancel check to stop.`; };
     tick(); this.ticker = setInterval(tick, 1000); return [line];
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
@@ -378,7 +378,7 @@ export function mountInline(api) {
     policy = state.value; capture = next; if (!wording) { edits = []; if (!rewriteMode) lastKey = keyFor(next); } copyOnly = false; clarityDue = false; // `undo` stays: the adapter refuses it once the text has changed
     if (automatic) nextAt = Date.now() + AUTO_INTERVAL;
     working = true;
-    update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with Codex… You can keep typing.` : wording ? 'Looking for clearer wording with Codex… You can keep typing.' : 'Checking with Codex… You can keep typing.');
+    update(rewriteMode ? `Working on “${REWRITE_LABELS[rewriteMode]}” with your provider… You can keep typing.` : wording ? 'Looking for clearer wording with your provider… You can keep typing.' : 'Checking your text… You can keep typing.');
     if (!automatic) view?.open(); // Stay visible while it runs: progress, and Cancel check.
     const id = crypto.randomUUID();
     try {

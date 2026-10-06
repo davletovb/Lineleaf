@@ -121,8 +121,8 @@ test('speed choices apply to every writing mode without changing the model, effo
 });
 test('saved speed survives reload, rejects stale/per-request overrides and records the requested tier', async () => {
   const f = fakeChrome(); installController(f.api);
-  assert.equal((await f.rpc('save-settings', {changes: {model: 'gpt-6-luna', effort: 'xhigh'}, expected: {model: '', effort: 'low'}, dictionary: {add: [], remove: []}})).ok, true);
-  const save = (speed, expected) => f.rpc('save-settings', {changes: {speed}, expected: {speed: expected}, dictionary: {add: [], remove: []}});
+  assert.equal((await f.rpc('save-settings', {changes: {model: 'gpt-6-luna', effort: 'xhigh'}, expected: {provider: 'codex', model: '', effort: 'low'}, dictionary: {add: [], remove: []}})).ok, true);
+  const save = (speed, expected) => f.rpc('save-settings', {changes: {speed}, expected: {provider: 'codex', speed: expected}, dictionary: {add: [], remove: []}});
   const saved = await save('fast', ''); assert.equal(saved.ok, true);
   assert.equal(saved.value.effort, 'xhigh'); assert.equal(saved.value.model, 'gpt-6-luna');
   assert.equal((await save('standard', '')).code, 'SETTINGS_CHANGED');
@@ -141,11 +141,11 @@ test('saved speed survives reload, rejects stale/per-request overrides and recor
   const timing = (await restarted.rpc('get-check-timing')).value;
   assert.equal(timing.requested_service_tier, 'fast'); assert.equal(timing.reasoning_effort, 'xhigh');
   assert.equal(JSON.stringify(timing).includes('He go'), false);
-  assert.equal((await restarted.rpc('save-settings', {changes: {speed: 'standard'}, expected: {speed: 'fast'}, dictionary: {add: [], remove: []}})).ok, true);
+  assert.equal((await restarted.rpc('save-settings', {changes: {speed: 'standard'}, expected: {provider: 'codex', speed: 'fast'}, dictionary: {add: [], remove: []}})).ok, true);
   const next = restarted.connect(); next.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
   await waitFor(() => next.received.some(x => x.type === 'result'));
   assert.equal(restarted.turns.at(-1).params.service_tier, 'standard'); assert.equal(restarted.turns.at(-1).params.reasoning_effort, 'xhigh');
-  assert.equal((await restarted.rpc('save-settings', {changes: {speed: ''}, expected: {speed: 'standard'}, dictionary: {add: [], remove: []}})).ok, true);
+  assert.equal((await restarted.rpc('save-settings', {changes: {speed: ''}, expected: {provider: 'codex', speed: 'standard'}, dictionary: {add: [], remove: []}})).ok, true);
   const inherited = restarted.connect(); inherited.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
   await waitFor(() => inherited.received.some(x => x.type === 'result'));
   assert.equal(Object.hasOwn(restarted.turns.at(-1).params, 'service_tier'), false);
@@ -160,13 +160,13 @@ test('substring ambiguity keeps the original whole-response refusal; explicit co
 test('check timings distinguish completed-message delay from completion and leave absent phases unavailable', () => {
   let time = 100;
   const timing = checkTiming('proofread', 'manual', () => time);
-  timing.readiness(20); time = 130; timing.sending({model: 'gpt-6-luna', effort: 'low', speed: 'fast'});
+  timing.readiness(20); time = 130; timing.sending({provider: 'codex', model: 'gpt-6-luna', effort: 'low', speed: 'fast'});
   time = 140; timing.event('launched'); time = 180; timing.event('started');
   time = 1180; timing.event('delta'); time = 1500; timing.event('delta');
   time = 1600; timing.event('completed'); time = 1610; timing.validating(); time = 1615;
-  assert.deepEqual(timing.finish('completed'), {version: 2, mode: 'proofread', kind: 'manual', requested_model: 'gpt-6-luna', reasoning_effort: 'low', requested_service_tier: 'fast', outcome: 'completed', attempts: 1,
+  assert.deepEqual(timing.finish('completed'), {version: 3, mode: 'proofread', kind: 'manual', requested_provider: 'codex', requested_model: 'gpt-6-luna', reasoning_effort: 'low', requested_service_tier: 'fast', outcome: 'completed', attempts: 1,
     readiness_ms: 20, launch_wait_ms: 10, provider_init_ms: 40, answer_ms: 1000, finish_ms: 420, validation_ms: 5, total_ms: 1515});
-  time = 2000; timing.sending({model: '', effort: '', speed: 'standard'}); time = 2010; timing.event('failed');
+  time = 2000; timing.sending({provider: 'codex', model: '', effort: '', speed: 'standard'}); time = 2010; timing.event('failed');
   assert.equal(timing.finish('PROVIDER_FAILED').answer_ms, null);
   assert.equal(timing.finish('PROVIDER_FAILED').attempts, 2);
 });
@@ -180,7 +180,7 @@ test('native timing observers receive only event names and cannot break successf
 });
 test('effort saves survive worker reloads, reject stale edits, and remain absent from per-check controls', async () => {
   const f = fakeChrome(); installController(f.api);
-  const save = (effort, expected) => f.rpc('save-settings', {changes: {effort}, expected: {effort: expected}, dictionary: {add: [], remove: []}});
+  const save = (effort, expected) => f.rpc('save-settings', {changes: {effort}, expected: {provider: 'codex', effort: expected}, dictionary: {add: [], remove: []}});
   assert.equal((await save('medium', 'low')).ok, true);
   assert.equal((await save('high', 'low')).code, 'SETTINGS_CHANGED');
   assert.equal((await save('unknown', 'medium')).code, 'INVALID_REQUEST');
@@ -250,7 +250,7 @@ test('settings permit only exact HTTP(S) origins and safe provider models', () =
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
   assert.equal(sitePattern('https://writing.test:8443'), 'https://writing.test/*');
   assert.deepEqual(preferences({provider: 'other', model: 'bad\nmodel', sites: ['https://writing.test', 'https://writing.test/path', 'file:///tmp']}),
-    {provider: 'codex', model: '', effort: 'low', speed: '', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: ['https://writing.test']});
+    {...preferences(null), sites: ['https://writing.test']});
 });
 test('packaged manifest has optional site access, no automatic/all-site content script or exposed resources', async () => {
   const m = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url)));
@@ -520,17 +520,17 @@ test('provider backoff survives worker restart and local refusals do not extend 
   f.api.runtime.connectNative = () => fakeNative((m, p) => broker(m, p, {send: (m, p) => p.reply(m.id, {type: 'failed', reason: 'PROVIDER_RATE_LIMITED'})}));
   installController(f.api, {now: () => clock}); const first = f.connect(); start(first);
   await waitFor(() => first.received.some(x => x.code === 'PROVIDER_RATE_LIMITED'));
-  assert.equal(f.sessionData.providerBackoff, 160000);
+  assert.equal(f.sessionData.providerBackoff.codex, 160000);
   clock = 120000; const restarted = fakeChrome(); restarted.api.storage.session = f.api.storage.session;
   installController(restarted.api, {now: () => clock}); const second = restarted.connect(); start(second);
   await waitFor(() => second.received.some(x => x.code === 'PROVIDER_RATE_LIMITED'));
   assert.equal(second.received.find(x => x.code === 'PROVIDER_RATE_LIMITED').retryAfterMs, 40000);
-  assert.equal(f.sessionData.providerBackoff, 160000); assert.equal(restarted.calls.some(x => sent(x)), false);
+  assert.equal(f.sessionData.providerBackoff.codex, 160000); assert.equal(restarted.calls.some(x => sent(x)), false);
   clock = 160000; const next = restarted.connect(); start(next); await waitFor(() => next.received.some(x => x.type === 'result'));
 });
 test('pause changes only pause and concurrent site/dictionary mutations preserve opt-in consent', async () => {
   const f = fakeChrome({automatic: true}); installController(f.api);
-  await f.rpc('save-settings', {changes: {model: 'latest-model', variant: 'UK', automatic: false}, expected: {model: '', variant: 'US', automatic: true}, dictionary: {add: ['newword'], remove: []}});
+  await f.rpc('save-settings', {changes: {model: 'latest-model', variant: 'UK', automatic: false}, expected: {provider: 'codex', model: '', variant: 'US', automatic: true}, dictionary: {add: ['newword'], remove: []}});
   await Promise.all([f.rpc('add-word', {word: 'Lineleaf'}, f.sender), f.rpc('set-pause', {paused: true}), f.rpc('set-site', {origin: 'https://writing.test', enabled: false})]);
   assert.equal(f.data.preferences.automatic, false); assert.equal(f.data.preferences.paused, true);
   assert.equal(f.data.preferences.model, 'latest-model'); assert.equal(f.data.preferences.variant, 'UK');
@@ -541,7 +541,7 @@ test('partial settings saves preserve current pause/consent and merge dictionary
   const f = fakeChrome(); installController(f.api);
   await f.rpc('set-pause', {paused: true});
   await f.rpc('save-settings', {changes: {automatic: true}, expected: {automatic: false}, dictionary: {add: ['Seatline'], remove: []}});
-  const result = await f.rpc('save-settings', {changes: {model: 'new-model'}, expected: {model: ''}, dictionary: {add: [], remove: []}});
+  const result = await f.rpc('save-settings', {changes: {model: 'new-model'}, expected: {provider: 'codex', model: ''}, dictionary: {add: [], remove: []}});
   assert.equal(result.ok, true); assert.equal(f.data.preferences.paused, true); assert.equal(f.data.preferences.automatic, true);
   assert.deepEqual(f.data.preferences.dictionary, ['seatline']);
   await Promise.all([
@@ -552,7 +552,7 @@ test('partial settings saves preserve current pause/consent and merge dictionary
 });
 test('stale same-field saves fail atomically and save-settings cannot change pause', async () => {
   const f = fakeChrome(); installController(f.api);
-  const save = (changes, expected, dictionary = {add: [], remove: []}) => f.rpc('save-settings', {changes, expected, dictionary});
+  const save = (changes, expected, dictionary = {add: [], remove: []}) => f.rpc('save-settings', {changes, expected: {...expected, ...(Object.keys(changes).some(key => ['model', 'effort', 'speed'].includes(key)) ? {provider: 'codex'} : {})}, dictionary});
   await save({model: 'new-model'}, {model: ''});
   const before = structuredClone(f.data);
   assert.equal((await save({model: 'stale-model', automatic: true}, {model: '', automatic: false}, {add: ['Lineleaf'], remove: []})).code, 'SETTINGS_CHANGED');
@@ -676,14 +676,14 @@ test('after a provider timeout background checks stop (across restarts) until an
   });
   installController(f.api, {now: () => clock}); const first = f.connect(); autoStart(first);
   await waitFor(() => first.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
-  assert.equal(f.sessionData.automaticHold, 400000);
+  assert.equal(f.sessionData.automaticHold.codex, 400000);
   clock = 120000; const second = f.connect({documentId: 'two'}); autoStart(second); // another tab, past the ten-second interval
   await waitFor(() => second.received.some(x => x.code === 'AUTO_PAUSED')); assert.equal(sends.length, 1);
   const restarted = fakeChrome({automatic: true}); restarted.api.storage.session = f.api.storage.session; restarted.api.runtime.connectNative = f.api.runtime.connectNative;
   installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third); // a restarted worker keeps the hold
   await waitFor(() => third.received.some(x => x.code === 'AUTO_PAUSED'));
   slow = false; const explicit = restarted.connect({documentId: 'explicit'}); start(explicit); // the user can always try again
-  await waitFor(() => explicit.received.some(x => x.type === 'result')); assert.equal(f.sessionData.automaticHold, 0);
+  await waitFor(() => explicit.received.some(x => x.type === 'result')); assert.equal(f.sessionData.automaticHold.codex, 0);
   clock = 140000; const later = restarted.connect({documentId: 'later'}); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result')); // answered: background checks resume
   clock = 500000; slow = true; const expired = restarted.connect({documentId: 'expired'}); autoStart(expired);
   await waitFor(() => expired.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
@@ -720,4 +720,164 @@ test('the page watchdog outlasts the worker’s whole sequence, so a slow but he
     mock.timers.tick(2000); await settle(); assert.equal(slow.received.some(x => x.type === 'error'), false); // the limit hit at 15 s; the unanswered cancel drains for 3 s
     mock.timers.tick(5000); await settle(); assert.equal(slow.received.find(x => x.type === 'error')?.code, 'PROVIDER_TIMEOUT');
   } finally { mock.timers.reset(); }
+});
+
+const saveProvider = async (fixture, changes, snapshot) => {
+  const loaded = snapshot ?? (await fixture.rpc('get-settings')).value;
+  const expected = Object.fromEntries(Object.keys(changes).map(key => [key, loaded[key]]));
+  expected.provider = loaded.provider;
+  if (changes.provider && changes.provider !== loaded.provider) expected.providerSettings = loaded.providerSettings;
+  return fixture.rpc('save-settings', {changes, expected, dictionary: {add: [], remove: []}});
+};
+test('providers restore independent saved models and reject stale provider-bound saves atomically', async () => {
+  const f = fakeChrome(); installController(f.api);
+  assert.equal((await saveProvider(f, {model: 'gpt-6-sol', effort: 'xhigh', speed: 'fast'})).ok, true);
+  const codex = (await f.rpc('get-settings')).value;
+  assert.equal((await saveProvider(f, {provider: 'claude', model: 'sonnet'})).ok, true);
+  assert.equal((await f.rpc('get-settings')).value.effort, '');
+  assert.equal((await f.rpc('get-settings')).value.speed, '');
+  const before = structuredClone(f.data);
+  assert.equal((await saveProvider(f, {model: 'gpt-6-luna'}, codex)).code, 'SETTINGS_CHANGED');
+  assert.deepEqual(f.data, before);
+  for (const changes of [{effort: 'low'}, {speed: 'fast'}, {allowCloud: true}, {provider: 'unknown'}, {model: 'bad model'}])
+    assert.equal((await saveProvider(f, changes)).code, 'INVALID_REQUEST');
+  assert.equal((await f.rpc('save-settings', {changes: {model: 'opus'}, expected: {model: 'sonnet'}, dictionary: {add: [], remove: []}})).code, 'INVALID_REQUEST');
+  assert.equal((await saveProvider(f, {provider: 'codex'})).ok, true);
+  const restored = (await f.rpc('get-settings')).value;
+  assert.equal(restored.model, 'gpt-6-sol'); assert.equal(restored.effort, 'xhigh'); assert.equal(restored.speed, 'fast');
+  assert.equal(restored.providerSettings.claude.model, 'sonnet');
+  // Another panel changed the inactive profile while the provider returned to Codex.
+  assert.equal((await saveProvider(f, {provider: 'claude', model: 'opus'})).ok, true);
+  assert.equal((await saveProvider(f, {provider: 'codex'})).ok, true);
+  assert.equal((await saveProvider(f, {provider: 'claude'}, restored)).code, 'SETTINGS_CHANGED');
+  const restart = fakeChrome(); restart.api.storage.local = f.api.storage.local; installController(restart.api);
+  assert.equal((await restart.rpc('get-settings')).value.providerSettings.claude.model, 'opus');
+});
+test('every provider routes all writing modes with independent ephemeral no-tools turns and provider timing', async () => {
+  for (const provider of ['codex', 'claude', 'gemini', 'grok']) {
+    const state = {...READY, sign_in: provider === 'gemini' ? 'cloud' : 'subscription', capabilities: {...READY.capabilities, reasoning_effort: provider === 'codex', service_tier: provider === 'codex'}};
+    const f = fakeChrome({state, automatic: true, clarity: true, answer: turn => turn.system.includes('"rewrite"') ? '{"rewrite":"He goes to work."}' : turn.system.includes('"suggestions"') ? '{"suggestions":[]}' : '{"corrections":[]}'});
+    installController(f.api);
+    assert.equal((await saveProvider(f, {provider, model: `${provider}-model`, ...(provider === 'gemini' ? {allowCloud: true} : {})})).ok, true);
+    assert.equal((await f.rpc('prepare', {tabId: 7})).value, 'prepared');
+    assert.equal(f.calls.find(call => call.method === 'prepare').provider, provider);
+    assert.equal((await f.rpc('check-connection')).value.provider, provider);
+    for (const mode of ['proofread', 'clarity', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']) {
+      const port = f.connect(); port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode, ...(mode === 'clarity' ? {kind: 'automatic'} : {})});
+      await waitFor(() => port.received.some(x => x.type === 'result' || x.type === 'error'));
+      assert.equal(port.received.at(-1).type, 'result', `${provider}/${mode}: ${JSON.stringify(port.received)}`);
+      const turn = f.turns.at(-1); assert.equal(turn.provider, provider); assert.equal(turn.params.model, `${provider}-model`);
+      assert.equal(turn.params.tools, 'none'); assert.equal(turn.params.session, 'ephemeral'); assert.equal(turn.params.continuation, null);
+      if (provider !== 'codex') { assert.equal(Object.hasOwn(turn.params, 'reasoning_effort'), false); assert.equal(Object.hasOwn(turn.params, 'service_tier'), false); }
+      assert.deepEqual(f.calls.filter(sent).at(-1).params.allowed_sign_in, [provider === 'gemini' ? 'cloud' : 'subscription']);
+    }
+    await waitFor(() => f.sessionData.lastCheckTiming?.mode === 'friendly');
+    assert.equal(f.sessionData.lastCheckTiming.requested_provider, provider);
+    assert.ok(f.calls.filter(probed).every(call => call.provider === provider));
+  }
+});
+test('Gemini requires explicit cloud opt-in and every provider refuses API-key or unknown sign-in before sending', async () => {
+  for (const [provider, signIn, allowCloud, code] of [
+    ['gemini', 'cloud', false, 'CLOUD_SIGN_IN_REQUIRED'], ['gemini', 'api_key', true, 'CLOUD_ROUTE_UNAVAILABLE'], ['gemini', 'unknown', true, 'CLOUD_ROUTE_UNAVAILABLE'], ['gemini', 'subscription', true, 'CLOUD_ROUTE_UNAVAILABLE'],
+    ...['codex', 'claude', 'grok'].flatMap(provider => ['api_key', 'cloud', 'unknown'].map(signIn => [provider, signIn, false, 'SUBSCRIPTION_REQUIRED']))
+  ]) {
+    const f = fakeChrome({state: {...READY, sign_in: signIn}}); installController(f.api);
+    assert.equal((await saveProvider(f, {provider, allowCloud})).ok, true);
+    const port = f.connect(); port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+    await waitFor(() => port.received.some(x => x.type === 'error'));
+    assert.equal(port.received.at(-1).code, code); assert.equal(f.turns.length, 0);
+    const status = await f.rpc('check-connection'); assert.equal(status.value.provider, provider); assert.equal(status.value.sign_in_allowed, false);
+  }
+});
+test('switching providers cancels the original routed request and keeps late output out of the new provider', async () => {
+  for (const phase of ['readiness', 'send_ready_with_policy']) {
+    const f = fakeChrome(); let held;
+    f.api.runtime.connectNative = () => fakeNative((m, p) => {
+      f.calls.push(m);
+      if (m.provider === 'claude' && m.method === phase) { held = {m, p}; if (sent(m)) p.reply(m.id, {type: 'status', status: READY}); }
+      else broker(m, p, {answer: '{"corrections":[]}'});
+    });
+    installController(f.api); await saveProvider(f, {provider: 'claude'});
+    const old = f.connect(); old.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+    await waitFor(() => held); assert.equal((await saveProvider(f, {provider: 'grok'})).ok, true);
+    await waitFor(() => old.received.some(x => x.code === 'CANCELLED'));
+    const cancel = f.calls.find(m => m.method === 'cancel'); assert.equal(cancel.provider, 'claude'); assert.equal(cancel.target, held.m.id);
+    held.p.reply(held.m.id, {type: 'delta', text: '{"corrections":[]}'}); // A retired provider must not supply the new result.
+    await new Promise(resolve => setImmediate(resolve));
+    const next = f.connect(); next.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+    await waitFor(() => next.received.some(x => x.type === 'result'));
+    assert.equal(f.turns.at(-1).provider, 'grok'); assert.equal(old.received.some(x => x.type === 'result'), false);
+  }
+});
+test('rate-limit backoff is provider-specific but the automatic request interval stays shared', async () => {
+  const f = fakeChrome({fail: 'PROVIDER_RATE_LIMITED', automatic: true}); installController(f.api, {now: () => 100000});
+  const run = async kind => { const port = f.connect(); port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', kind}); await waitFor(() => port.received.some(x => ['result', 'error'].includes(x.type))); return port.received.at(-1); };
+  assert.equal((await run('automatic')).code, 'PROVIDER_RATE_LIMITED');
+  await saveProvider(f, {provider: 'claude'}); f.fail = null;
+  assert.equal((await run('automatic')).code, 'AUTO_WAIT');
+  assert.equal((await run('manual')).type, 'result');
+  await saveProvider(f, {provider: 'codex'});
+  assert.equal((await run('manual')).code, 'PROVIDER_RATE_LIMITED');
+});
+test('native transport rejects unknown providers before connecting and preserves provider on cancellation', async () => {
+  let connects = 0, port;
+  const native = new NativeSeatline(() => { connects++; return port = fakeNative((m, p) => { if (m.method === 'cancel') broker(m, p); }); });
+  await assert.rejects(native.request('status', null, {provider: 'unknown'}), /INVALID_REQUEST/); assert.equal(connects, 0);
+  const abort = new AbortController(), pending = native.request('send', {}, {provider: 'gemini', signal: abort.signal});
+  await waitFor(() => port?.sent.length); abort.abort(); await assert.rejects(pending, /CANCELLED/);
+  assert.ok(port.sent.every(m => m.provider === 'gemini')); native.close();
+});
+
+test('a stale switch into the current provider still reports a conflict, even when both model IDs match', async () => {
+  const f = fakeChrome(); installController(f.api);
+  await saveProvider(f, {model: 'shared-model'});
+  const old = (await f.rpc('get-settings')).value;
+  assert.equal((await saveProvider(f, {provider: 'claude', model: 'shared-model', effort: '', speed: '', allowCloud: false})).ok, true);
+  assert.equal((await f.rpc('get-settings')).value.model, 'shared-model');
+  assert.equal((await saveProvider(f, {provider: 'claude', model: 'shared-model'}, old)).code, 'SETTINGS_CHANGED');
+});
+
+test('a non-Codex request reconnects once only when unsent, and a mid-request disconnect never replays it', async () => {
+  let count = 0, first;
+  const native = new NativeSeatline(() => {
+    count++;
+    if (count === 1) { first = fakeNative(); first.postMessage = () => { throw new Error('closed before writing'); }; return first; }
+    return fakeNative((m, p) => { assert.equal(m.provider, 'claude'); broker(m, p, {answer: 'answer'}); });
+  });
+  assert.equal(await native.request('send', {}, {provider: 'claude'}), 'answer'); assert.equal(count, 2); assert.equal(first.closed, true); native.close();
+  let sends = 0;
+  const broken = new NativeSeatline(() => fakeNative((m, p) => { assert.equal(m.provider, 'grok'); sends++; p.disconnect(); }));
+  await assert.rejects(broken.request('send', {}, {provider: 'grok'}), /NATIVE_UNAVAILABLE/); assert.equal(sends, 1); broken.close();
+});
+test('a provider timeout pauses only that provider and survives a worker restart', async () => {
+  const f = fakeChrome({fail: 'PROVIDER_TIMEOUT', automatic: true}); installController(f.api, {now: () => 100000});
+  await saveProvider(f, {provider: 'claude'});
+  const port = f.connect(); port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+  await waitFor(() => port.received.some(x => x.code === 'PROVIDER_TIMEOUT'));
+  assert.equal(f.sessionData.automaticHold.claude, 400000); assert.equal(f.sessionData.automaticHold.grok, 0);
+  const next = fakeChrome({automatic: true}); next.api.storage.local = f.api.storage.local; next.api.storage.session = f.api.storage.session; installController(next.api, {now: () => 100000});
+  const blocked = next.connect(); blocked.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', kind: 'automatic'});
+  await waitFor(() => blocked.received.some(x => x.code === 'AUTO_PAUSED'));
+  await saveProvider(next, {provider: 'grok'});
+  const allowed = next.connect(); allowed.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', kind: 'automatic'});
+  await waitFor(() => allowed.received.some(x => x.type === 'result'));
+});
+test('one settings save commits all edited profiles, including inactive cloud revocation, with atomic stale/invalid refusal', async () => {
+  const f = fakeChrome(); installController(f.api);
+  await saveProvider(f, {provider: 'gemini', model: 'gemini-model', allowCloud: true});
+  await saveProvider(f, {provider: 'codex'});
+  const loaded = (await f.rpc('get-settings')).value;
+  const profiles = {gemini: {...loaded.providerSettings.gemini, allowCloud: false}, claude: {...loaded.providerSettings.claude, model: 'sonnet'}};
+  const payload = {changes: {}, expected: {provider: loaded.provider, providerSettings: loaded.providerSettings}, profiles, dictionary: {add: [], remove: []}};
+  const saved = await f.rpc('save-settings', payload); assert.equal(saved.ok, true); assert.equal(saved.value.provider, 'codex');
+  assert.equal(saved.value.providerSettings.gemini.allowCloud, false); assert.equal(saved.value.providerSettings.claude.model, 'sonnet');
+  const before = structuredClone(f.data);
+  assert.equal((await f.rpc('save-settings', payload)).code, 'SETTINGS_CHANGED'); assert.deepEqual(f.data, before);
+  const current = (await f.rpc('get-settings')).value;
+  const expected = {provider: current.provider, providerSettings: current.providerSettings};
+  for (const profiles of [null, {unknown: current.providerSettings.codex}, {claude: {...current.providerSettings.claude, speed: 'fast'}}, {gemini: {...current.providerSettings.gemini, model: 'bad model'}}, {grok: {...current.providerSettings.grok, credentials: 'refused'}}]) {
+    assert.equal((await f.rpc('save-settings', {...payload, expected, profiles})).code, 'INVALID_REQUEST'); assert.deepEqual(f.data, before);
+  }
+  await saveProvider(f, {provider: 'gemini'});
+  assert.equal((await f.rpc('get-settings')).value.allowCloud, false);
 });

@@ -18,7 +18,7 @@ test('both speed choices require an explicit companion capability before writing
     for (const capability of [undefined, false, 'unknown']) {
       const state = {...READY, capabilities: {tool_isolation: true, reasoning_effort: true, ...(capability === undefined ? {} : {service_tier: capability})}};
       const f = fakeChrome({state}); installController(f.api);
-      await f.rpc('save-settings', {changes: {speed}, expected: {speed: ''}, dictionary: {add: [], remove: []}});
+      await f.rpc('save-settings', {changes: {speed}, expected: {provider: 'codex', speed: ''}, dictionary: {add: [], remove: []}});
       const port = f.connect(); start(port);
       await waitFor(() => port.received.some(x => x.code === 'COMPANION_UPDATE_REQUIRED'));
       assert.equal(f.calls.some(sent), false);
@@ -30,13 +30,13 @@ test('provider default omits the tier and runs on companions without tier forwar
   for (const capability of [undefined, false, 'unknown']) {
     const state = {...READY, capabilities: {tool_isolation: true, reasoning_effort: true, ...(capability === undefined ? {} : {service_tier: capability})}};
     const f = fakeChrome({state}); installController(f.api);
-    await f.rpc('save-settings', {changes: {model: 'gpt-6-luna', effort: 'xhigh'}, expected: {model: '', effort: 'low'}, dictionary: {add: [], remove: []}});
+    await f.rpc('save-settings', {changes: {model: 'gpt-6-luna', effort: 'xhigh'}, expected: {provider: 'codex', model: '', effort: 'low'}, dictionary: {add: [], remove: []}});
     assert.equal((await f.rpc('check-connection')).value.update_required, false);
     const port = f.connect(); start(port); await waitFor(() => port.received.some(x => x.type === 'result'));
     assert.equal(Object.hasOwn(f.turns.at(-1).params, 'service_tier'), false);
     assert.equal(f.turns.at(-1).params.model, 'gpt-6-luna'); assert.equal(f.turns.at(-1).params.reasoning_effort, 'xhigh');
     const sends = f.turns.length;
-    await f.rpc('save-settings', {changes: {speed: 'fast'}, expected: {speed: ''}, dictionary: {add: [], remove: []}});
+    await f.rpc('save-settings', {changes: {speed: 'fast'}, expected: {provider: 'codex', speed: ''}, dictionary: {add: [], remove: []}});
     const next = f.connect(); start(next); await waitFor(() => next.received.some(x => x.code === 'COMPANION_UPDATE_REQUIRED'));
     assert.equal(f.turns.length, sends);
     assert.equal((await f.rpc('check-connection')).value.update_required, true);
@@ -49,7 +49,7 @@ test('a chosen effort requires companion support; provider default remains compa
     await waitFor(() => port.received.some(x => x.code === 'COMPANION_UPDATE_REQUIRED'));
     assert.equal(f.calls.some(sent), false);
     assert.equal((await f.rpc('check-connection')).value.update_required, true);
-    await f.rpc('save-settings', {changes: {effort: ''}, expected: {effort: 'low'}, dictionary: {add: [], remove: []}});
+    await f.rpc('save-settings', {changes: {effort: ''}, expected: {provider: 'codex', effort: 'low'}, dictionary: {add: [], remove: []}});
     const next = f.connect(); start(next); await waitFor(() => next.received.some(x => x.type === 'result'));
     assert.equal(Object.hasOwn(f.turns.at(-1).params, 'reasoning_effort'), false);
   }

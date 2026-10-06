@@ -16,9 +16,10 @@ parser.add_argument("--fail-on", type=int)
 parser.add_argument("--failure", choices=["disconnect", "malformed", "rate_limit"], default="disconnect")
 parser.add_argument("--legacy", action="store_true", help="Act as a companion that predates Seatline's readiness API")
 parser.add_argument("--hold-turn", type=int, help="Keep this generation running until target cancellation; no timing race")
+parser.add_argument("--cloud", action="store_true", help="Synthetic cloud sign-in for Antigravity opt-in tests")
 args = parser.parse_args()
 sends = 0
-STATUS = {"availability": "available", "authentication": "authenticated", "sign_in": "subscription",
+STATUS = {"availability": "available", "authentication": "authenticated", "sign_in": "cloud" if args.cloud else "subscription",
           "capabilities": {"tool_isolation": True, "reasoning_effort": True, "service_tier": True}, "models": []}
 
 

@@ -11,6 +11,7 @@ import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {nativePort} from '../tools/evaluation/native-port.mjs';
 import {candidates} from '../extension/lib/candidates.mjs';
 import {readPackage} from '../tools/evaluation/package.mjs';
+import {fakeNative, broker, READY} from './fixtures/extension-api.mjs';
 import {LineleafError} from '../extension/lib/policy.mjs';
 const corpus = validateCorpus(JSON.parse(await readFile(new URL('../evaluation/writing-corpus.json', import.meta.url), 'utf8')));
 const config = {provider: 'codex', model: 'test-model', providerVersion: 'test-cli-1', seatlineRevision: 'd'.repeat(40), engineHash: 'e'.repeat(64), packageHash: 'a'.repeat(64),
@@ -121,12 +122,14 @@ test('malformed Unicode/overlaps/ambiguous model corrections fail through the pr
 test('runner records malformed answers, continues every remaining case with fresh connections and no retry/tools/continuation', async () => {
   const calls = []; let opened=0, closed=0;
   const connectionFactory=()=>{ const c=corpus.cases[opened++]; return {async request(method, turn) {
-    calls.push({method,turn}); if(method==='status') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true,reasoning_effort:true,service_tier:true}};
+    calls.push({method,turn}); if(method==='readiness') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true,reasoning_effort:true,service_tier:true}};
     return c.id===corpus.cases[3].id ? '```json\n{"corrections":[]}\n```' : JSON.stringify(c.proposal);
   },close(){closed++;}}; };
   const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,380); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
-  assert.equal(opened,380); assert.equal(closed,380); assert.equal(calls.filter(c=>c.method==='send').length,380);
-  const send = calls.find(c => c.method === 'send').turn;
+  assert.equal(opened,380); assert.equal(closed,380); assert.equal(calls.filter(c=>c.method==='send_ready_with_policy').length,380);
+  const protectedSend = calls.find(c => c.method === 'send_ready_with_policy');
+  assert.deepEqual(protectedSend.turn.allowed_sign_in, ['subscription']);
+  const send = protectedSend.turn.turn;
   assert.equal(send.tools, 'none'); assert.equal(send.session, 'ephemeral'); assert.equal(send.continuation, null);
   assert.match(send.system, /Preserve facts, names, numbers, dates, negation/); assert.equal(JSON.parse(send.messages[0].text).text, corpus.cases[0].source);
 });
@@ -172,8 +175,8 @@ test('invalid and partial runs with reviews report outcome rates and missing cas
 test('readiness, timeout, provider limits and transport failures stop rather than retry or exhaust the corpus', async () => {
   for(const code of ['PROVIDER_TIMEOUT','PROVIDER_RATE_LIMITED','QUEUE_FULL','NATIVE_UNAVAILABLE','PROTOCOL_ERROR','LOGIN_REQUIRED','SUBSCRIPTION_REQUIRED','TOOL_ISOLATION_UNAVAILABLE']) {
     let opened=0,closed=0,sends=0;
-    const connectionFactory=()=>{opened++;return{async request(method){ if(method==='status') return{availability:'available',authentication:code==='LOGIN_REQUIRED'?'unauthenticated':'authenticated',sign_in:code==='SUBSCRIPTION_REQUIRED'?'api_key':'subscription',capabilities:{tool_isolation:code!=='TOOL_ISOLATION_UNAVAILABLE',reasoning_effort:true,service_tier:true}};
-      if(method==='send') sends++; throw new LineleafError(code);},close(){closed++;}};};
+    const connectionFactory=()=>{opened++;return{async request(method){ if(method==='readiness') return{availability:'available',authentication:code==='LOGIN_REQUIRED'?'unauthenticated':'authenticated',sign_in:code==='SUBSCRIPTION_REQUIRED'?'api_key':'subscription',capabilities:{tool_isolation:code!=='TOOL_ISOLATION_UNAVAILABLE',reasoning_effort:true,service_tier:true}};
+      if(method==='send_ready_with_policy') sends++; throw new LineleafError(code);},close(){closed++;}};};
     const {run}=await evaluate(corpus,config,{connectionFactory}); assert.equal(run.rows.length,1); assert.equal(opened,1); assert.equal(closed,1); assert.ok(sends<=1);
     assert.equal(run.rows[0].code,code);
   }
@@ -272,8 +275,8 @@ test('evaluation accepts a fixed effort for the whole run and preserves provider
     const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
       const c = corpus.cases[turns.length];
       return {async request(method, turn) {
-        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}};
-        turns.push(turn); return JSON.stringify(c.proposal);
+        if (method === 'readiness') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}};
+        turns.push(turn.turn); return JSON.stringify(c.proposal);
       }, close() {}};
     }});
     assert.equal(run.rows.length, corpus.cases.length);
@@ -303,8 +306,8 @@ test('evaluation fixes speed for the whole run and binds it to the evidence hash
     const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
       const c = corpus.cases[turns.length];
       return {async request(method, turn) {
-        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, ...(speed ? {service_tier: true} : {})}};
-        turns.push(turn); return JSON.stringify(c.proposal);
+        if (method === 'readiness') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, ...(speed ? {service_tier: true} : {})}};
+        turns.push(turn.turn); return JSON.stringify(c.proposal);
       }, close() {}};
     }});
     assert.equal(turns.length, corpus.cases.length);
@@ -326,9 +329,37 @@ test('evaluation stops before a writing send when the companion lacks service-ti
   let sends = 0;
   const {run, readiness} = await evaluate(corpus, {...config, effort: 'xhigh', speed: 'fast'}, {fixture: true, connectionFactory: () => ({
     async request(method) {
-      if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true}};
+      if (method === 'readiness') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true}};
       sends++; return 'unreachable';
     }, close() {}
   })});
   assert.equal(sends, 0); assert.equal(readiness, 'COMPANION_UPDATE_REQUIRED'); assert.equal(run.rows.length, 1);
+});
+test('evaluation records and hashes each provider and cloud policy, without Codex-only settings leaking', async () => {
+  for (const provider of ['codex', 'claude', 'gemini', 'grok']) {
+    const cfg = {...config, provider, effort: provider === 'codex' ? 'low' : '', speed: '', allowCloud: provider === 'gemini'};
+    const {run} = await evaluate(corpus, cfg, {fixture: true});
+    assert.equal(run.rows.length, corpus.cases.length); assert.ok(run.rows.every(row => row.status === 'completed'));
+    assert.equal(score(corpus, run).configuration.provider, provider);
+    const altered = structuredClone(run); altered.configuration.provider = provider === 'codex' ? 'claude' : 'codex';
+    assert.throws(() => score(corpus, altered));
+    if (provider !== 'codex') assert.equal(cfg.effort, '');
+  }
+  const blocked = await evaluate(corpus, {...config, provider: 'gemini', effort: '', speed: '', allowCloud: false}, {fixture: true});
+  assert.equal(blocked.readiness, 'CLOUD_SIGN_IN_REQUIRED'); assert.equal(blocked.run.rows.length, 1);
+  for (const cfg of [{provider: 'unknown'}, {provider: 'claude', effort: 'low'}, {provider: 'grok', speed: 'fast'}, {provider: 'codex', allowCloud: true}])
+    await assert.rejects(configuration({...cfg, fixture: true}));
+});
+
+test('provider evaluation uses protected policy and refuses a changed cloud sign-in before output', async () => {
+  let calls = [];
+  const cfg = {...config, provider: 'gemini', effort: '', speed: '', allowCloud: true};
+  const result = await evaluate(corpus, cfg, {fixture: true, connectionFactory: () => new NativeSeatline(() => fakeNative((m, p) => {
+    calls.push(m);
+    broker(m, p, {state: {...READY, sign_in: m.method === 'readiness' ? 'cloud' : 'api_key'}});
+  }))});
+  assert.equal(result.run.rows[0].code, 'CLOUD_ROUTE_UNAVAILABLE'); assert.equal(result.run.rows[0].response, '');
+  assert.ok(calls.every(call => call.provider === 'gemini'));
+  assert.deepEqual(calls.find(call => call.method === 'send_ready_with_policy').params.allowed_sign_in, ['cloud']);
+  assert.equal(calls.some(call => call.method === 'send'), false);
 });

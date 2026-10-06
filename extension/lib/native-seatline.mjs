@@ -1,4 +1,4 @@
-import {MAX_OUTPUT, PHASES, LineleafError, safeReason, errorCode, isObject, exactKeys} from './policy.mjs';
+import {MAX_OUTPUT, PHASES, PROVIDERS, LineleafError, safeReason, errorCode, isObject, exactKeys} from './policy.mjs';
 const TYPES = new Set(['launched', 'started', 'activity', 'delta', 'session', 'session_lost', 'usage', 'source', 'status', 'completed', 'stopped', 'failed']);
 const TERMINAL = new Set(['completed', 'stopped', 'failed']);
 // Answered with one status event. `send_ready_with_policy` also carries one, ahead of its turn, which `onStatus` can refuse.
@@ -78,7 +78,8 @@ export class NativeSeatline {
       catch (error) { if (!error?.[UNSENT] || attempt > 0) throw error; }
     }
   }
-  async attempt(method, params, {signal, timeout = 30000, onStatus = null, onEvent = null}) {
+  async attempt(method, params, {provider = 'codex', signal, timeout = 30000, onStatus = null, onEvent = null}) {
+    if (!PROVIDERS.includes(provider)) throw new LineleafError('INVALID_REQUEST');
     if (signal?.aborted) throw new LineleafError('CANCELLED');
     const abortReady = () => this.close('CANCELLED');
     signal?.addEventListener('abort', abortReady, {once: true});
@@ -89,11 +90,11 @@ export class NativeSeatline {
     if (!this.port) throw unsent();
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const item = {method, resolve, reject, signal, onStatus, onEvent, output: '', bytes: 0, events: 0, status: null, cancelled: null};
+      const item = {provider, method, resolve, reject, signal, onStatus, onEvent, output: '', bytes: 0, events: 0, status: null, cancelled: null};
       item.abort = () => this.cancel(id, 'CANCELLED');
       item.timer = setTimeout(() => this.cancel(id, 'PROVIDER_TIMEOUT'), timeout);
       this.pending.set(id, item); signal?.addEventListener('abort', item.abort, {once: true});
-      try { this.port.postMessage({id, provider: 'codex', method, params}); }
+      try { this.port.postMessage({id, provider, method, params}); }
       catch {
         clearTimeout(item.timer); signal?.removeEventListener('abort', item.abort); this.pending.delete(id);
         this.close('NATIVE_UNAVAILABLE'); reject(unsent());
@@ -106,7 +107,7 @@ export class NativeSeatline {
     const cancelId = crypto.randomUUID(); this.ignored.add(cancelId);
     item.cancelId = cancelId;
     item.timer = setTimeout(() => this.close(reason), this.drainTimeout);
-    try { this.port.postMessage({id: cancelId, provider: 'codex', method: 'cancel', target: id, params: null}); }
+    try { this.port.postMessage({id: cancelId, provider: item.provider, method: 'cancel', target: id, params: null}); }
     catch { this.close(reason); }
   }
   finish(id, error, result) {
