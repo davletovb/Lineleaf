@@ -232,7 +232,7 @@ test('rewrites are refused where nothing eligible is selected', async () => {
 
 // Failures of an explicit rewrite are not failed checks: the proofreading suggestions set aside for it come back, automatic
 // checking keeps working, and the card shows the reason.
-for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not complete this action.'], ['no connection can be made', 'Lineleaf could not complete this action.'], ['the provider never answers', 'Codex did not answer in time']]) {
+for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not complete this action.'], ['no connection can be made', 'Lineleaf could not complete this action.'], ['the provider never answers', 'The provider did not answer in time']]) {
   test(`a rewrite fails cleanly when ${fault}: suggestions come back and automatic checking stays on`, async () => {
     await load(); await proofreadAnswer();
     await useTextarea('He go to work.'); await openCard(); await press('Check now'); await inline.locator('.underline').waitFor();
@@ -432,8 +432,8 @@ test('while a request runs the card stays open with progress, the actions are di
   await load(); await proofreadAnswer(); await useTextarea('He go to work.');
   await page.evaluate(() => { fixture.worker.hold = true; });
   await openCard(); await press('Improve it');
-  await inline.locator('#status').waitFor(el => /^Working on “Improve it” with Codex/.test(el.textContent));
-  await inline.locator('[data-elapsed]').waitFor(el => /^Waiting for Codex… \d+ s\. Choose Cancel check to stop\.$/.test(el.textContent));
+  await inline.locator('#status').waitFor(el => /^Working on “Improve it” with your provider/.test(el.textContent));
+  await inline.locator('[data-elapsed]').waitFor(el => /^Waiting for the provider… \d+ s\. Choose Cancel check to stop\.$/.test(el.textContent));
   assert.equal(await inline.button('Improve it').isDisabled(), true); assert.equal(await inline.button('Check now').isDisabled(), true);
   assert.equal(await inline.button('Cancel check').isDisabled(), false);
   await press('Cancel check'); await inline.locator('#status').waitFor(el => /^Cancelled/.test(el.textContent));
@@ -456,7 +456,7 @@ test('a Check now that times out reopens the card with the reason, and the next 
   await load(); await proofreadAnswer(); await useTextarea('He go to work.');
   await page.evaluate(() => { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); }); // shorten only the explicit watchdog
   await openCard(); await press('Check now');
-  await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time'));
+  await inline.locator('#status').waitFor(el => el.textContent.startsWith('The provider did not answer in time'));
   assert.equal(await inline.button('Check now').isDisabled(), false); assert.equal(await inline.button('Improve it').isDisabled(), false);
   await page.evaluate(() => { fixture.worker.hold = false; });
   await press('Check now'); await inline.locator('.underline').waitFor();
@@ -470,7 +470,7 @@ test('an automatic check refused during the provider hold is retried after it, i
     window.setTimeout = (fn, ms, ...args) => real(fn, ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args);
   });
   await openCard(); await press('Check now');
-  await inline.locator('#status').waitFor(el => el.textContent.startsWith('Codex did not answer in time')); // sets the hold
+  await inline.locator('#status').waitFor(el => el.textContent.startsWith('The provider did not answer in time')); // sets the hold
   await page.evaluate(() => { fixture.worker.hold = false; });
   await press('Cancel check'); await typeAtEnd(' '); // unblocked; the next automatic check is refused by the hold
   await inline.locator('.badge').waitFor(el => /Automatic checking is paused/.test(el.getAttribute('aria-label')));

@@ -104,7 +104,7 @@ export function mountContent(api) {
       node('header', '', {}, [logo, node('div', '', {class: 'titles'}, [node('h2', 'Lineleaf'), node('p', 'Clearer writing. Still your words.', {class: 'tagline'})]), closeButton]),
       node('div', '', {class: 'scroll'}, [
         node('label', 'Your selection'), node('blockquote', '', {id: 'selected'}),
-        node('p', 'Only this selection goes through Seatline to Codex when you press Check. Drafts are not saved.', {class: 'muted'}),
+        node('p', 'Only this selection goes through Seatline to your selected provider when you press Check. Drafts are not saved.', {class: 'muted'}),
         node('section', '', {id: 'paste-section'}, [node('label', 'Or paste text for preview and copy', {for: 'pasted'}),
           node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
           node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'For editors that cannot expose a safe selection, copy text yourself and paste it here. Lineleaf will only offer a preview and Copy.', {class: 'muted'})]),
@@ -188,7 +188,7 @@ export function mountContent(api) {
       current.onDisconnect.addListener(() => { void api.runtime.lastError; if (port === current) { stop(); status(messageFor('UNAVAILABLE')); } });
       current.onMessage.addListener(message => {
         if (port !== current || message.id !== requestId) return;
-        if (message.type === 'progress') status(message.stage === 'connecting' ? 'Connecting to Seatline…' : 'Checking with Codex… You can keep typing.');
+        if (message.type === 'progress') status(message.stage === 'connecting' ? 'Connecting to Seatline…' : 'Checking your text… You can keep typing.');
         else if (message.type === 'error') { stop(); status(messageFor(message.code)); }
         else if (message.type === 'result') {
           stop();

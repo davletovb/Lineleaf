@@ -153,7 +153,7 @@ test('a companion that cannot receive writing is shown on the badge, not as an i
   assert.equal(await inline.locator('.badge').evaluate(el => el.dataset.tip), 'Needs attention');
   const label = await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label'));
   assert.match(label, /does not support the required check settings/);
-  assert.match(label, /the check was refused and nothing was sent to Codex/);
+  assert.match(label, /the check was refused and nothing was sent to the provider/);
   assert.match(label, /seatline-companion install/);
   assert.equal((await sends()).length, 0, 'nothing was sent to the provider');
   // Seatline is updated and restarted; Check now works again without reloading the page.
@@ -241,7 +241,7 @@ test('typing announces a repeated idle message once and still announces state tr
   await page.keyboard.press('End'); await page.keyboard.type(' Fifteen letters');
   assert.deepEqual(await page.evaluate(() => globalThis.__announcements), ['Text changed. Checking after a pause.']);
   await result();
-  assert.deepEqual(await page.evaluate(() => globalThis.__announcements), ['Text changed. Checking after a pause.', 'Checking with Codex… You can keep typing.', '1 suggestion. Review before accepting.']);
+  assert.deepEqual(await page.evaluate(() => globalThis.__announcements), ['Text changed. Checking after a pause.', 'Checking your text… You can keep typing.', '1 suggestion. Review before accepting.']);
 });
 test('disabled site, revoked permission and removed field cancel work and remove all previews', async () => {
   for (const change of ['disable', 'revoke', 'remove']) {
