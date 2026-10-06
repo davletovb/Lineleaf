@@ -862,3 +862,22 @@ test('a provider timeout pauses only that provider and survives a worker restart
   const allowed = next.connect(); allowed.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', kind: 'automatic'});
   await waitFor(() => allowed.received.some(x => x.type === 'result'));
 });
+test('one settings save commits all edited profiles, including inactive cloud revocation, with atomic stale/invalid refusal', async () => {
+  const f = fakeChrome(); installController(f.api);
+  await saveProvider(f, {provider: 'gemini', model: 'gemini-model', allowCloud: true});
+  await saveProvider(f, {provider: 'codex'});
+  const loaded = (await f.rpc('get-settings')).value;
+  const profiles = {gemini: {...loaded.providerSettings.gemini, allowCloud: false}, claude: {...loaded.providerSettings.claude, model: 'sonnet'}};
+  const payload = {changes: {}, expected: {provider: loaded.provider, providerSettings: loaded.providerSettings}, profiles, dictionary: {add: [], remove: []}};
+  const saved = await f.rpc('save-settings', payload); assert.equal(saved.ok, true); assert.equal(saved.value.provider, 'codex');
+  assert.equal(saved.value.providerSettings.gemini.allowCloud, false); assert.equal(saved.value.providerSettings.claude.model, 'sonnet');
+  const before = structuredClone(f.data);
+  assert.equal((await f.rpc('save-settings', payload)).code, 'SETTINGS_CHANGED'); assert.deepEqual(f.data, before);
+  const current = (await f.rpc('get-settings')).value;
+  const expected = {provider: current.provider, providerSettings: current.providerSettings};
+  for (const profiles of [null, {unknown: current.providerSettings.codex}, {claude: {...current.providerSettings.claude, speed: 'fast'}}, {gemini: {...current.providerSettings.gemini, model: 'bad model'}}, {grok: {...current.providerSettings.grok, credentials: 'refused'}}]) {
+    assert.equal((await f.rpc('save-settings', {...payload, expected, profiles})).code, 'INVALID_REQUEST'); assert.deepEqual(f.data, before);
+  }
+  await saveProvider(f, {provider: 'gemini'});
+  assert.equal((await f.rpc('get-settings')).value.allowCloud, false);
+});

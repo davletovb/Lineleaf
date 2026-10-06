@@ -58,6 +58,7 @@ const stub = ({sites = [], paused = false, automatic = false, clarity = false, u
   const settings = JSON.parse(sessionStorage.getItem('lineleafSettings') ?? 'null') ?? {provider: 'codex', allowCloud: false, providerSettings: ${JSON.stringify(preferences(null).providerSettings)}, variant: 'US', model: '', effort: 'low', speed: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
   window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type, payload}) {
       if (type === 'save-settings') {
+        Object.assign(settings.providerSettings, payload.profiles);
         const provider = payload.changes.provider ?? settings.provider;
         if (provider !== settings.provider) Object.assign(settings, settings.providerSettings[provider]);
         Object.assign(settings, payload.changes);
@@ -290,5 +291,21 @@ test('settings saves provider-specific models and shows Codex-only budgets and e
   assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol'); assert.equal(await page.locator('#effort').inputValue(), 'xhigh'); assert.equal(await page.locator('#speed').inputValue(), 'fast');
   assert.equal(await page.locator('#effort').isEnabled(), true);
   await page.locator('#provider').selectOption('gemini'); assert.equal(await page.locator('#allow-cloud').isChecked(), true); assert.equal(await page.locator('#model').inputValue(), 'gemini-model');
+  await context.close();
+});
+
+test('one Save retains edits across provider switches, including revoking Gemini cloud access', async () => {
+  const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 800}});
+  await settled(page, '#authorize');
+  const save = async () => { await page.getByRole('button', {name: 'Save preferences'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.'); };
+  await page.locator('#model').fill('gpt-6-sol');
+  await page.locator('#provider').selectOption('gemini'); await page.locator('#model').fill('gemini-model'); await page.locator('#allow-cloud').check();
+  await save();
+  await page.locator('#provider').selectOption('codex'); assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol');
+  await page.locator('#provider').selectOption('gemini'); await page.locator('#allow-cloud').uncheck();
+  await page.locator('#provider').selectOption('claude'); await page.locator('#model').fill('sonnet'); await save();
+  await page.reload(); await settled(page, '#authorize');
+  await page.locator('#provider').selectOption('gemini'); assert.equal(await page.locator('#allow-cloud').isChecked(), false); assert.equal(await page.locator('#model').inputValue(), 'gemini-model');
+  await page.locator('#provider').selectOption('codex'); assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol');
   await context.close();
 });

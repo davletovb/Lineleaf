@@ -337,7 +337,7 @@ test('evaluation stops before a writing send when the companion lacks service-ti
 });
 test('evaluation records and hashes each provider and cloud policy, without Codex-only settings leaking', async () => {
   for (const provider of ['codex', 'claude', 'gemini', 'grok']) {
-    const cfg = await configuration({provider, fixture: true, allowCloud: provider === 'gemini'});
+    const cfg = {...config, provider, effort: provider === 'codex' ? 'low' : '', speed: '', allowCloud: provider === 'gemini'};
     const {run} = await evaluate(corpus, cfg, {fixture: true});
     assert.equal(run.rows.length, corpus.cases.length); assert.ok(run.rows.every(row => row.status === 'completed'));
     assert.equal(score(corpus, run).configuration.provider, provider);
@@ -345,7 +345,7 @@ test('evaluation records and hashes each provider and cloud policy, without Code
     assert.throws(() => score(corpus, altered));
     if (provider !== 'codex') assert.equal(cfg.effort, '');
   }
-  const blocked = await evaluate(corpus, await configuration({provider: 'gemini', fixture: true}), {fixture: true});
+  const blocked = await evaluate(corpus, {...config, provider: 'gemini', effort: '', speed: '', allowCloud: false}, {fixture: true});
   assert.equal(blocked.readiness, 'CLOUD_SIGN_IN_REQUIRED'); assert.equal(blocked.run.rows.length, 1);
   for (const cfg of [{provider: 'unknown'}, {provider: 'claude', effort: 'low'}, {provider: 'grok', speed: 'fast'}, {provider: 'codex', allowCloud: true}])
     await assert.rejects(configuration({...cfg, fixture: true}));
@@ -353,7 +353,7 @@ test('evaluation records and hashes each provider and cloud policy, without Code
 
 test('provider evaluation uses protected policy and refuses a changed cloud sign-in before output', async () => {
   let calls = [];
-  const cfg = await configuration({provider: 'gemini', fixture: true, allowCloud: true});
+  const cfg = {...config, provider: 'gemini', effort: '', speed: '', allowCloud: true};
   const result = await evaluate(corpus, cfg, {fixture: true, connectionFactory: () => new NativeSeatline(() => fakeNative((m, p) => {
     calls.push(m);
     broker(m, p, {state: {...READY, sign_in: m.method === 'readiness' ? 'cloud' : 'api_key'}});

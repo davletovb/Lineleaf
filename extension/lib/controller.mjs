@@ -248,18 +248,22 @@ export function installController(api, {now = Date.now, clock = () => performanc
     if (message.type === 'set-pause' && exactKeys(p, ['paused']) && typeof p.paused === 'boolean') {
       const next = {...settings, paused: p.paused}; await api.storage.local.set({preferences: next}); return next;
     }
-    if (message.type === 'save-settings' && exactKeys(p, ['changes', 'expected', 'dictionary'])) {
+    if (message.type === 'save-settings' && (exactKeys(p, ['changes', 'expected', 'dictionary']) || exactKeys(p, ['changes', 'expected', 'dictionary', 'profiles']))) {
       const fields = ['provider', 'model', 'effort', 'speed', 'allowCloud', 'variant', 'automatic', 'clarity'];
       if (!isObject(p.changes) || !Object.keys(p.changes).every(key => fields.includes(key))
           || !exactKeys(p.dictionary, ['add', 'remove'])
           || !['add', 'remove'].every(key => Array.isArray(p.dictionary[key]) && p.dictionary[key].length <= 500 && p.dictionary[key].every(word => dictionaryWord(word)))) throw new LineleafError('INVALID_REQUEST');
-      const scoped = Object.keys(p.changes).some(key => ['provider', 'model', 'effort', 'speed', 'allowCloud'].includes(key));
+      const patches = Object.hasOwn(p, 'profiles') ? p.profiles : {};
+      if (!isObject(patches) || Object.keys(patches).length > PROVIDERS.length || !Object.entries(patches).every(([id, values]) => PROVIDERS.includes(id) && exactKeys(values, ['model', 'effort', 'speed', 'allowCloud']) && ['model', 'effort', 'speed', 'allowCloud'].every(key => providerSettings(values, id)[key] === values[key]))) throw new LineleafError('INVALID_REQUEST');
+      const editedProfiles = Object.keys(patches).length > 0;
+      const scoped = editedProfiles || Object.keys(p.changes).some(key => ['provider', 'model', 'effort', 'speed', 'allowCloud'].includes(key));
       const switching = Object.hasOwn(p.changes, 'provider') && p.changes.provider !== p.expected?.provider;
-      const expectedKeys = [...new Set([...Object.keys(p.changes), ...(scoped ? ['provider'] : []), ...(switching ? ['providerSettings'] : [])])];
+      const expectedKeys = [...new Set([...Object.keys(p.changes), ...(scoped ? ['provider'] : []), ...((switching || editedProfiles) ? ['providerSettings'] : [])])];
       if (!exactKeys(p.expected, expectedKeys)) throw new LineleafError('INVALID_REQUEST');
       const target = p.changes.provider ?? settings.provider;
       if (!PROVIDERS.includes(target)) throw new LineleafError('INVALID_REQUEST');
-      const base = {...settings, provider: target, ...settings.providerSettings[target]};
+      const base = {...settings, provider: target, ...settings.providerSettings[target], ...patches[target]};
+      if (patches[target] && ['model', 'effort', 'speed', 'allowCloud'].some(key => Object.hasOwn(p.changes, key) && p.changes[key] !== patches[target][key])) throw new LineleafError('INVALID_REQUEST');
       const validated = preferences({...base, ...p.changes});
       if (!Object.keys(p.changes).every(key => validated[key] === p.changes[key])) throw new LineleafError('INVALID_REQUEST');
       // Bind provider preferences to the provider the panel loaded. A switch also guards the stored profiles.
@@ -272,7 +276,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
       const remove = new Set(p.dictionary.remove.map(dictionaryWord));
       const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(dictionaryWord)])];
       if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
-      const bank = {...settings.providerSettings, [target]: providerSettings(validated, target)};
+      const bank = {...settings.providerSettings, ...patches, [target]: providerSettings(validated, target)};
       const next = preferences({...validated, providerSettings: bank, dictionary});
       if (JSON.stringify(next) !== JSON.stringify(settings)) await api.storage.local.set({preferences: next});
       return next;

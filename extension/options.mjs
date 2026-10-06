@@ -1,5 +1,5 @@
 import {command} from './lib/ui-api.mjs';
-import {errorCode, dictionaryWord, PROVIDER_LABELS, providerSettings, preferences} from './lib/policy.mjs';
+import {errorCode, dictionaryWord, PROVIDER_LABELS, preferences} from './lib/policy.mjs';
 import {messageFor, connectionSummary} from './lib/messages.mjs';
 const query = x => document.querySelector(x), show = text => { query('#status').textContent = text; };
 let loaded, lastTiming, profiles, selectedProvider;
@@ -10,7 +10,7 @@ function renderProvider(provider) {
   query('#allow-cloud').checked = values.allowCloud; query('#cloud-setting').hidden = provider !== 'gemini';
 }
 query('#provider').addEventListener('change', () => {
-  profiles[selectedProvider] = providerSettings({model: query('#model').value.trim(), effort: query('#effort').value, speed: query('#speed').value, allowCloud: query('#allow-cloud').checked}, selectedProvider);
+  profiles[selectedProvider] = {model: query('#model').value.trim(), effort: query('#effort').value, speed: query('#speed').value, allowCloud: query('#allow-cloud').checked};
   renderProvider(query('#provider').value);
 });
 async function loadTiming() {
@@ -54,12 +54,14 @@ query('#preferences').addEventListener('submit', async event => {
   const values = {provider: selectedProvider, allowCloud: selectedProvider === 'gemini' && query('#allow-cloud').checked, model: query('#model').value.trim(), effort: query('#effort').value, speed: query('#speed').value, variant: query('#variant').value, automatic: query('#automatic').checked, clarity: query('#automatic').checked && query('#clarity').checked};
   const changes = {}, expected = {};
   for (const key of Object.keys(values)) if (values[key] !== loaded[key] || (values.provider !== loaded.provider && ['model', 'effort', 'speed', 'allowCloud'].includes(key))) { changes[key] = values[key]; expected[key] = loaded[key]; }
-  if (Object.keys(changes).some(key => ['provider', 'model', 'effort', 'speed', 'allowCloud'].includes(key))) expected.provider = loaded.provider;
-  if (values.provider !== loaded.provider) expected.providerSettings = loaded.providerSettings;
+  profiles[selectedProvider] = {model: values.model, effort: values.effort, speed: values.speed, allowCloud: values.allowCloud};
+  const patches = Object.fromEntries(Object.entries(profiles).filter(([id, profile]) => ['model', 'effort', 'speed', 'allowCloud'].some(key => profile[key] !== loaded.providerSettings[id][key])));
+  if (Object.keys(patches).length || Object.keys(changes).some(key => ['provider', 'model', 'effort', 'speed', 'allowCloud'].includes(key))) expected.provider = loaded.provider;
+  if (values.provider !== loaded.provider || Object.keys(patches).length) expected.providerSettings = loaded.providerSettings;
   const words = [...new Set(dictionary.map(dictionaryWord))];
   const delta = {add: words.filter(word => !loaded.dictionary.includes(word)), remove: loaded.dictionary.filter(word => !words.includes(word))};
   show('Saving preferences…');
-  try { await command('save-settings', {changes, expected, dictionary: delta}); await load(); show('Preferences saved.'); }
+  try { await command('save-settings', {changes, expected, dictionary: delta, ...(Object.keys(patches).length ? {profiles: patches} : {})}); await load(); show('Preferences saved.'); }
   catch (error) { show(messageFor(errorCode(error))); }
 });
 query('#automatic').addEventListener('change', () => { query('#clarity').disabled = !query('#automatic').checked; if (!query('#automatic').checked) query('#clarity').checked = false; });
