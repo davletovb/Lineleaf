@@ -12,7 +12,7 @@ before(async () => {
   await page.route('https://inline.lineleaf.test/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
+    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
@@ -151,7 +151,10 @@ test('a companion that cannot receive writing is shown on the badge, not as an i
   await page.evaluate(() => { fixture.worker.legacy = true; }); await type();
   await inline.locator('.badge').waitFor(el => el.dataset.state === 'attention');
   assert.equal(await inline.locator('.badge').evaluate(el => el.dataset.tip), 'Needs attention');
-  assert.match(await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label')), /cannot enforce the subscription sign-in policy/);
+  const label = await inline.locator('.badge').evaluate(el => el.getAttribute('aria-label'));
+  assert.match(label, /does not support the required check settings/);
+  assert.match(label, /the check was refused and nothing was sent to Codex/);
+  assert.match(label, /seatline-companion install/);
   assert.equal((await sends()).length, 0, 'nothing was sent to the provider');
   // Seatline is updated and restarted; Check now works again without reloading the page.
   await page.evaluate(() => { fixture.worker.legacy = false; fixture.worker.ports[0].disconnect(); });

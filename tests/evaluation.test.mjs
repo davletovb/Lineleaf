@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {readFile, mkdtemp, writeFile, rm, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {sha256, validateCorpus, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
+import {sha256, validateCorpus, validateRun, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
 import {parseData, readData} from '../tools/evaluation/json.mjs';
-import {evaluate, plannedRun} from '../tools/evaluate-writing.mjs';
+import {evaluate, plannedRun, configuration} from '../tools/evaluate-writing.mjs';
 import {betaGate, CI_CHECKS, COEXISTENCE_CHECKS, DEVICE_CHECKS} from '../tools/evaluation/beta-gate.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {nativePort} from '../tools/evaluation/native-port.mjs';
@@ -262,4 +262,38 @@ test('a clearer-wording answer outside the contract is an invalid output, and a 
   const s = score(corpus, d.run); assert.deepEqual(s.invalidCaseIds, ['clarity-001']);
   const changesNumber = data(); changesNumber.run.rows.find(r => r.id === 'clarity-006').response = JSON.stringify({suggestions: [{before: '80 percent', after: '90 percent', left: 'total of ', right: ' of the work', explanation: 'x'}]});
   assert.deepEqual(candidates(changesNumber.run.rows.find(r => r.id === 'clarity-006').response, corpus.cases.find(c => c.id === 'clarity-006').source, 'clarity'), []);
+});
+
+test('evaluation accepts a fixed effort for the whole run and preserves provider default omission', async () => {
+  for (const effort of ['', 'low', 'medium', 'max']) {
+    const settings = {...config, effort};
+    assert.equal(settings.effort, effort);
+    const turns = [];
+    const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
+      const c = corpus.cases[turns.length];
+      return {async request(method, turn) {
+        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true}};
+        turns.push(turn); return JSON.stringify(c.proposal);
+      }, close() {}};
+    }});
+    assert.equal(run.rows.length, corpus.cases.length);
+    for (const turn of turns) {
+      if (effort) assert.equal(turn.reasoning_effort, effort);
+      else assert.equal(Object.hasOwn(turn, 'reasoning_effort'), false);
+    }
+    assert.equal(run.configuration.effort, effort);
+    assert.equal(run.configurationHash, sha256(run.configuration));
+  }
+  await assert.rejects(configuration({fixture: true, effort: 'unexpected'}), /INVALID_EFFORT/);
+});
+test('evaluation evidence hashes explicit effort and keeps historical configurations readable', () => {
+  const {run} = data();
+  validateRun(corpus, run);
+  run.configuration.effort = 'low'; run.configurationHash = sha256(run.configuration);
+  validateRun(corpus, run);
+  run.configuration.effort = 'medium';
+  assert.throws(() => validateRun(corpus, run));
+  run.configurationHash = sha256(run.configuration); validateRun(corpus, run);
+  run.configuration.effort = 'unknown'; run.configurationHash = sha256(run.configuration);
+  assert.throws(() => validateRun(corpus, run));
 });

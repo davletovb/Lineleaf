@@ -30,6 +30,14 @@ class Fragmented(io.BytesIO):
 
 
 class FramingTests(unittest.TestCase):
+    def test_benchmark_effort_is_explicit_bounded_and_absent_for_provider_default(self):
+        self.assertNotIn("reasoning_effort", writing_turn("He go."))
+        self.assertEqual(writing_turn("He go.", effort="low")["reasoning_effort"], "low")
+        with self.assertRaises(ValueError):
+            writing_turn("He go.", effort='low"; command')
+        report = run_benchmark(FIXTURE, fixture=True, effort="low")
+        self.assertEqual(report["reasoning_effort"], "low")
+        self.assertEqual(report["status"], "completed")
     def test_fragmented_unicode_roundtrip(self):
         value = {"text": "Zoë 👩🏽‍💻", "id": "a"}
         self.assertEqual(read_frame(Fragmented(encoded(value))), value)

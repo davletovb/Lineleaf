@@ -2,10 +2,24 @@ import {command} from './lib/ui-api.mjs';
 import {errorCode, dictionaryWord} from './lib/policy.mjs';
 import {messageFor, connectionSummary} from './lib/messages.mjs';
 const query = x => document.querySelector(x), show = text => { query('#status').textContent = text; };
-let loaded;
+let loaded, lastTiming;
+async function loadTiming() {
+  lastTiming = await command('get-check-timing');
+  query('#timing-phases').replaceChildren(); query('#copy-timing').disabled = !lastTiming;
+  query('#timing-summary').textContent = lastTiming
+    ? `${lastTiming.kind} ${lastTiming.mode} · ${lastTiming.requested_model ?? 'provider default model'} · ${lastTiming.reasoning_effort ?? 'provider default effort'} · ${lastTiming.outcome}`
+    : 'No manual check recorded in this browser session.';
+  if (!lastTiming) return;
+  for (const [key, label] of [['readiness_ms', 'Readiness'], ['launch_wait_ms', 'Wait for launch'], ['provider_init_ms', 'Startup'], ['answer_ms', 'Answer'], ['finish_ms', 'Completion'], ['validation_ms', 'Validation'], ['total_ms', 'Total']]) {
+    const row = document.createElement('tr'), name = document.createElement('th'), value = document.createElement('td');
+    name.scope = 'row'; name.textContent = label;
+    value.textContent = Number.isFinite(lastTiming[key]) ? `${(lastTiming[key] / 1000).toFixed(2)} s` : 'Unavailable';
+    row.append(name, value); query('#timing-phases').append(row);
+  }
+}
 async function load() {
   const settings = await command('get-settings'); loaded = settings; query('#variant').value = settings.variant;
-  query('#model').value = settings.model; query('#paused').checked = settings.paused;
+  query('#model').value = settings.model; query('#effort').value = settings.effort; query('#paused').checked = settings.paused;
   query('#automatic').checked = settings.automatic; query('#clarity').checked = settings.clarity; query('#clarity').disabled = !settings.automatic;
   query('#dictionary').value = settings.dictionary.join('\n');
   query('#authorize').textContent = `seatline-companion authorize lineleaf codex chrome-extension://${chrome.runtime.id}/`;
@@ -25,7 +39,7 @@ query('#preferences').addEventListener('submit', async event => {
   const dictionary = query('#dictionary').value.split(/\r?\n/u).map(x => x.trim()).filter(Boolean);
   if (dictionary.length > 500 || dictionary.some(word => !dictionaryWord(word))) { show('Use one word per line, up to 500 words of at most 64 characters.'); return; }
   if (!loaded) return;
-  const values = {model: query('#model').value.trim(), variant: query('#variant').value, automatic: query('#automatic').checked, clarity: query('#automatic').checked && query('#clarity').checked};
+  const values = {model: query('#model').value.trim(), effort: query('#effort').value, variant: query('#variant').value, automatic: query('#automatic').checked, clarity: query('#automatic').checked && query('#clarity').checked};
   const changes = {}, expected = {};
   for (const key of Object.keys(values)) if (values[key] !== loaded[key]) { changes[key] = values[key]; expected[key] = loaded[key]; }
   const words = [...new Set(dictionary.map(dictionaryWord))];
@@ -51,7 +65,13 @@ query('#connection').addEventListener('click', async () => {
   catch (error) { show(messageFor(errorCode(error))); }
   finally { query('#connection').disabled = false; }
 });
-query('#reset').addEventListener('click', async () => { try { await command('reset'); await load(); show('Preferences and site access reset.'); } catch (error) { show(messageFor(errorCode(error))); } });
+query('#reset').addEventListener('click', async () => { try { await command('reset'); await load(); await loadTiming(); show('Preferences and site access reset.'); } catch (error) { show(messageFor(errorCode(error))); } });
+query('#refresh-timing').addEventListener('click', () => loadTiming().catch(() => show(messageFor('UNAVAILABLE'))));
+query('#copy-timing').addEventListener('click', async () => {
+  if (!lastTiming) return;
+  try { await navigator.clipboard.writeText(JSON.stringify(lastTiming, null, 2)); show('Timing copied.'); }
+  catch { show('Could not copy timing.'); }
+});
 query('#copy-command').addEventListener('click', async () => {
   const command = query('#authorize').textContent;
   try { await navigator.clipboard.writeText(command); show('Command copied.'); }
@@ -67,3 +87,4 @@ const mark = () => {
 };
 addEventListener('scroll', mark, {passive: true}); mark();
 load().catch(() => show(messageFor('UNAVAILABLE')));
+loadTiming().catch(() => {});

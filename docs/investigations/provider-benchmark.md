@@ -7,8 +7,10 @@
 Use the audited installed companion, an authenticated Codex subscription, and a model exposed by the installed provider. Verify `lineleaf` has a Codex grant. Replace `MODEL_ID` with that actual model identifier:
 
 ```sh
-python3 -m tools.benchmark_provider --companion /path/to/seatline-companion --provider codex --model MODEL_ID --samples 5 --timeout 30
+python3 -m tools.benchmark_provider --companion /path/to/seatline-companion --provider codex --model MODEL_ID --effort low --samples 5 --timeout 30
 ```
+
+Pass the same `--effort` to the benchmark and quality evaluator when comparing runs. The benchmark keeps its historical omitted-effort behavior (Provider default); the evaluator defaults to Low. Both record the selected budget for the whole run, so omission is not evidence of an equivalent comparison.
 
 The harness first requires available/authenticated/subscription status and tool isolation. An API-key, cloud, unknown, unavailable, or unclassified configuration is refused before writing. Each turn uses no tools, ephemeral context, and no continuation. Text is synthetic, limited to 2,000 characters, and wrapped as data. Six cases cover agreement, spelling, punctuation, correct text, facts/negation, and Unicode.
 

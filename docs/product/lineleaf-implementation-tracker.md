@@ -19,9 +19,9 @@ E-01–E-03 implementation: [PR #5](https://github.com/davletovb/Lineleaf/pull/5
 
 ## Progress
 
-- Planned implementation items: **24**
+- Planned implementation items: **27**
 - DONE: **8**
-- IMPLEMENTED — VERIFY: **16**
+- IMPLEMENTED — VERIFY: **19**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
 - TODO: **0**
@@ -52,6 +52,7 @@ A staged decision can have separate dependency gates only when the decision log 
 | D | Validate real editors and investigate complex surfaces | D-01 through D-03 |
 | E | Evaluate quality, coexistence, and beta packaging | E-01 through E-03 |
 | F | Add Grammarly-style inline rewriting | F-01 through F-03 |
+| G | Reduce manual-check latency and expose saved effort/timings | G-01 through G-03 |
 
 ## Work items
 
@@ -149,3 +150,23 @@ Remaining acceptance: fresh macOS/Linux browser, installed-extension, packaging 
 ## Seatline preparation review follow-up
 
 Status: **IMPLEMENTED — VERIFY**. Owner: Lineleaf/Seatline maintainers. Unfinished preparation is aborted and its native port detached before foreground writing or Check Seatline; the abandoned operation cannot later close the new foreground port. Regressions hold preparation without a cancel acknowledgement past the status/drain deadlines and cover an unfinished native handshake. All 105 Node units pass and exit normally; 37 Python tests and the extension build pass locally. The first correction's [CI run 37217540722](https://github.com/davletovb/Lineleaf/actions/runs/37217540722) passed all four jobs, including macOS. Current follow-up CI is recorded on [PR #14](https://github.com/davletovb/Lineleaf/pull/14) after refreshing the companion pin. Seatline #11 requires a merge commit to retain the app-pinned commit on main. Live/provider/device acceptance remains open; slice E stays deferred.
+
+## G — Manual-check latency follow-up — 2026-10-06
+
+Owner: Lineleaf/Seatline maintainers. Companion dependency: [Seatline #13](https://github.com/davletovb/seatline/pull/13), pinned at `59c39234c09b1f44fb52d5117a15896075196fef`. Authorized by the owner's request to implement the remaining latency suggestions, with effort saved beside model selection and applied to every check. Code baseline: Lineleaf `0664e02` and Seatline `edc34e4` on main; neither repository had open implementation PRs at inspection. Earlier IDs and live/device gates remain in effect.
+
+| ID | Status | Change and evidence | Remaining acceptance |
+| --- | --- | --- | --- |
+| G-01 | IMPLEMENTED — VERIFY | Saved effort beside model, Low default, explicit Provider default, validated atomic settings saves, global application to all writing modes; generic Seatline capability/turn field and safe CLI override. Unit regressions cover worker reload, stale settings and refusal before generation on unsupported companions. | Updated companion installed/restarted on the owner's device; supported model/effort choices and writing quality verified live. |
+| G-02 | IMPLEMENTED — VERIFY | Last non-cancelled manual check timing in Settings, with readiness, launch wait, startup, first complete message, completion and validation. Only one session record with no drafts/answers/origins; copying and refresh; absent phases unavailable; content-script access refused. Benchmark `--effort` records the budget for the entire run. | Browser/IPC/platform CI and live manual-check timing distribution, including page dispatch/render overhead separately. |
+| G-03 | IMPLEMENTED — VERIFY | Short-explanation instructions with original context requirements and the existing schema/source/ambiguity checks; context minimization is deferred until corpus validation. Companion stops and reaps completed ephemeral Codex turns promptly, while persistent save grace and cancellation remain intact. | Live output-size, latency and precision comparison on the same corpus/model/effort. |
+
+Local evidence: 113 Node units, 38 Python checks and all 221 browser checks pass; build/package and the full synthetic evaluation pass. New evaluation configurations hash the effort choice; historical evidence remains readable. The browser suite uses a downloaded Chromium headless shell, including Settings persistence/layout/timing controls. Full Chrome installed-extension and real-broker IPC cannot create AF_UNIX sockets here. The initial [CI run 37405024937](https://github.com/davletovb/Lineleaf/actions/runs/37405024937) passed both companion jobs but its browser jobs timed out because nine fixture route allowlists omitted the new timing module. Those routes now serve the module. The [second run 37406258616](https://github.com/davletovb/Lineleaf/actions/runs/37406258616) passed both companion jobs and 220/221 browser checks on each platform; its sole failure was an assertion using the old companion-update wording. The corrected assertion also verifies refusal, the install instruction, zero provider sends and recovery after update. Complete browser/installed-extension CI is rerun on [Lineleaf #19](https://github.com/davletovb/Lineleaf/pull/19). Seatline's focused provider lifecycle/contract checks pass (50 tests), plus 75 core and 72 adapter units; all six [Seatline CI jobs](https://github.com/davletovb/seatline/actions/runs/37404826518) pass. No new live speedup is claimed. The owner's informal switch to `gpt-6-luna` reported 3–4 seconds and the same errors on their example; this is model-selection feedback, not a corpus comparison or acceptance of these additional changes. Seatline slice E remains DEFERRED pending its app-server decision.
+
+## G review corrections — 2026-10-06
+
+Owner: Lineleaf/Seatline maintainers. Status: **IMPLEMENTED — VERIFY**. The [Lineleaf #19](https://github.com/davletovb/Lineleaf/pull/19) reviews are addressed by invalidating older timing writes during Reset and draining writes already in flight before clearing the record. Site permissions are removed before that drain; timing-storage rejection cannot leave them granted. Automatic and cancelled checks preserve the last manual diagnostic. Regression cases cover cancellation during Reset, rejected session storage, delayed writes without delayed result delivery, and automatic/cancelled overwrite protection. Duplicate policy imports are consolidated and the effort choices are ordered Provider default, None, Low through Maximum. The owner confirmed there are no existing users, so Low remains the intended default without migration handling.
+
+The instruction to minimize context or use empty context has been removed from this PR; original context requirements and strict whole-response rejection remain until a separate corpus evaluation. A substring-ambiguity regression preserves that boundary. Quality evaluation now accepts a fixed `--effort`, records/hashes the choice and forbids replacing the effort when scoring existing evidence. Benchmark documentation uses an explicit matching effort and states its historical Provider-default behavior. Seatline is re-pinned to the review-corrected revision above.
+
+Review-fix local validation: all 118 Node unit checks, 38 Python checks and 221 browser checks pass. Build/package and the trusted typing probe pass. Full 380-case synthetic evaluator runs complete with both explicit Medium and Provider default, and their configuration records preserve the requested effort. The preceding [Lineleaf CI run 37406770192](https://github.com/davletovb/Lineleaf/actions/runs/37406770192) passed both companion jobs, all 221 browser checks and all seven installed-extension/lifecycle checks on Linux and macOS; its typing measurement then failed because its separate route allowlist also omitted the timing module. That final fixture route is corrected too. Current full CI, packaging, evaluator/typing probes and browser evidence are recorded on the PR. No live Codex runtime/account is available here; model/CLI compatibility of None/Maximum remains a live/device gate. No live speedup or quality gain is claimed.

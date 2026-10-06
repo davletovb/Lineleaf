@@ -14,11 +14,13 @@ This exercises the production `writingTurn`, `NativeSeatline`, readiness gates a
 
 Copy `labels-template.json` to `labels.json`. An independent human must inspect every source/proposal and correct references before setting `review.kind` to `human`, a pseudonymous `reviewer`, `independent: true` and ISO `reviewedAt`. The ID must differ from corpus author `codex`. Each case requires `decision: approved`, `corrected` or `rejected`. Approved references must match the draft; corrected references must actually differ after production decoding. A rejected case requires `reference: null` and blocks release until the corpus is repaired and reviewed again. Changing only a review header cannot approve labels. Keep the exact corpus hash. This v2 corpus invalidates earlier references/runs; regenerate all hashes/reviews/runs. Proofreading references use the same contextual schema as provider responses; alternative approved spans need reference adjudication.
 
+The evaluator accepts a fixed `--effort` for a whole run (`none`, `low`, `medium`, `high`, `xhigh`, `max`, or an empty string for Provider default). Omission uses Low, matching Lineleaf Settings. The choice is sent on every turn and included in the configuration hash; changing it requires fresh evidence. Scoring an existing `--run` cannot override its recorded effort. Compare efforts in separate output directories with the same corpus, model and prompt engine. Shorter-context prompts remain deferred; this change retains the original context instructions and strict whole-response validation.
+
 Before collecting live outcomes, prepare templates for the intended model/CLI/runtime configuration without contacting a provider:
 
 ```sh
 npm run package
-node tools/evaluate-writing.mjs --prepare --model ACTUAL_SELECTED_MODEL \
+node tools/evaluate-writing.mjs --prepare --effort low --model ACTUAL_SELECTED_MODEL \
   --provider-version ACTUAL_CLI_VERSION --out test-results/quality-plan
 ```
 
