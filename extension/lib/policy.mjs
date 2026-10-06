@@ -104,9 +104,9 @@ export function requireReady(status) {
 export function requireEffort(status, settings) {
   if (settings.effort && status?.capabilities?.reasoning_effort !== true) throw new LineleafError('COMPANION_UPDATE_REQUIRED');
 }
-// Keep the existing schema and validation bounds. Ask for only the context
-// needed to locate a correction, and avoid spending output on long reasons.
-const COMPACT_EDITS = ' Use the shortest context that uniquely identifies each source occurrence; use empty left and right strings when the source is unique. Prefer a single short phrase for each explanation. Do not repeat the source in the explanation.';
+// Keep the original context instructions and strict validation until shorter
+// context has been evaluated on the corpus. Reduce explanation verbosity only.
+const COMPACT_EDITS = ' Prefer a single short phrase for each explanation. Do not repeat the source in the explanation.';
 const CLARITY_TASK = 'Suggest phrase-level wording improvements that make the text clearer or more concise, such as removing filler or replacing a roundabout phrase. Keep the writer\'s voice, meaning, tone and formality. Do not fix grammar, spelling or punctuation (those are checked separately), do not rewrite whole sentences, and never change names, numbers, dates, negation or uncertainty. Suggest a change only when it is clearly better; return an empty array if the text already reads well. Return ONLY JSON: {"suggestions":[{"before":"exact source","after":"replacement","left":"immediately preceding context","right":"immediately following context","explanation":"brief reason"}]}. Use at most ' + CLARITY_MAX + ' suggestions, at most 120 UTF-16 code units of context on each side, at most 240 UTF-16 code units in before and after, and at most 280 UTF-16 code units per explanation. Do not supply offsets.';
 const REWRITE_TASKS = {
   improve: 'Improve the selection for clarity, concision and flow. Keep the writer\'s voice, meaning, level of formality and rough length. Fix awkward or wordy phrasing and change nothing else. If it already reads well, return it unchanged.',

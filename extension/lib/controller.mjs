@@ -1,13 +1,13 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, requireEffort, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 import {checkTiming} from './check-timing.mjs';
-import {requireEffort} from './policy.mjs';
 
 export function installController(api, {now = Date.now, clock = () => performance.now()} = {}) {
   let active = null, diagnostic = false, backoffUntil = 0, automaticHold = 0; // automaticHold: no background requests after the provider failed to answer in time
   const peers = new Set();
+  let timingEpoch = 0, timingWrites = Promise.resolve(), resetting = false;
   const read = async () => preferences((await api.storage.local.get('preferences')).preferences);
   // One native connection serves every request until it has been idle for LINK_IDLE, so a check pays for neither a new companion process nor,
   // usually, a new provider probe. `readinessApi` is what the companion at the other end has shown: Seatline's readiness API (true), a
@@ -118,9 +118,19 @@ export function installController(api, {now = Date.now, clock = () => performanc
     peer.running = true; peer.automatic = automatic; peer.done = new Promise(resolve => { peer.finish = resolve; });
     peer.abort = new AbortController(); const signal = peer.abort.signal;
     const timing = checkTiming(request.mode, automatic ? 'automatic' : 'manual', clock);
+    const epoch = timingEpoch;
     let connection;
-    const saveTiming = outcome => connection ? api.storage.session.set({lastCheckTiming: timing.finish(outcome)}).catch(() => {}) : Promise.resolve();
+    const saveTiming = outcome => {
+      if (!connection || automatic || outcome === 'CANCELLED' || epoch !== timingEpoch) return;
+      const record = timing.finish(outcome);
+      // Results never wait for storage. Reset invalidates late work and drains
+      // writes already in flight before clearing the session record.
+      timingWrites = timingWrites.then(() => {
+        if (epoch === timingEpoch) return api.storage.session.set({lastCheckTiming: record});
+      }).catch(() => {});
+    };
     try {
+      if (resetting) throw new LineleafError('CANCELLED');
       await initialized; const {settings} = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
@@ -257,11 +267,16 @@ export function installController(api, {now = Date.now, clock = () => performanc
       return {...settings, sites};
     }
     if (message.type === 'reset' && p === null) {
+      resetting = true; timingEpoch++;
       for (const peer of peers) cancelPeer(peer);
-      await api.storage.local.clear();
-      await api.storage.session.set({lastCheckTiming: null});
-      const origins = ((await api.permissions.getAll()).origins ?? []).filter(o => /^https?:\/\//.test(o));
-      if (origins.length) await api.permissions.remove({origins}); return preferences(null);
+      try {
+        await api.storage.local.clear();
+        const origins = ((await api.permissions.getAll()).origins ?? []).filter(o => /^https?:\/\//.test(o));
+        if (origins.length) await api.permissions.remove({origins});
+        await timingWrites;
+        await api.storage.session.set({lastCheckTiming: null}).catch(() => {});
+        return preferences(null);
+      } finally { resetting = false; }
     }
     if (message.type === 'open-panel' && exactKeys(p, ['tabId']) && Number.isInteger(p.tabId)) {
       const tab = await api.tabs.get(p.tabId), origin = originOf(tab.url);

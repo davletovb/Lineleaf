@@ -6,7 +6,7 @@ import os from 'node:os';
 import {parseArgs} from 'node:util';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {candidates} from '../extension/lib/candidates.mjs';
-import {writingTurn, preferences, requireReady, errorCode} from '../extension/lib/policy.mjs';
+import {writingTurn, preferences, requireReady, errorCode, EFFORTS} from '../extension/lib/policy.mjs';
 import {nativePort} from './evaluation/native-port.mjs';
 import {sha256, validateCorpus, score, reviewTemplates} from './evaluation/quality.mjs';
 import {readData} from './evaluation/json.mjs';
@@ -20,9 +20,10 @@ export async function privateJSON(path, value) {
   await mkdir(resolve(path, '..'), {recursive: true, mode: 0o700});
   await writeFile(path, JSON.stringify(value, null, 2) + '\n', {mode: 0o600}); await chmod(path, 0o600);
 }
-export async function configuration({model, providerVersion, fixture}) {
+export async function configuration({model, providerVersion, fixture, effort = preferences(null).effort}) {
+  if (!EFFORTS.includes(effort)) throw new Error('INVALID_EFFORT');
   const contract = JSON.parse(await readFile(join(ROOT, 'config/seatline-contract.json'), 'utf8'));
-  return {provider: 'codex', model: fixture ? 'fixture-reference' : model, effort: preferences(null).effort, providerVersion: fixture ? 'fixture' : providerVersion,
+  return {provider: 'codex', model: fixture ? 'fixture-reference' : model, effort, providerVersion: fixture ? 'fixture' : providerVersion,
     seatlineRevision: contract.revision, engineHash: await engineHash(), packageHash: (await readPackage(ROOT)).packageHash,
     runtime: {platform: os.platform(), arch: os.arch(), cpu: os.cpus()[0]?.model ?? 'unknown', memoryGB: Math.round(os.totalmem() / 1073741824 * 100) / 100}};
 }
@@ -78,19 +79,19 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
 }
 const readJSON = readData;
 export async function main(argv = process.argv.slice(2)) {
-  const {values} = parseArgs({args: argv, options: {prepare: {type: 'boolean'}, fixture: {type: 'boolean'}, companion: {type: 'string'}, model: {type: 'string'},
+  const {values} = parseArgs({args: argv, options: {prepare: {type: 'boolean'}, fixture: {type: 'boolean'}, companion: {type: 'string'}, model: {type: 'string'}, effort: {type: 'string'},
     'provider-version': {type: 'string'}, out: {type: 'string', default: 'test-results/quality'}, run: {type: 'string'},
     labels: {type: 'string'}, judgments: {type: 'string'}, acceptance: {type: 'string'}, timeout: {type: 'string', default: '30'}}});
   const corpus = validateCorpus(await readJSON(CORPUS)), out = resolve(values.out);
   if (values.prepare && (values.fixture || values.run || values.labels || values.judgments || values.acceptance)) throw new Error('PREPARATION_OPTIONS_CONFLICT');
   let run, readiness;
   if (values.run) {
-    if (values.fixture || values.model || values.companion) throw new Error('SCORING_OPTIONS_CONFLICT');
+    if (values.fixture || values.model || values.companion || values.effort !== undefined) throw new Error('SCORING_OPTIONS_CONFLICT');
     run = await readJSON(values.run);
   } else {
     if (!values.fixture && (!values.model || preferences({model: values.model}).model !== values.model || !values['provider-version'])) throw new Error('LIVE_CONFIGURATION_REQUIRED');
     const timeout = Number(values.timeout); if (!Number.isFinite(timeout) || timeout < 1 || timeout > 120) throw new Error('INVALID_TIMEOUT');
-    const config = await configuration({model: values.model, providerVersion: values['provider-version'], fixture: values.fixture});
+    const config = await configuration({model: values.model, providerVersion: values['provider-version'], fixture: values.fixture, effort: values.effort});
     if (values.prepare) run = plannedRun(corpus, config);
     else {
       ({run, readiness} = await evaluate(corpus, config, {fixture: values.fixture, companion: values.companion, timeout: timeout * 1000}));

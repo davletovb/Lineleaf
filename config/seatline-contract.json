@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/davletovb/seatline",
-  "revision": "25da149f633bce4063b8bb728bfb6f3a1b3ec6a1",
-  "minimum_revision": "25da149f633bce4063b8bb728bfb6f3a1b3ec6a1",
+  "revision": "59c39234c09b1f44fb52d5117a15896075196fef",
+  "minimum_revision": "59c39234c09b1f44fb52d5117a15896075196fef",
   "legacy_revision": "dc1086582c8b98498aa48dae91c8d174bc3cfc3c",
   "version": "0.1.0-dev",
   "protocol": 1,

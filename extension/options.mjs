@@ -8,7 +8,7 @@ async function loadTiming() {
   query('#timing-phases').replaceChildren(); query('#copy-timing').disabled = !lastTiming;
   query('#timing-summary').textContent = lastTiming
     ? `${lastTiming.kind} ${lastTiming.mode} · ${lastTiming.requested_model ?? 'provider default model'} · ${lastTiming.reasoning_effort ?? 'provider default effort'} · ${lastTiming.outcome}`
-    : 'No check recorded in this browser session.';
+    : 'No manual check recorded in this browser session.';
   if (!lastTiming) return;
   for (const [key, label] of [['readiness_ms', 'Readiness'], ['launch_wait_ms', 'Wait for launch'], ['provider_init_ms', 'Startup'], ['answer_ms', 'Answer'], ['finish_ms', 'Completion'], ['validation_ms', 'Validation'], ['total_ms', 'Total']]) {
     const row = document.createElement('tr'), name = document.createElement('th'), value = document.createElement('td');

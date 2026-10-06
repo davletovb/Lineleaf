@@ -151,7 +151,7 @@ test('settings: effort sits beside model, saves with preferences, and timings sh
   await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'medium');
   await page.evaluate(() => { window.lastTiming = {kind: 'manual', mode: 'proofread', requested_model: 'gpt-6-luna', reasoning_effort: 'medium', outcome: 'completed', total_ms: 3420, readiness_ms: 8, finish_ms: 17}; });
-  await page.getByText('Last check timing', {exact: true}).click(); await page.getByRole('button', {name: 'Refresh timing'}).click();
+  await page.getByText('Last manual check timing', {exact: true}).click(); await page.getByRole('button', {name: 'Refresh timing'}).click();
   await page.waitForFunction(() => document.querySelector('#timing-summary').textContent.includes('gpt-6-luna'));
   assert.match(await page.locator('#timing-phases').textContent(), /Unavailable/);
   assert.match(await page.locator('#timing-phases').textContent(), /3\.42 s/);

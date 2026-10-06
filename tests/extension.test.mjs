@@ -99,9 +99,14 @@ test('saved effort is bounded and applies to every writing mode; provider defaul
   }
   for (const effort of ['unexpected', 'low\";run-command', null, 3]) assert.equal(preferences({effort}).effort, 'low');
   const system = writingTurn('go go', 'proofread', preferences(null)).system;
-  assert.match(system, /shortest context that uniquely identifies/);
+  assert.doesNotMatch(system, /shortest context|use empty left/);
   assert.match(system, /single short phrase/);
   rejects(() => candidates(output([correction()]), 'go go', 'proofread')); // Compact responses still need unique source matches.
+});
+test('substring ambiguity keeps the original whole-response refusal; explicit context preserves the valid edits', () => {
+  const source = 'He go to work. I think the weather is nice, teh end.';
+  rejects(() => candidates(output([correction('he', 'she'), correction('teh', 'the')]), source, 'proofread'));
+  assert.equal(candidates(output([correction('go', 'goes', 'He ', ' to'), correction('teh', 'the', ', ', ' end.')]), source, 'proofread').length, 2);
 });
 test('check timings distinguish completed-message delay from completion and leave absent phases unavailable', () => {
   let time = 100;
@@ -145,6 +150,52 @@ test('effort saves survive worker reloads, reject stale edits, and remain absent
   assert.equal(JSON.stringify(timing).includes('He go'), false); assert.equal(JSON.stringify(timing).includes('Subject agreement'), false);
   assert.equal((await restarted.rpc('get-check-timing', null, restarted.sender)).ok, false);
   await restarted.rpc('reset'); assert.equal((await restarted.rpc('get-check-timing')).value, null);
+});
+test('reset clears in-flight check timing and still removes permissions when timing storage fails', async () => {
+  for (const rejectTiming of [false, true]) {
+    const f = fakeChrome({hang: true}); installController(f.api); const port = f.connect();
+    port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+    await waitFor(() => f.turns.length === 1);
+    const set = f.api.storage.session.set;
+    f.api.storage.session.set = async value => {
+      if (rejectTiming && Object.hasOwn(value, 'lastCheckTiming')) throw new Error('storage unavailable');
+      await set(value);
+    };
+    assert.equal((await f.rpc('reset')).ok, true);
+    await waitFor(() => port.received.some(x => x.code === 'CANCELLED'));
+    assert.equal((await f.rpc('get-check-timing')).value, null);
+    assert.deepEqual(f.data, {});
+    assert.deepEqual((await f.api.permissions.getAll()).origins, []);
+  }
+});
+test('reset drains a delayed timing write while result delivery stays immediate', async () => {
+  const f = fakeChrome(); let release, writing;
+  const blocked = new Promise(resolve => { release = resolve; });
+  const set = f.api.storage.session.set;
+  f.api.storage.session.set = async value => {
+    if (value.lastCheckTiming) { writing = true; await blocked; }
+    await set(value);
+  };
+  installController(f.api); const port = f.connect();
+  port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+  await waitFor(() => writing && port.received.some(x => x.type === 'result'));
+  const reset = f.rpc('reset');
+  await waitFor(() => !f.data.preferences);
+  release();
+  assert.equal((await reset).ok, true);
+  assert.equal((await f.rpc('get-check-timing')).value, null);
+  assert.deepEqual((await f.api.permissions.getAll()).origins, []);
+});
+test('automatic and cancelled checks preserve the last manual timing', async () => {
+  const f = fakeChrome({automatic: true}); installController(f.api); const port = f.connect();
+  const start = kind => port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', kind});
+  start('manual'); await waitFor(() => port.received.some(x => x.type === 'result'));
+  const previous = (await f.rpc('get-check-timing')).value;
+  start('automatic'); await waitFor(() => port.received.filter(x => x.type === 'result').length === 2);
+  assert.deepEqual((await f.rpc('get-check-timing')).value, previous);
+  f.hold = true; start('manual'); await waitFor(() => f.turns.length === 3);
+  port.onMessage.emit({type: 'cancel'}); await waitFor(() => port.received.some(x => x.code === 'CANCELLED'));
+  assert.deepEqual((await f.rpc('get-check-timing')).value, previous);
 });
 test('settings permit only exact HTTP(S) origins and safe provider models', () => {
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
@@ -372,7 +423,7 @@ test('automatic budget is shared across documents and survives a worker restart 
   installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third);
   await waitFor(() => third.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(restarted.calls.some(x => sent(x)), false);
   assert.deepEqual(f.sessionData.automaticBudget, [100000]);
-  assert.equal(f.sessionData.lastCheckTiming.outcome, 'completed');
+  assert.equal(f.sessionData.lastCheckTiming, undefined, 'automatic checks do not replace manual diagnostics');
   assert.equal(JSON.stringify(f.sessionData).includes('He go to work.'), false);
   clock += 10000; const later = restarted.connect(); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result'));
 });
