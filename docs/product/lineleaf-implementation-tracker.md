@@ -189,7 +189,7 @@ Review-fix local validation: all 124 Node units and 40 Python checks pass. Build
 
 ## H-01 — Saved provider selection — 2026-10-06
 
-Owner: Lineleaf maintainers. Status: **IMPLEMENTED — VERIFY**. The owner explicitly selected Claude Code, Gemini through Antigravity, and Grok alongside Codex. Inspected merged Lineleaf `96ab32e98988522e796f79a6d3b39485e8f0ccb8` and Seatline `af245676209803013d5df5ff8431270efc1af9df`, with no conflicting open PRs. The existing companion pin already supplies every adapter; Seatline's app-server slice E remains deferred.
+Owner: Lineleaf maintainers. Status: **IMPLEMENTED — VERIFY**. Evidence: [Lineleaf #21](https://github.com/davletovb/Lineleaf/pull/21). The owner explicitly selected Claude Code, Gemini through Antigravity, and Grok alongside Codex. Inspected merged Lineleaf `96ab32e98988522e796f79a6d3b39485e8f0ccb8` and Seatline `af245676209803013d5df5ff8431270efc1af9df`, with no conflicting open PRs. The existing companion pin already supplies every adapter; Seatline's app-server slice E remains deferred.
 
 | ID | Status | Implemented evidence | Remaining acceptance |
 | --- | --- | --- | --- |

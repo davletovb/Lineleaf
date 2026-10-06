@@ -4,7 +4,7 @@ Status: A-01 contract audited at Seatline `dc1086582c8b98498aa48dae91c8d174bc3cf
 
 ## Architecture and ownership
 
-## Saved provider selection
+### Saved provider selection
 
 Settings → Writing selects Codex, Claude Code, Gemini through Antigravity (`agy`), or Grok for every writing mode. Each provider retains its own model ID; Codex also retains effort/speed. Other adapters do not forward those generic controls, so they are disabled and omitted. Blank Model uses that provider's default; entered IDs are validated, not an entitlement claim. This uses the four adapters already present in the pinned shared companion, without another backend or process type.
 
