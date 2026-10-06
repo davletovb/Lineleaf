@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile, mkdtemp, writeFile, rm, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {sha256, validateCorpus, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
+import {sha256, validateCorpus, validateRun, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
 import {parseData, readData} from '../tools/evaluation/json.mjs';
 import {evaluate, plannedRun} from '../tools/evaluate-writing.mjs';
 import {betaGate, CI_CHECKS, COEXISTENCE_CHECKS, DEVICE_CHECKS} from '../tools/evaluation/beta-gate.mjs';
@@ -262,4 +262,16 @@ test('a clearer-wording answer outside the contract is an invalid output, and a 
   const s = score(corpus, d.run); assert.deepEqual(s.invalidCaseIds, ['clarity-001']);
   const changesNumber = data(); changesNumber.run.rows.find(r => r.id === 'clarity-006').response = JSON.stringify({suggestions: [{before: '80 percent', after: '90 percent', left: 'total of ', right: ' of the work', explanation: 'x'}]});
   assert.deepEqual(candidates(changesNumber.run.rows.find(r => r.id === 'clarity-006').response, corpus.cases.find(c => c.id === 'clarity-006').source, 'clarity'), []);
+});
+
+test('evaluation evidence hashes explicit effort and keeps historical configurations readable', () => {
+  const {run} = data();
+  validateRun(corpus, run);
+  run.configuration.effort = 'low'; run.configurationHash = sha256(run.configuration);
+  validateRun(corpus, run);
+  run.configuration.effort = 'medium';
+  assert.throws(() => validateRun(corpus, run));
+  run.configurationHash = sha256(run.configuration); validateRun(corpus, run);
+  run.configuration.effort = 'unknown'; run.configurationHash = sha256(run.configuration);
+  assert.throws(() => validateRun(corpus, run));
 });

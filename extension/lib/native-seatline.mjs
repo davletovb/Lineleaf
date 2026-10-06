@@ -64,6 +64,9 @@ export class NativeSeatline {
         else if (reports && item.status === null) throw new Error();
         else this.finish(frame.id, null, STATUS.has(item.method) ? item.status : item.output);
       }
+      // Diagnostics observe validated event names only, never answer content.
+      // An observer cannot break the request or change its terminal semantics.
+      try { item.onEvent?.(event.type); } catch { /* optional diagnostics */ }
     } catch { this.close('PROTOCOL_ERROR'); }
   }
   // `readiness` and `prepare` answer with the provider's status; `send_ready_with_policy` with the model's output, after `onStatus` has seen the
@@ -75,7 +78,7 @@ export class NativeSeatline {
       catch (error) { if (!error?.[UNSENT] || attempt > 0) throw error; }
     }
   }
-  async attempt(method, params, {signal, timeout = 30000, onStatus = null}) {
+  async attempt(method, params, {signal, timeout = 30000, onStatus = null, onEvent = null}) {
     if (signal?.aborted) throw new LineleafError('CANCELLED');
     const abortReady = () => this.close('CANCELLED');
     signal?.addEventListener('abort', abortReady, {once: true});
@@ -86,7 +89,7 @@ export class NativeSeatline {
     if (!this.port) throw unsent();
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
-      const item = {method, resolve, reject, signal, onStatus, output: '', bytes: 0, events: 0, status: null, cancelled: null};
+      const item = {method, resolve, reject, signal, onStatus, onEvent, output: '', bytes: 0, events: 0, status: null, cancelled: null};
       item.abort = () => this.cancel(id, 'CANCELLED');
       item.timer = setTimeout(() => this.cancel(id, 'PROVIDER_TIMEOUT'), timeout);
       this.pending.set(id, item); signal?.addEventListener('abort', item.abort, {once: true});

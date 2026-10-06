@@ -19,9 +19,9 @@ E-01–E-03 implementation: [PR #5](https://github.com/davletovb/Lineleaf/pull/5
 
 ## Progress
 
-- Planned implementation items: **24**
+- Planned implementation items: **27**
 - DONE: **8**
-- IMPLEMENTED — VERIFY: **16**
+- IMPLEMENTED — VERIFY: **19**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
 - TODO: **0**
@@ -52,6 +52,7 @@ A staged decision can have separate dependency gates only when the decision log 
 | D | Validate real editors and investigate complex surfaces | D-01 through D-03 |
 | E | Evaluate quality, coexistence, and beta packaging | E-01 through E-03 |
 | F | Add Grammarly-style inline rewriting | F-01 through F-03 |
+| G | Reduce manual-check latency and expose saved effort/timings | G-01 through G-03 |
 
 ## Work items
 
@@ -149,3 +150,15 @@ Remaining acceptance: fresh macOS/Linux browser, installed-extension, packaging 
 ## Seatline preparation review follow-up
 
 Status: **IMPLEMENTED — VERIFY**. Owner: Lineleaf/Seatline maintainers. Unfinished preparation is aborted and its native port detached before foreground writing or Check Seatline; the abandoned operation cannot later close the new foreground port. Regressions hold preparation without a cancel acknowledgement past the status/drain deadlines and cover an unfinished native handshake. All 105 Node units pass and exit normally; 37 Python tests and the extension build pass locally. The first correction's [CI run 37217540722](https://github.com/davletovb/Lineleaf/actions/runs/37217540722) passed all four jobs, including macOS. Current follow-up CI is recorded on [PR #14](https://github.com/davletovb/Lineleaf/pull/14) after refreshing the companion pin. Seatline #11 requires a merge commit to retain the app-pinned commit on main. Live/provider/device acceptance remains open; slice E stays deferred.
+
+## G — Manual-check latency follow-up — 2026-10-06
+
+Owner: Lineleaf/Seatline maintainers. Companion dependency: [Seatline #13](https://github.com/davletovb/seatline/pull/13), pinned at `25da149f633bce4063b8bb728bfb6f3a1b3ec6a1`. Authorized by the owner's request to implement the remaining latency suggestions, with effort saved beside model selection and applied to every check. Code baseline: Lineleaf `0664e02` and Seatline `edc34e4` on main; neither repository had open implementation PRs at inspection. Earlier IDs and live/device gates remain in effect.
+
+| ID | Status | Change and evidence | Remaining acceptance |
+| --- | --- | --- | --- |
+| G-01 | IMPLEMENTED — VERIFY | Saved effort beside model, Low default, explicit Provider default, validated atomic settings saves, global application to all writing modes; generic Seatline capability/turn field and safe CLI override. Unit regressions cover worker reload, stale settings and refusal before generation on unsupported companions. | Updated companion installed/restarted on the owner's device; supported model/effort choices and writing quality verified live. |
+| G-02 | IMPLEMENTED — VERIFY | Last check timing in Settings, with readiness, launch wait, startup, first complete message, completion and validation. Only one session record with no drafts/answers/origins; copying and refresh; absent phases unavailable; content-script access refused. Benchmark `--effort` records the budget for the entire run. | Browser/IPC/platform CI and live manual-check timing distribution, including page dispatch/render overhead separately. |
+| G-03 | IMPLEMENTED — VERIFY | Compact context/explanation instructions with the existing schema and source/ambiguity checks. Companion stops and reaps completed ephemeral Codex turns promptly, while persistent save grace and cancellation remain intact. | Live output-size, latency and precision comparison on the same corpus/model/effort. |
+
+Local evidence: 113 Node units and 38 Python checks pass; build/package and the full synthetic evaluation pass. New evaluation configurations hash the effort choice; historical evidence remains readable. Browser and installed-extension checks cannot launch Chromium here because AF_UNIX creation is denied; the existing Linux/macOS CI must supply those checks. Seatline's focused provider lifecycle/contract checks pass (50 tests), plus 75 core and 72 adapter units. No new live speedup is claimed. The owner's informal switch to `gpt-6-luna` reported 3–4 seconds and the same errors on their example; this is model-selection feedback, not a corpus comparison or acceptance of these additional changes. Seatline slice E remains DEFERRED pending its app-server decision.

@@ -7,6 +7,7 @@ import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
 import {messageFor} from '../extension/lib/messages.mjs';
 import {EXCLUDED} from '../extension/lib/editor-policy.mjs';
+import {checkTiming} from '../extension/lib/check-timing.mjs';
 import {fakeNative, fakeChrome, broker, sent, probed, turnOf, READY, waitFor} from './fixtures/extension-api.mjs';
 import {closeNativeFixtures} from './fixtures/extension-api.mjs';
 test.afterEach(closeNativeFixtures);
@@ -84,11 +85,72 @@ test('proofread prompt states the same explanation limit enforced by candidate v
   assert.equal(candidates(output([{...correction(), explanation: 'a'.repeat(280)}]), 'go', 'proofread').length, 1);
   rejects(() => candidates(output([{...correction(), explanation: 'a'.repeat(281)}]), 'go', 'proofread'));
 });
+test('saved effort is bounded and applies to every writing mode; provider default sends no override', () => {
+  assert.equal(preferences(null).effort, 'low');
+  for (const effort of ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max']) {
+    const settings = preferences({model: 'gpt-6-luna', effort});
+    assert.equal(settings.effort, effort);
+    for (const mode of ['proofread', 'clarity', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']) {
+      const turn = writingTurn('He go.', mode, settings);
+      assert.equal(turn.model, 'gpt-6-luna');
+      if (effort) assert.equal(turn.reasoning_effort, effort);
+      else assert.equal(Object.hasOwn(turn, 'reasoning_effort'), false);
+    }
+  }
+  for (const effort of ['unexpected', 'low\";run-command', null, 3]) assert.equal(preferences({effort}).effort, 'low');
+  const system = writingTurn('go go', 'proofread', preferences(null)).system;
+  assert.match(system, /shortest context that uniquely identifies/);
+  assert.match(system, /single short phrase/);
+  rejects(() => candidates(output([correction()]), 'go go', 'proofread')); // Compact responses still need unique source matches.
+});
+test('check timings distinguish completed-message delay from completion and leave absent phases unavailable', () => {
+  let time = 100;
+  const timing = checkTiming('proofread', 'manual', () => time);
+  timing.readiness(20); time = 130; timing.sending({model: 'gpt-6-luna', effort: 'low'});
+  time = 140; timing.event('launched'); time = 180; timing.event('started');
+  time = 1180; timing.event('delta'); time = 1500; timing.event('delta');
+  time = 1600; timing.event('completed'); time = 1610; timing.validating(); time = 1615;
+  assert.deepEqual(timing.finish('completed'), {version: 1, mode: 'proofread', kind: 'manual', requested_model: 'gpt-6-luna', reasoning_effort: 'low', outcome: 'completed', attempts: 1,
+    readiness_ms: 20, launch_wait_ms: 10, provider_init_ms: 40, answer_ms: 1000, finish_ms: 420, validation_ms: 5, total_ms: 1515});
+  time = 2000; timing.sending({model: '', effort: ''}); time = 2010; timing.event('failed');
+  assert.equal(timing.finish('PROVIDER_FAILED').answer_ms, null);
+  assert.equal(timing.finish('PROVIDER_FAILED').attempts, 2);
+});
+test('native timing observers receive only event names and cannot break successful requests', async () => {
+  const events = [], native = new NativeSeatline(() => fakeNative((m, p) => {
+    p.reply(m.id, {type: 'launched'}); p.reply(m.id, {type: 'started'});
+    p.reply(m.id, {type: 'delta', text: 'private answer'}); p.reply(m.id, {type: 'completed'});
+  }));
+  assert.equal(await native.request('send', {}, {onEvent: (...args) => {events.push(args); if (args[0] === 'delta') throw new Error('observer');}}), 'private answer');
+  assert.deepEqual(events, [['launched'], ['started'], ['delta'], ['completed']]); native.close();
+});
+test('effort saves survive worker reloads, reject stale edits, and remain absent from per-check controls', async () => {
+  const f = fakeChrome(); installController(f.api);
+  const save = (effort, expected) => f.rpc('save-settings', {changes: {effort}, expected: {effort: expected}, dictionary: {add: [], remove: []}});
+  assert.equal((await save('medium', 'low')).ok, true);
+  assert.equal((await save('high', 'low')).code, 'SETTINGS_CHANGED');
+  assert.equal((await save('unknown', 'medium')).code, 'INVALID_REQUEST');
+  const restarted = fakeChrome(); restarted.api.storage.local = f.api.storage.local; installController(restarted.api);
+  assert.equal((await restarted.rpc('get-settings')).value.effort, 'medium');
+  const port = restarted.connect();
+  port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread', effort: 'high'});
+  await waitFor(() => port.received.some(x => x.code === 'INVALID_REQUEST'));
+  assert.equal(restarted.turns.length, 0);
+  port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text: 'He go to work.', mode: 'proofread'});
+  await waitFor(() => port.received.some(x => x.type === 'result'));
+  assert.equal(restarted.turns[0].params.reasoning_effort, 'medium');
+  const timing = (await restarted.rpc('get-check-timing')).value;
+  assert.equal(timing.reasoning_effort, 'medium'); assert.equal(timing.outcome, 'completed');
+  assert.ok(timing.total_ms >= 0);
+  assert.equal(JSON.stringify(timing).includes('He go'), false); assert.equal(JSON.stringify(timing).includes('Subject agreement'), false);
+  assert.equal((await restarted.rpc('get-check-timing', null, restarted.sender)).ok, false);
+  await restarted.rpc('reset'); assert.equal((await restarted.rpc('get-check-timing')).value, null);
+});
 test('settings permit only exact HTTP(S) origins and safe provider models', () => {
   assert.equal(originOf('chrome://extensions'), null); assert.equal(originOf('https://user:pass@example.com'), null);
   assert.equal(sitePattern('https://writing.test:8443'), 'https://writing.test/*');
   assert.deepEqual(preferences({provider: 'other', model: 'bad\nmodel', sites: ['https://writing.test', 'https://writing.test/path', 'file:///tmp']}),
-    {provider: 'codex', model: '', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: ['https://writing.test']});
+    {provider: 'codex', model: '', effort: 'low', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: ['https://writing.test']});
 });
 test('packaged manifest has optional site access, no automatic/all-site content script or exposed resources', async () => {
   const m = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url)));
@@ -309,7 +371,9 @@ test('automatic budget is shared across documents and survives a worker restart 
   const restarted = fakeChrome({automatic: true}); restarted.api.storage.session = f.api.storage.session;
   installController(restarted.api, {now: () => clock}); const third = restarted.connect(); autoStart(third);
   await waitFor(() => third.received.some(x => x.code === 'AUTO_WAIT')); assert.equal(restarted.calls.some(x => sent(x)), false);
-  assert.deepEqual(f.sessionData, {automaticBudget: [100000]});
+  assert.deepEqual(f.sessionData.automaticBudget, [100000]);
+  assert.equal(f.sessionData.lastCheckTiming.outcome, 'completed');
+  assert.equal(JSON.stringify(f.sessionData).includes('He go to work.'), false);
   clock += 10000; const later = restarted.connect(); autoStart(later); await waitFor(() => later.received.some(x => x.type === 'result'));
 });
 test('automatic rolling budget permits six starts per minute and expires old timestamps', async () => {

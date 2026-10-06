@@ -2,8 +2,10 @@ import {NativeSeatline} from './native-seatline.mjs';
 import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
+import {checkTiming} from './check-timing.mjs';
+import {requireEffort} from './policy.mjs';
 
-export function installController(api, {now = Date.now} = {}) {
+export function installController(api, {now = Date.now, clock = () => performance.now()} = {}) {
   let active = null, diagnostic = false, backoffUntil = 0, automaticHold = 0; // automaticHold: no background requests after the provider failed to answer in time
   const peers = new Set();
   const read = async () => preferences((await api.storage.local.get('preferences')).preferences);
@@ -115,7 +117,9 @@ export function installController(api, {now = Date.now} = {}) {
     if (automatic ? !AUTOMATIC_MODES.includes(request.mode) : request.mode === 'clarity') { send(peer.port, {type: 'error', id: request.id, code: 'INVALID_REQUEST'}); return; }
     peer.running = true; peer.automatic = automatic; peer.done = new Promise(resolve => { peer.finish = resolve; });
     peer.abort = new AbortController(); const signal = peer.abort.signal;
+    const timing = checkTiming(request.mode, automatic ? 'automatic' : 'manual', clock);
     let connection;
+    const saveTiming = outcome => connection ? api.storage.session.set({lastCheckTiming: timing.finish(outcome)}).catch(() => {}) : Promise.resolve();
     try {
       await initialized; const {settings} = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
@@ -135,23 +139,28 @@ export function installController(api, {now = Date.now} = {}) {
       let verification = READINESS.cached, answer;
       for (let attempt = 0; ; attempt++) {
         // Lineleaf's own policy (subscription sign-in, no-tools requests) is enforced here, from Seatline's readiness, before anything is sent.
-        const {status, modern} = await readiness(connection, signal, verification);
+        const readyAt = clock();
+        let status, modern;
+        try { ({status, modern} = await readiness(connection, signal, verification)); }
+        finally { timing.readiness(clock() - readyAt); }
         requireReady(status);
         // Permissions/settings may have changed while readiness was being checked.
         const latest = await eligible(peer.sender);
         if (signal.aborted) throw new LineleafError('CANCELLED');
         if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
         if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
+        requireEffort(status, latest.settings);
         send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
         const turn = writingTurn(request.text, request.mode, latest.settings, {checkSignIn: !modern}), timeout = REQUEST_TIMEOUT[automatic ? 'automatic' : 'manual'];
         try {
           // `send_ready_with_policy` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
           // evidence has changed or lapsed, and the status it reports is checked again as it arrives.
           if (!modern) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
+          timing.sending(latest.settings);
           // The status Seatline reports ahead of the turn shows that it accepted the protected send: from then on the companion is not the
           // problem, whatever the turn or the sign-in check does next.
           answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']},
-            {signal, timeout, onStatus: status => { remember(false); requireReady(status); }});
+            {signal, timeout, onEvent: type => timing.event(type), onStatus: status => { remember(false); requireReady(status); requireEffort(status, latest.settings); }});
           break;
         } catch (error) {
           if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
@@ -162,11 +171,14 @@ export function installController(api, {now = Date.now} = {}) {
       }
       const final = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
+      timing.validating();
       const edits = filterDictionary(candidates(answer, request.text, request.mode), final.settings);
+      void saveTiming('completed');
       send(peer.port, {type: 'result', id: request.id, edits});
       if (automaticHold) { automaticHold = 0; await api.storage.session.set({automaticHold: 0}).catch(() => {}); } // It answered, so background checks may resume.
     } catch (error) {
       const code = errorCode(error);
+      void saveTiming(code);
       if (code === 'PROVIDER_TIMEOUT') { automaticHold = now() + AUTOMATIC_HOLD; await api.storage.session.set({automaticHold}).catch(() => {}); }
       if (code === 'PROVIDER_RATE_LIMITED' && !error.local) backoffUntil = now() + 60000;
       else if (code === 'QUEUE_FULL') backoffUntil = now() + 5000;
@@ -214,11 +226,12 @@ export function installController(api, {now = Date.now} = {}) {
     await initialized; if (!ui(sender) || !exactKeys(message, ['type', 'payload'])) throw new LineleafError('INVALID_REQUEST');
     const settings = await read(), p = message.payload;
     if (message.type === 'get-settings' && p === null) return settings;
+    if (message.type === 'get-check-timing' && p === null) return (await api.storage.session.get('lastCheckTiming')).lastCheckTiming ?? null;
     if (message.type === 'set-pause' && exactKeys(p, ['paused']) && typeof p.paused === 'boolean') {
       const next = {...settings, paused: p.paused}; await api.storage.local.set({preferences: next}); return next;
     }
     if (message.type === 'save-settings' && exactKeys(p, ['changes', 'expected', 'dictionary'])) {
-      const fields = ['model', 'variant', 'automatic', 'clarity'];
+      const fields = ['model', 'effort', 'variant', 'automatic', 'clarity'];
       if (!p.changes || !exactKeys(p.expected, Object.keys(p.changes)) || !exactKeys(p.changes, Object.keys(p.expected))
           || !Object.keys(p.changes).every(key => fields.includes(key)) || !exactKeys(p.dictionary, ['add', 'remove'])
           || !['add', 'remove'].every(key => Array.isArray(p.dictionary[key]) && p.dictionary[key].length <= 500 && Array.from(p.dictionary[key]).every(word => dictionaryWord(word)))) throw new LineleafError('INVALID_REQUEST');
@@ -246,6 +259,7 @@ export function installController(api, {now = Date.now} = {}) {
     if (message.type === 'reset' && p === null) {
       for (const peer of peers) cancelPeer(peer);
       await api.storage.local.clear();
+      await api.storage.session.set({lastCheckTiming: null});
       const origins = ((await api.permissions.getAll()).origins ?? []).filter(o => /^https?:\/\//.test(o));
       if (origins.length) await api.permissions.remove({origins}); return preferences(null);
     }
@@ -282,7 +296,7 @@ export function installController(api, {now = Date.now} = {}) {
       stopPreparation();
       try { // The user asked: always a fresh probe, which later checks may then reuse. A companion that cannot receive writing is not "ready".
         const {status, modern} = await readiness(native(), undefined, READINESS.fresh);
-        return {...statusView(status), update_required: !modern || outdated};
+        return {...statusView(status), update_required: !modern || outdated || Boolean(settings.effort && status?.capabilities?.reasoning_effort !== true)};
       } finally { diagnostic = false; idleLink(); }
     }
     throw new LineleafError('INVALID_REQUEST');

@@ -1,6 +1,6 @@
 export const MESSAGES = {
   NATIVE_UNAVAILABLE: 'Seatline is unavailable. Install the shared companion and authorize the Lineleaf extension ID.',
-  COMPANION_UPDATE_REQUIRED: 'The Seatline that is running cannot enforce the subscription sign-in policy, so nothing was sent. Run “seatline-companion install” from the updated Seatline, quit the Seatline that is still running (it stays up while any app uses it), then try again.',
+  COMPANION_UPDATE_REQUIRED: 'The Seatline that is running does not support the required check settings, so the check was refused and nothing was sent to Codex. Run “seatline-companion install” from the updated Seatline, quit the Seatline that is still running (it stays up while any app uses it), then try again.',
   PROTOCOL_ERROR: 'Seatline returned an unsupported response. Check the companion version.',
   EXECUTABLE_NOT_FOUND: 'Codex was not found by Seatline. Install the supported Codex CLI.',
   LOGIN_REQUIRED: 'Sign in to Codex, then try again.', AUTH_REJECTED: 'Codex sign-in was rejected. Sign in again.',
@@ -15,6 +15,7 @@ export const MESSAGES = {
   READINESS_UNVERIFIED: 'Seatline could not confirm that Codex is ready, so nothing was sent. Use Check Seatline in Settings, then try again.',
   READINESS_TIMEOUT: 'Codex did not confirm in time that it is ready, so nothing was sent. Try again.',
   MODEL_NOT_SUPPORTED: 'This model is not supported. Check the model setting.',
+  REASONING_EFFORT_UNSUPPORTED: 'This reasoning effort is not supported. Check the effort setting.',
   INVALID_OUTPUT: 'The response could not be safely matched to your selection. No changes were made.',
   INVALID_REQUEST: 'Select between 1 and 2,000 characters in an eligible field.',
   SITE_DISABLED: 'Enable this site in Lineleaf before checking text.', PAUSED: 'Lineleaf is paused. Resume it in settings.',

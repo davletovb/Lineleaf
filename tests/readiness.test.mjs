@@ -13,6 +13,18 @@ const API_KEY = {...READY, sign_in: 'api_key'};
 const correction = (before, after) => ({before, after, left: '', right: '', category: 'grammar', explanation: 'Test'});
 const start = (port, text = 'He go to work.', extra = {}) => port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text, mode: 'proofread', ...extra});
 const autoStart = (port, text) => start(port, text, {kind: 'automatic'});
+test('a chosen effort requires companion support; provider default remains compatible', async () => {
+  for (const capability of [undefined, false, 'unknown']) {
+    const state = {...READY, capabilities: {tool_isolation: true, ...(capability === undefined ? {} : {reasoning_effort: capability})}};
+    const f = fakeChrome({state}); installController(f.api); const port = f.connect(); start(port);
+    await waitFor(() => port.received.some(x => x.code === 'COMPANION_UPDATE_REQUIRED'));
+    assert.equal(f.calls.some(sent), false);
+    assert.equal((await f.rpc('check-connection')).value.update_required, true);
+    await f.rpc('save-settings', {changes: {effort: ''}, expected: {effort: 'low'}, dictionary: {add: [], remove: []}});
+    const next = f.connect(); start(next); await waitFor(() => next.received.some(x => x.type === 'result'));
+    assert.equal(Object.hasOwn(f.turns.at(-1).params, 'reasoning_effort'), false);
+  }
+});
 // The frames the companion received (the fixture's call log also records the worker's storage setup).
 const frames = f => f.calls.filter(m => m.method);
 const methods = f => frames(f).filter(m => m.method !== 'cancel').map(m => m.method);

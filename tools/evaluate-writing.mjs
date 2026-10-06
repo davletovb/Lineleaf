@@ -22,7 +22,7 @@ export async function privateJSON(path, value) {
 }
 export async function configuration({model, providerVersion, fixture}) {
   const contract = JSON.parse(await readFile(join(ROOT, 'config/seatline-contract.json'), 'utf8'));
-  return {provider: 'codex', model: fixture ? 'fixture-reference' : model, providerVersion: fixture ? 'fixture' : providerVersion,
+  return {provider: 'codex', model: fixture ? 'fixture-reference' : model, effort: preferences(null).effort, providerVersion: fixture ? 'fixture' : providerVersion,
     seatlineRevision: contract.revision, engineHash: await engineHash(), packageHash: (await readPackage(ROOT)).packageHash,
     runtime: {platform: os.platform(), arch: os.arch(), cpu: os.cpus()[0]?.model ?? 'unknown', memoryGB: Math.round(os.totalmem() / 1073741824 * 100) / 100}};
 }
@@ -55,7 +55,7 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
   const open = connectionFactory ?? (() => fixture ? fixtureConnection(corpus) : new NativeSeatline(() => nativePort(companion)));
   let readiness = null, bytes = 0;
   for (const c of corpus.cases) {
-    const started = performance.now(), settings = preferences({model: fixture ? '' : config.model, variant: c.variant});
+    const started = performance.now(), settings = preferences({model: fixture ? '' : config.model, effort: config.effort, variant: c.variant});
     const row = {id: c.id, inputHash: sha256(c.source), status: 'failed', response: '', elapsedMs: 0, code: null};
     let native, checkingReadiness = true;
     try {

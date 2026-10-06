@@ -54,8 +54,10 @@ const CONTRAST = '(' + function (el) {
 }.toString() + ')';
 const TYPES = {'.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascript', '.js': 'text/javascript', '.png': 'image/png', '.svg': 'image/svg+xml'};
 const stub = ({sites = [], paused = false, automatic = false, clarity = false, url = 'https://mail.example.com/compose'} = {}) => `
-  const settings = {variant: 'US', model: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
-  window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type}) {
+  const settings = {variant: 'US', model: '', effort: 'low', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
+  window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type, payload}) {
+      if (type === 'save-settings') Object.assign(settings, payload.changes);
+      if (type === 'get-check-timing') return {ok: true, value: window.lastTiming ?? null};
       if (type === 'check-connection') return {ok: true, value: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', tool_isolation: true, update_required: window.outdated === true}};
       return {ok: true, value: settings};
     }}, tabs: {async query() { return [{id: 1, url: ${JSON.stringify(url)}, incognito: false}]; }}, permissions: {async request() { return true; }}};`;
@@ -136,6 +138,23 @@ test('settings: the authorization command can be copied', async () => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin: 'https://ext.lineleaf.test'}); await settled(page, '#authorize');
   await page.getByRole('button', {name: 'Copy'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Command copied.');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'seatline-companion authorize lineleaf codex chrome-extension://abcdefghijklmnopabcdefghijklmnop/');
+  await context.close();
+});
+test('settings: effort sits beside model, saves with preferences, and timings show unavailable phases honestly', async () => {
+  const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
+  await settled(page, '#authorize');
+  assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'low');
+  const model = await page.locator('#model').boundingBox(), effort = await page.locator('#effort').boundingBox();
+  assert.equal(Math.round(model.y), Math.round(effort.y));
+  await page.locator('#model').fill('gpt-6-luna'); await page.getByLabel('Reasoning effort').selectOption('medium');
+  await page.getByRole('button', {name: 'Save preferences'}).click();
+  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'medium');
+  await page.evaluate(() => { window.lastTiming = {kind: 'manual', mode: 'proofread', requested_model: 'gpt-6-luna', reasoning_effort: 'medium', outcome: 'completed', total_ms: 3420, readiness_ms: 8, finish_ms: 17}; });
+  await page.getByText('Last check timing', {exact: true}).click(); await page.getByRole('button', {name: 'Refresh timing'}).click();
+  await page.waitForFunction(() => document.querySelector('#timing-summary').textContent.includes('gpt-6-luna'));
+  assert.match(await page.locator('#timing-phases').textContent(), /Unavailable/);
+  assert.match(await page.locator('#timing-phases').textContent(), /3\.42 s/);
   await context.close();
 });
 test('keyboard focus is visible on switches and buttons, and reduced motion removes the animations', async () => {

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {candidates} from '../../extension/lib/candidates.mjs';
-import {validText, exactKeys, MODES, REWRITE_MODES} from '../../extension/lib/policy.mjs';
+import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS} from '../../extension/lib/policy.mjs';
 
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 const fail = () => { throw new Error('INVALID_EVALUATION_DATA'); };
@@ -58,9 +58,13 @@ export function validateAcceptance(corpus, run, policy) {
   return policy.minimumReferenceRecall;
 }
 export function validateRun(corpus, run) {
+  // Old evidence remains readable; new runs include effort in the hashed
+  // configuration so comparisons cannot silently change reasoning budgets.
+  const hasEffort = Object.hasOwn(run?.configuration ?? {}, 'effort');
   if (!exactKeys(run, ['schema', 'id', 'kind', 'corpusHash', 'configuration', 'configurationHash', 'createdAt', 'timingBoundary', 'rows']) || run.schema !== 1
       || !id(run.id) || !['fixture', 'live', 'planned'].includes(run.kind) || run.corpusHash !== sha256(corpus)
-      || !exactKeys(run.configuration, ['provider', 'model', 'providerVersion', 'seatlineRevision', 'engineHash', 'packageHash', 'runtime'])
+      || !exactKeys(run.configuration, ['provider', 'model', 'providerVersion', 'seatlineRevision', 'engineHash', 'packageHash', 'runtime', ...(hasEffort ? ['effort'] : [])])
+      || (hasEffort && !EFFORTS.includes(run.configuration.effort))
       || run.configuration.provider !== 'codex' || !validText(run.configuration.model, 128)
       || !validText(run.configuration.providerVersion, 128) || !/^[a-f0-9]{40}$/.test(run.configuration.seatlineRevision)
       || !hash(run.configuration.engineHash) || !hash(run.configuration.packageHash)

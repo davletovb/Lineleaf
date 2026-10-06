@@ -58,6 +58,12 @@ body.settings { background: var(--ll-surface); }
 .field { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
 .field > label, .field > .label { font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 20px; }
+.check-timing { margin-top: 16px; }
+.check-timing summary { cursor: pointer; font-weight: 600; }
+.check-timing table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.check-timing th, .check-timing td { padding: 5px 0; text-align: left; }
+.check-timing th { font-weight: 400; color: var(--ll-ink-2); }
+.check-timing td { text-align: right; }
 .setting { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--ll-line-soft); }
 .setting:first-of-type { border-top: 0; padding-top: 0; }
 .setting.nested { margin-left: 20px; padding-left: 16px; border-left: 2px solid var(--ll-brand-soft); border-top: 0; margin-top: 14px; padding-top: 0; }
