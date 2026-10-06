@@ -16,6 +16,7 @@ export const MESSAGES = {
   READINESS_TIMEOUT: 'Codex did not confirm in time that it is ready, so nothing was sent. Try again.',
   MODEL_NOT_SUPPORTED: 'This model is not supported. Check the model setting.',
   REASONING_EFFORT_UNSUPPORTED: 'This reasoning effort is not supported. Check the effort setting.',
+  SERVICE_TIER_UNSUPPORTED: 'This speed setting is not supported. Check your Codex version and model, or choose Standard in Settings.',
   INVALID_OUTPUT: 'The response could not be safely matched to your selection. No changes were made.',
   INVALID_REQUEST: 'Select between 1 and 2,000 characters in an eligible field.',
   SITE_DISABLED: 'Enable this site in Lineleaf before checking text.', PAUSED: 'Lineleaf is paused. Resume it in settings.',

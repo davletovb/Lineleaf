@@ -30,6 +30,19 @@ class Fragmented(io.BytesIO):
 
 
 class FramingTests(unittest.TestCase):
+    def test_benchmark_speed_preserves_effort_and_records_the_requested_tier(self):
+        for speed in ("standard", "fast"):
+            turn = writing_turn("He go.", model="gpt-6-luna", effort="xhigh", speed=speed)
+            self.assertEqual(turn["service_tier"], speed)
+            self.assertEqual(turn["reasoning_effort"], "xhigh")
+            self.assertEqual(turn["model"], "gpt-6-luna")
+        with self.assertRaises(ValueError):
+            writing_turn("He go.", speed='fast"; command')
+        report = run_benchmark(FIXTURE, fixture=True, effort="xhigh", speed="fast")
+        self.assertEqual(report["requested_service_tier"], "fast")
+        self.assertEqual(report["reasoning_effort"], "xhigh")
+        self.assertEqual(report["status"], "completed")
+
     def test_benchmark_effort_is_explicit_bounded_and_absent_for_provider_default(self):
         self.assertNotIn("reasoning_effort", writing_turn("He go."))
         self.assertEqual(writing_turn("He go.", effort="low")["reasoning_effort"], "low")
@@ -354,7 +367,7 @@ class BenchmarkRegressionTests(unittest.TestCase):
             def collect(self, request, **_kwargs):
                 if request == "status":
                     return [{"type": "status", "status": {"availability": "available", "authentication": "authenticated",
-                        "sign_in": "subscription", "capabilities": {"tool_isolation": True}}}, {"type": "completed"}]
+                        "sign_in": "subscription", "capabilities": {"tool_isolation": True, "service_tier": True}}}, {"type": "completed"}]
                 raise TimeoutError("private diagnostic")
             def event(self, *_args):
                 if self.sends == 2: raise TimeoutError("private diagnostic")

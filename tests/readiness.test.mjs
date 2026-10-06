@@ -13,9 +13,22 @@ const API_KEY = {...READY, sign_in: 'api_key'};
 const correction = (before, after) => ({before, after, left: '', right: '', category: 'grammar', explanation: 'Test'});
 const start = (port, text = 'He go to work.', extra = {}) => port.onMessage.emit({type: 'start', id: crypto.randomUUID(), text, mode: 'proofread', ...extra});
 const autoStart = (port, text) => start(port, text, {kind: 'automatic'});
+test('both speed choices require an explicit companion capability before writing is sent', async () => {
+  for (const speed of ['standard', 'fast']) {
+    for (const capability of [undefined, false, 'unknown']) {
+      const state = {...READY, capabilities: {tool_isolation: true, reasoning_effort: true, ...(capability === undefined ? {} : {service_tier: capability})}};
+      const f = fakeChrome({state}); installController(f.api);
+      if (speed === 'fast') await f.rpc('save-settings', {changes: {speed}, expected: {speed: 'standard'}, dictionary: {add: [], remove: []}});
+      const port = f.connect(); start(port);
+      await waitFor(() => port.received.some(x => x.code === 'COMPANION_UPDATE_REQUIRED'));
+      assert.equal(f.calls.some(sent), false);
+      assert.equal((await f.rpc('check-connection')).value.update_required, true);
+    }
+  }
+});
 test('a chosen effort requires companion support; provider default remains compatible', async () => {
   for (const capability of [undefined, false, 'unknown']) {
-    const state = {...READY, capabilities: {tool_isolation: true, ...(capability === undefined ? {} : {reasoning_effort: capability})}};
+    const state = {...READY, capabilities: {tool_isolation: true, service_tier: true, ...(capability === undefined ? {} : {reasoning_effort: capability})}};
     const f = fakeChrome({state}); installController(f.api); const port = f.connect(); start(port);
     await waitFor(() => port.received.some(x => x.code === 'COMPANION_UPDATE_REQUIRED'));
     assert.equal(f.calls.some(sent), false);

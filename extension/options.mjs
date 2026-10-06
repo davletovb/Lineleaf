@@ -7,7 +7,7 @@ async function loadTiming() {
   lastTiming = await command('get-check-timing');
   query('#timing-phases').replaceChildren(); query('#copy-timing').disabled = !lastTiming;
   query('#timing-summary').textContent = lastTiming
-    ? `${lastTiming.kind} ${lastTiming.mode} · ${lastTiming.requested_model ?? 'provider default model'} · ${lastTiming.reasoning_effort ?? 'provider default effort'} · ${lastTiming.outcome}`
+    ? `${lastTiming.kind} ${lastTiming.mode} · ${lastTiming.requested_model ?? 'provider default model'} · ${lastTiming.reasoning_effort ?? 'provider default effort'} · ${lastTiming.requested_service_tier ? `requested ${lastTiming.requested_service_tier} speed` : 'speed unavailable'} · ${lastTiming.outcome}`
     : 'No manual check recorded in this browser session.';
   if (!lastTiming) return;
   for (const [key, label] of [['readiness_ms', 'Readiness'], ['launch_wait_ms', 'Wait for launch'], ['provider_init_ms', 'Startup'], ['answer_ms', 'Answer'], ['finish_ms', 'Completion'], ['validation_ms', 'Validation'], ['total_ms', 'Total']]) {
@@ -19,7 +19,7 @@ async function loadTiming() {
 }
 async function load() {
   const settings = await command('get-settings'); loaded = settings; query('#variant').value = settings.variant;
-  query('#model').value = settings.model; query('#effort').value = settings.effort; query('#paused').checked = settings.paused;
+  query('#model').value = settings.model; query('#effort').value = settings.effort; query('#speed').value = settings.speed; query('#paused').checked = settings.paused;
   query('#automatic').checked = settings.automatic; query('#clarity').checked = settings.clarity; query('#clarity').disabled = !settings.automatic;
   query('#dictionary').value = settings.dictionary.join('\n');
   query('#authorize').textContent = `seatline-companion authorize lineleaf codex chrome-extension://${chrome.runtime.id}/`;
@@ -39,7 +39,7 @@ query('#preferences').addEventListener('submit', async event => {
   const dictionary = query('#dictionary').value.split(/\r?\n/u).map(x => x.trim()).filter(Boolean);
   if (dictionary.length > 500 || dictionary.some(word => !dictionaryWord(word))) { show('Use one word per line, up to 500 words of at most 64 characters.'); return; }
   if (!loaded) return;
-  const values = {model: query('#model').value.trim(), effort: query('#effort').value, variant: query('#variant').value, automatic: query('#automatic').checked, clarity: query('#automatic').checked && query('#clarity').checked};
+  const values = {model: query('#model').value.trim(), effort: query('#effort').value, speed: query('#speed').value, variant: query('#variant').value, automatic: query('#automatic').checked, clarity: query('#automatic').checked && query('#clarity').checked};
   const changes = {}, expected = {};
   for (const key of Object.keys(values)) if (values[key] !== loaded[key]) { changes[key] = values[key]; expected[key] = loaded[key]; }
   const words = [...new Set(dictionary.map(dictionaryWord))];

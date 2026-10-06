@@ -121,7 +121,7 @@ test('malformed Unicode/overlaps/ambiguous model corrections fail through the pr
 test('runner records malformed answers, continues every remaining case with fresh connections and no retry/tools/continuation', async () => {
   const calls = []; let opened=0, closed=0;
   const connectionFactory=()=>{ const c=corpus.cases[opened++]; return {async request(method, turn) {
-    calls.push({method,turn}); if(method==='status') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true}};
+    calls.push({method,turn}); if(method==='status') return {availability:'available',authentication:'authenticated',sign_in:'subscription',capabilities:{tool_isolation:true,reasoning_effort:true,service_tier:true}};
     return c.id===corpus.cases[3].id ? '```json\n{"corrections":[]}\n```' : JSON.stringify(c.proposal);
   },close(){closed++;}}; };
   const {run} = await evaluate(corpus, config, {connectionFactory}); assert.equal(run.rows.length,380); assert.equal(run.rows[3].code,'INVALID_OUTPUT');
@@ -172,7 +172,7 @@ test('invalid and partial runs with reviews report outcome rates and missing cas
 test('readiness, timeout, provider limits and transport failures stop rather than retry or exhaust the corpus', async () => {
   for(const code of ['PROVIDER_TIMEOUT','PROVIDER_RATE_LIMITED','QUEUE_FULL','NATIVE_UNAVAILABLE','PROTOCOL_ERROR','LOGIN_REQUIRED','SUBSCRIPTION_REQUIRED','TOOL_ISOLATION_UNAVAILABLE']) {
     let opened=0,closed=0,sends=0;
-    const connectionFactory=()=>{opened++;return{async request(method){ if(method==='status') return{availability:'available',authentication:code==='LOGIN_REQUIRED'?'unauthenticated':'authenticated',sign_in:code==='SUBSCRIPTION_REQUIRED'?'api_key':'subscription',capabilities:{tool_isolation:code!=='TOOL_ISOLATION_UNAVAILABLE'}};
+    const connectionFactory=()=>{opened++;return{async request(method){ if(method==='status') return{availability:'available',authentication:code==='LOGIN_REQUIRED'?'unauthenticated':'authenticated',sign_in:code==='SUBSCRIPTION_REQUIRED'?'api_key':'subscription',capabilities:{tool_isolation:code!=='TOOL_ISOLATION_UNAVAILABLE',reasoning_effort:true,service_tier:true}};
       if(method==='send') sends++; throw new LineleafError(code);},close(){closed++;}};};
     const {run}=await evaluate(corpus,config,{connectionFactory}); assert.equal(run.rows.length,1); assert.equal(opened,1); assert.equal(closed,1); assert.ok(sends<=1);
     assert.equal(run.rows[0].code,code);
@@ -272,7 +272,7 @@ test('evaluation accepts a fixed effort for the whole run and preserves provider
     const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
       const c = corpus.cases[turns.length];
       return {async request(method, turn) {
-        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true}};
+        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}};
         turns.push(turn); return JSON.stringify(c.proposal);
       }, close() {}};
     }});
@@ -296,4 +296,35 @@ test('evaluation evidence hashes explicit effort and keeps historical configurat
   run.configurationHash = sha256(run.configuration); validateRun(corpus, run);
   run.configuration.effort = 'unknown'; run.configurationHash = sha256(run.configuration);
   assert.throws(() => validateRun(corpus, run));
+});
+test('evaluation fixes speed for the whole run and binds it to the evidence hash', async () => {
+  for (const speed of ['standard', 'fast']) {
+    const settings = {...config, model: 'gpt-6-luna', effort: 'xhigh', speed}, turns = [];
+    const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
+      const c = corpus.cases[turns.length];
+      return {async request(method, turn) {
+        if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}};
+        turns.push(turn); return JSON.stringify(c.proposal);
+      }, close() {}};
+    }});
+    assert.equal(turns.length, corpus.cases.length);
+    for (const turn of turns) { assert.equal(turn.service_tier, speed); assert.equal(turn.reasoning_effort, 'xhigh'); }
+    assert.equal(run.configuration.speed, speed); validateRun(corpus, run);
+    run.configuration.speed = speed === 'fast' ? 'standard' : 'fast';
+    assert.throws(() => validateRun(corpus, run));
+    run.configurationHash = sha256(run.configuration); validateRun(corpus, run);
+    run.configuration.speed = 'priority'; run.configurationHash = sha256(run.configuration);
+    assert.throws(() => validateRun(corpus, run));
+  }
+  await assert.rejects(configuration({fixture: true, speed: 'unexpected'}), /INVALID_SPEED/);
+});
+test('evaluation stops before a writing send when the companion lacks service-tier support', async () => {
+  let sends = 0;
+  const {run, readiness} = await evaluate(corpus, {...config, effort: 'xhigh', speed: 'fast'}, {fixture: true, connectionFactory: () => ({
+    async request(method) {
+      if (method === 'status') return {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true}};
+      sends++; return 'unreachable';
+    }, close() {}
+  })});
+  assert.equal(sends, 0); assert.equal(readiness, 'COMPANION_UPDATE_REQUIRED'); assert.equal(run.rows.length, 1);
 });

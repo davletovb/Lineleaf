@@ -16,6 +16,8 @@ Copy `labels-template.json` to `labels.json`. An independent human must inspect 
 
 The evaluator accepts a fixed `--effort` for a whole run (`none`, `low`, `medium`, `high`, `xhigh`, `max`, or an empty string for Provider default). Omission uses Low, matching Lineleaf Settings. The choice is sent on every turn and included in the configuration hash; changing it requires fresh evidence. Scoring an existing `--run` cannot override its recorded effort. Compare efforts in separate output directories with the same corpus, model and prompt engine. Shorter-context prompts remain deferred; this change retains the original context instructions and strict whole-response validation.
 
+`--speed standard|fast` also fixes the requested tier for the whole run (default Standard), is forwarded on every case, and is bound into its configuration hash. Scoring existing evidence cannot override it. For a Fast comparison, keep model, effort, corpus, provider version and engine unchanged, use separate output directories, and pass `--effort xhigh --speed standard` or `--effort xhigh --speed fast` to both preparation and live collection. Compare recall as well as human precision and latency; fixture agreement cannot establish equal error detection. Readiness must advertise service-tier forwarding and any explicit reasoning effort before generation. Speed metadata records the requested tier, not confirmation of the backend tier served.
+
 Before collecting live outcomes, prepare templates for the intended model/CLI/runtime configuration without contacting a provider:
 
 ```sh

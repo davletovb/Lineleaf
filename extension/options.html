@@ -53,11 +53,19 @@
                 </select>
               </div>
               <div class="field">
+                <label for="speed">Speed</label>
+                <select id="speed" aria-describedby="speed-help">
+                  <option value="standard" selected>Standard</option>
+                  <option value="fast">Fast</option>
+                </select>
+              </div>
+              <div class="field">
                 <label for="variant">English variant</label>
                 <select id="variant"><option value="US">English · US</option><option value="UK">English · UK</option></select>
               </div>
             </div>
-            <p class="muted" style="margin-top:8px">Model and effort apply to every check and rewrite after you save. Lower effort can answer faster; higher effort can help with difficult text. Use choices supported by your installed Codex runtime and model. Sign in with your subscription; Lineleaf stores no provider credentials.</p>
+            <p class="muted" style="margin-top:8px">Model, effort and speed apply to every check and rewrite after you save. Lower effort can answer faster; higher effort can help with difficult text. Use choices supported by your installed Codex runtime and model. Sign in with your subscription; Lineleaf stores no provider credentials.</p>
+            <p id="speed-help" class="muted">Fast requests faster processing while keeping your model and reasoning effort. It uses subscription limits at 2.5× the Standard rate; this is a usage multiplier, not a speed guarantee. Availability depends on your Codex version, model and plan.</p>
           </section>
 
           <section class="card-section" id="automatic-checks" aria-labelledby="automatic-title">
@@ -130,7 +138,7 @@
         <p class="lede">What Lineleaf keeps on this browser.</p>
         <ul class="facts">
           <li>Lineleaf saves preferences, dictionary words, and enabled site origins.</li>
-          <li>Session storage keeps request-limit timestamps and the last manual check’s durations, chosen model and effort, and outcome. Automatic and cancelled checks do not replace it. Drafts, answers and site addresses are excluded from timing details.</li>
+          <li>Session storage keeps request-limit timestamps and the last manual check’s durations, requested model, effort and speed, and outcome. Automatic and cancelled checks do not replace it. Drafts, answers and site addresses are excluded from timing details.</li>
           <li>Suggestions from a check stay in that page's memory only, for as long as the text they describe is unchanged. They are dropped when you edit that text, leave or close the page, pause Lineleaf, or turn the site off, and are never saved.</li>
           <li>The writing panel clears its selection and results after five minutes.</li>
           <li>No draft history, provider credentials, or telemetry is stored.</li>

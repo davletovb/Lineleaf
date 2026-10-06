@@ -6,7 +6,7 @@ import os from 'node:os';
 import {parseArgs} from 'node:util';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {candidates} from '../extension/lib/candidates.mjs';
-import {writingTurn, preferences, requireReady, errorCode, EFFORTS} from '../extension/lib/policy.mjs';
+import {writingTurn, preferences, requireReady, requireWritingSettings, errorCode, EFFORTS, SPEEDS} from '../extension/lib/policy.mjs';
 import {nativePort} from './evaluation/native-port.mjs';
 import {sha256, validateCorpus, score, reviewTemplates} from './evaluation/quality.mjs';
 import {readData} from './evaluation/json.mjs';
@@ -20,10 +20,11 @@ export async function privateJSON(path, value) {
   await mkdir(resolve(path, '..'), {recursive: true, mode: 0o700});
   await writeFile(path, JSON.stringify(value, null, 2) + '\n', {mode: 0o600}); await chmod(path, 0o600);
 }
-export async function configuration({model, providerVersion, fixture, effort = preferences(null).effort}) {
+export async function configuration({model, providerVersion, fixture, effort = preferences(null).effort, speed = preferences(null).speed}) {
   if (!EFFORTS.includes(effort)) throw new Error('INVALID_EFFORT');
+  if (!SPEEDS.includes(speed)) throw new Error('INVALID_SPEED');
   const contract = JSON.parse(await readFile(join(ROOT, 'config/seatline-contract.json'), 'utf8'));
-  return {provider: 'codex', model: fixture ? 'fixture-reference' : model, effort, providerVersion: fixture ? 'fixture' : providerVersion,
+  return {provider: 'codex', model: fixture ? 'fixture-reference' : model, effort, speed, providerVersion: fixture ? 'fixture' : providerVersion,
     seatlineRevision: contract.revision, engineHash: await engineHash(), packageHash: (await readPackage(ROOT)).packageHash,
     runtime: {platform: os.platform(), arch: os.arch(), cpu: os.cpus()[0]?.model ?? 'unknown', memoryGB: Math.round(os.totalmem() / 1073741824 * 100) / 100}};
 }
@@ -37,7 +38,7 @@ function fixtureConnection(corpus) {
     const emit = value => queueMicrotask(() => { for (const fn of listeners) fn(value); });
     const port = {onMessage: {addListener: fn => listeners.add(fn)}, onDisconnect: {addListener: fn => disconnects.add(fn)},
       disconnect: () => {}, postMessage(request) {
-        if (request.method === 'status') emit({id: request.id, event: {type: 'status', status: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true}}}});
+        if (request.method === 'status') emit({id: request.id, event: {type: 'status', status: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', capabilities: {tool_isolation: true, reasoning_effort: true, service_tier: true}}}});
         else {
           const source = JSON.parse(request.params.messages[0].text).text;
           // The case whose exact production prompt this is, so every mode (including future ones) is matched the same way.
@@ -56,14 +57,15 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
   const open = connectionFactory ?? (() => fixture ? fixtureConnection(corpus) : new NativeSeatline(() => nativePort(companion)));
   let readiness = null, bytes = 0;
   for (const c of corpus.cases) {
-    const started = performance.now(), settings = preferences({model: fixture ? '' : config.model, effort: config.effort, variant: c.variant});
+    const started = performance.now(), settings = preferences({model: fixture ? '' : config.model, effort: config.effort, speed: config.speed, variant: c.variant});
     const row = {id: c.id, inputHash: sha256(c.source), status: 'failed', response: '', elapsedMs: 0, code: null};
     let native, checkingReadiness = true;
     try {
       // Every case gets a new bridge/handshake, status probe and ephemeral send: the cold path. Production now keeps its connection and reuses
       // Seatline's readiness, so these timings are not production's (the report's timing boundary says what they include).
       native = open();
-      requireReady(await native.request('status', null, {timeout: Math.min(timeout, 15000)}));
+      const status = await native.request('status', null, {timeout: Math.min(timeout, 15000)});
+      requireReady(status); requireWritingSettings(status, settings);
       checkingReadiness = false;
       row.response = await native.request('send', writingTurn(c.source, c.mode, settings), {timeout});
       bytes += Buffer.byteLength(row.response);
@@ -79,19 +81,19 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
 }
 const readJSON = readData;
 export async function main(argv = process.argv.slice(2)) {
-  const {values} = parseArgs({args: argv, options: {prepare: {type: 'boolean'}, fixture: {type: 'boolean'}, companion: {type: 'string'}, model: {type: 'string'}, effort: {type: 'string'},
+  const {values} = parseArgs({args: argv, options: {prepare: {type: 'boolean'}, fixture: {type: 'boolean'}, companion: {type: 'string'}, model: {type: 'string'}, effort: {type: 'string'}, speed: {type: 'string'},
     'provider-version': {type: 'string'}, out: {type: 'string', default: 'test-results/quality'}, run: {type: 'string'},
     labels: {type: 'string'}, judgments: {type: 'string'}, acceptance: {type: 'string'}, timeout: {type: 'string', default: '30'}}});
   const corpus = validateCorpus(await readJSON(CORPUS)), out = resolve(values.out);
   if (values.prepare && (values.fixture || values.run || values.labels || values.judgments || values.acceptance)) throw new Error('PREPARATION_OPTIONS_CONFLICT');
   let run, readiness;
   if (values.run) {
-    if (values.fixture || values.model || values.companion || values.effort !== undefined) throw new Error('SCORING_OPTIONS_CONFLICT');
+    if (values.fixture || values.model || values.companion || values.effort !== undefined || values.speed !== undefined) throw new Error('SCORING_OPTIONS_CONFLICT');
     run = await readJSON(values.run);
   } else {
     if (!values.fixture && (!values.model || preferences({model: values.model}).model !== values.model || !values['provider-version'])) throw new Error('LIVE_CONFIGURATION_REQUIRED');
     const timeout = Number(values.timeout); if (!Number.isFinite(timeout) || timeout < 1 || timeout > 120) throw new Error('INVALID_TIMEOUT');
-    const config = await configuration({model: values.model, providerVersion: values['provider-version'], fixture: values.fixture, effort: values.effort});
+    const config = await configuration({model: values.model, providerVersion: values['provider-version'], fixture: values.fixture, effort: values.effort, speed: values.speed});
     if (values.prepare) run = plannedRun(corpus, config);
     else {
       ({run, readiness} = await evaluate(corpus, config, {fixture: values.fixture, companion: values.companion, timeout: timeout * 1000}));
