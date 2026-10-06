@@ -14,10 +14,10 @@ Load `dist/lineleaf` unpacked through `chrome://extensions` with Developer mode 
 Authorize with the existing shared companion:
 
 ```sh
-seatline-companion authorize lineleaf codex,claude,gemini,grok chrome-extension://lnbkadelggojehiapgnhonicnfonobal/
+seatline-companion authorize lineleaf codex chrome-extension://lnbkadelggojehiapgnhonicnfonobal/
 ```
 
-This replaces the Lineleaf grant. If you retain additional Lineleaf origins or providers, use the [authorization helper](../investigations/extension-authorization.md) with all of them. Do not install a second companion.
+This grants only the initial Codex provider and replaces the Lineleaf grant. After selecting and saving another provider, copy its command from Settings and authorize again. If you retain additional Lineleaf origins or providers, use the [authorization helper](../investigations/extension-authorization.md) with all of them. Do not install a second companion.
 
 ## Try a selection
 

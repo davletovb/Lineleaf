@@ -145,7 +145,7 @@ test('settings: the authorization command can be copied', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin: 'https://ext.lineleaf.test'}); await settled(page, '#authorize');
   await page.getByRole('button', {name: 'Copy'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Command copied.');
-  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'seatline-companion authorize lineleaf codex,claude,gemini,grok chrome-extension://abcdefghijklmnopabcdefghijklmnop/');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'seatline-companion authorize lineleaf codex chrome-extension://abcdefghijklmnopabcdefghijklmnop/');
   await context.close();
 });
 test('settings: saved model, effort and speed stay together and timings label the requested speed', async () => {
@@ -282,8 +282,9 @@ test('settings saves provider-specific models and shows Codex-only budgets and e
     assert.equal(await page.locator('#model').inputValue(), '');
     for (const id of ['effort', 'speed']) { assert.equal(await page.locator(`#${id}`).isDisabled(), true); assert.equal(await page.locator(`#${id}`).inputValue(), ''); }
     assert.equal(await page.locator('#cloud-setting').isVisible(), provider === 'gemini');
-    if (provider === 'gemini') { assert.equal(await page.locator('#allow-cloud').isChecked(), false); await page.locator('#allow-cloud').check(); }
+    if (provider === 'gemini') { assert.equal(await page.locator('#allow-cloud').isChecked(), false); assert.match(await page.locator('#cloud-setting').textContent(), /each check sends the active paragraph through this cloud route/); await page.locator('#allow-cloud').check(); }
     await page.locator('#model').fill(`${provider}-model`); await save();
+    assert.equal(await page.locator('#authorize').textContent(), `seatline-companion authorize lineleaf ${provider} chrome-extension://abcdefghijklmnopabcdefghijklmnop/`);
   }
   await page.reload(); await settled(page, '#authorize');
   assert.equal(await page.locator('#provider').inputValue(), 'grok'); assert.equal(await page.locator('#model').inputValue(), 'grok-model');

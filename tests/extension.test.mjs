@@ -778,7 +778,7 @@ test('every provider routes all writing modes with independent ephemeral no-tool
 });
 test('Gemini requires explicit cloud opt-in and every provider refuses API-key or unknown sign-in before sending', async () => {
   for (const [provider, signIn, allowCloud, code] of [
-    ['gemini', 'cloud', false, 'CLOUD_SIGN_IN_REQUIRED'], ['gemini', 'api_key', true, 'SUBSCRIPTION_REQUIRED'], ['gemini', 'unknown', true, 'SUBSCRIPTION_REQUIRED'],
+    ['gemini', 'cloud', false, 'CLOUD_SIGN_IN_REQUIRED'], ['gemini', 'api_key', true, 'CLOUD_ROUTE_UNAVAILABLE'], ['gemini', 'unknown', true, 'CLOUD_ROUTE_UNAVAILABLE'], ['gemini', 'subscription', true, 'CLOUD_ROUTE_UNAVAILABLE'],
     ...['codex', 'claude', 'grok'].flatMap(provider => ['api_key', 'cloud', 'unknown'].map(signIn => [provider, signIn, false, 'SUBSCRIPTION_REQUIRED']))
   ]) {
     const f = fakeChrome({state: {...READY, sign_in: signIn}}); installController(f.api);

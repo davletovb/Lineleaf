@@ -40,7 +40,7 @@
               <select id="provider"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini · Antigravity</option><option value="grok">Grok</option></select>
             </div>
             <label id="cloud-setting" class="switch-row setting" for="allow-cloud" hidden>
-              <span class="switch-text"><strong>Allow the Antigravity cloud route</strong><span class="muted">Seatline cannot verify this route as subscription sign-in. Processing and billing follow your Antigravity account. Enable only if you accept this route.</span></span>
+              <span class="switch-text"><strong>Allow the Antigravity cloud route</strong><span class="muted">Seatline cannot verify this route as subscription sign-in. Processing and billing follow your Antigravity account. Enable only if you accept this route. If automatic checking is enabled, each check sends the active paragraph through this cloud route.</span></span>
               <input id="allow-cloud" type="checkbox">
             </label>
             <div class="grid2">
@@ -125,7 +125,8 @@
 
       <section class="card-section" id="seatline" aria-labelledby="seatline-title">
         <h2 id="seatline-title">Seatline connection</h2>
-        <p class="lede">Lineleaf uses your existing shared Seatline companion. Authorize this extension ID for the supported providers:</p>
+        <p class="lede">Lineleaf uses your existing shared Seatline companion. Save your provider selection, then authorize this extension ID for that provider:</p>
+        <p class="muted">This command replaces Lineleaf’s grant with the saved provider only. After switching and saving a provider, authorize again. Include all retained origins or providers manually only if you intend to grant them.</p>
         <div class="command"><code id="authorize"></code><button id="copy-command" type="button" class="small">Copy</button></div>
         <div class="actions-row"><button id="connection" type="button">Check Seatline</button></div>
         <details class="check-timing">

@@ -113,7 +113,7 @@ export function requireReady(status, settings) {
   const s = statusView(status);
   if (s.availability !== 'available') throw new LineleafError('EXECUTABLE_NOT_FOUND');
   if (s.authentication !== 'authenticated') throw new LineleafError('LOGIN_REQUIRED');
-  if (!allowedSignIn(settings).includes(s.sign_in)) throw new LineleafError(settings?.provider === 'gemini' && s.sign_in === 'cloud' ? 'CLOUD_SIGN_IN_REQUIRED' : 'SUBSCRIPTION_REQUIRED');
+  if (!allowedSignIn(settings).includes(s.sign_in)) throw new LineleafError(settings?.provider === 'gemini' ? (settings.allowCloud === true ? 'CLOUD_ROUTE_UNAVAILABLE' : s.sign_in === 'cloud' ? 'CLOUD_SIGN_IN_REQUIRED' : 'SUBSCRIPTION_REQUIRED') : 'SUBSCRIPTION_REQUIRED');
   if (!s.tool_isolation) throw new LineleafError('TOOL_ISOLATION_UNAVAILABLE');
 }
 export function requireWritingSettings(status, settings) {

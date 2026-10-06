@@ -34,7 +34,7 @@ async function load() {
   query('#paused').checked = settings.paused;
   query('#automatic').checked = settings.automatic; query('#clarity').checked = settings.clarity; query('#clarity').disabled = !settings.automatic;
   query('#dictionary').value = settings.dictionary.join('\n');
-  query('#authorize').textContent = `seatline-companion authorize lineleaf codex,claude,gemini,grok chrome-extension://${chrome.runtime.id}/`;
+  query('#authorize').textContent = `seatline-companion authorize lineleaf ${settings.provider} chrome-extension://${chrome.runtime.id}/`;
   query('#sites').replaceChildren();
   for (const origin of settings.sites) {
     const item = document.createElement('li'), avatar = document.createElement('span'), name = document.createElement('span');

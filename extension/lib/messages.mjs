@@ -7,13 +7,14 @@ export const MESSAGES = {
   LOGIN_REQUIRED: 'Sign in to the selected provider, then try again.', AUTH_REJECTED: 'Provider sign-in was rejected. Sign in again.',
   SUBSCRIPTION_REQUIRED: 'This prototype requires a verified subscription sign-in. API-key and unknown configurations are not enabled.',
   CLOUD_SIGN_IN_REQUIRED: 'Gemini through Antigravity requires the cloud-route opt-in in Settings before text can be sent.',
+  CLOUD_ROUTE_UNAVAILABLE: 'Seatline did not verify the configured Antigravity cloud route. Check your provider sign-in and Seatline before trying again.',
   TOOL_ISOLATION_UNAVAILABLE: 'This provider configuration cannot guarantee a request with no tools.',
   APP_NOT_AUTHORIZED: 'Authorize Lineleaf for the selected provider using the existing Seatline companion.',
   PROVIDER_RATE_LIMITED: 'The provider reached a limit. Wait a minute before trying again.',
   QUEUE_FULL: 'Seatline is busy. Wait briefly before trying again.', PROVIDER_TIMEOUT: 'The provider did not answer in time, so the request was cancelled and nothing was changed. Try again, choose a faster model in Settings, or use Check Seatline in Settings if it keeps happening.',
   PROVIDER_UNAVAILABLE: 'The provider is unavailable. Check the selected provider and Seatline.', PROVIDER_FAILED: 'The provider could not finish this request.',
-  READINESS_CHANGED: 'Your Provider sign-in or settings changed while Lineleaf was checking. Try again.',
-  READINESS_EXPIRED: 'Your Provider sign-in changed while Lineleaf was checking. Try again.',
+  READINESS_CHANGED: 'Your provider sign-in or settings changed while Lineleaf was checking. Try again.',
+  READINESS_EXPIRED: 'Your provider sign-in changed while Lineleaf was checking. Try again.',
   READINESS_UNVERIFIED: 'Seatline could not confirm that the provider is ready, so nothing was sent. Use Check Seatline in Settings, then try again.',
   READINESS_TIMEOUT: 'The provider did not confirm in time that it is ready, so nothing was sent. Try again.',
   MODEL_NOT_SUPPORTED: 'This model is not supported. Check the model setting.',
@@ -25,7 +26,7 @@ export const MESSAGES = {
   BUSY: 'Another Lineleaf request is running. Cancel it or wait for it to finish.',
   AUTO_WAIT: 'Automatic checking is waiting for the shared request interval.',
   AUTOMATIC_DISABLED: 'Automatic checking is off. Enable it in settings after reviewing the provider disclosure.',
-  AUTO_PAUSED: 'Automatic checking is paused for a few minutes because The provider did not answer in time. Choose Check now to try again.',
+  AUTO_PAUSED: 'Automatic checking is paused for a few minutes because the provider did not answer in time. Choose Check now to try again.',
   CLARITY_DISABLED: 'Clearer-wording suggestions are off. Enable them in settings after reviewing the provider disclosure.',
   SETTINGS_CHANGED: 'Preferences changed elsewhere. Reload settings before saving your changes.',
   OFFLINE: 'You are offline. Check your connection, then retry when ready.',
@@ -39,6 +40,6 @@ export const messageFor = code => MESSAGES[code] ?? MESSAGES.UNAVAILABLE;
 // look healthy while every check is refused.
 export function connectionSummary(state) {
   const line = `${PROVIDER_LABELS[state.provider] ?? 'Codex'}: ${state.availability}, ${state.authentication}, ${state.sign_in}. No-tools requests: ${state.tool_isolation ? 'supported' : 'unavailable'}.`;
-  if (state.sign_in_allowed === false) return `${line} ${messageFor(state.provider === 'gemini' && state.sign_in === 'cloud' ? 'CLOUD_SIGN_IN_REQUIRED' : 'SUBSCRIPTION_REQUIRED')}`;
+  if (state.sign_in_allowed === false) return `${line} ${messageFor(state.provider === 'gemini' ? (state.sign_in === 'cloud' ? 'CLOUD_SIGN_IN_REQUIRED' : 'CLOUD_ROUTE_UNAVAILABLE') : 'SUBSCRIPTION_REQUIRED')}`;
   return state.update_required === true ? `${line} ${MESSAGES.COMPANION_UPDATE_REQUIRED}` : line;
 }

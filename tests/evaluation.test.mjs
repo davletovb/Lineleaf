@@ -358,7 +358,7 @@ test('provider evaluation uses protected policy and refuses a changed cloud sign
     calls.push(m);
     broker(m, p, {state: {...READY, sign_in: m.method === 'readiness' ? 'cloud' : 'api_key'}});
   }))});
-  assert.equal(result.run.rows[0].code, 'SUBSCRIPTION_REQUIRED'); assert.equal(result.run.rows[0].response, '');
+  assert.equal(result.run.rows[0].code, 'CLOUD_ROUTE_UNAVAILABLE'); assert.equal(result.run.rows[0].response, '');
   assert.ok(calls.every(call => call.provider === 'gemini'));
   assert.deepEqual(calls.find(call => call.method === 'send_ready_with_policy').params.allowed_sign_in, ['cloud']);
   assert.equal(calls.some(call => call.method === 'send'), false);
