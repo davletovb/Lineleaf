@@ -30,6 +30,18 @@ class Fragmented(io.BytesIO):
 
 
 class FramingTests(unittest.TestCase):
+    def test_gemini_cloud_opt_in_is_explicit_and_uses_protected_sign_in_policy(self):
+        command = [*FIXTURE, "--cloud"]
+        blocked = run_benchmark(command, fixture=True, provider="gemini", readiness="cached")
+        self.assertEqual(blocked["reason"], "SUBSCRIPTION_SIGN_IN_REQUIRED")
+        allowed = run_benchmark(command, fixture=True, provider="gemini", readiness="cached", allow_cloud=True)
+        self.assertEqual(allowed["status"], "completed")
+        self.assertTrue(allowed["allow_cloud"])
+        for options in ({"provider": "codex", "allow_cloud": True}, {"provider": "gemini", "allow_cloud": True},
+                        {"provider": "claude", "effort": "low"}, {"provider": "grok", "speed": "fast"}):
+            with self.assertRaises(ValueError):
+                run_benchmark(FIXTURE, fixture=True, **options)
+
     def test_benchmark_speed_preserves_effort_and_records_the_requested_tier(self):
         for speed in ("", "standard", "fast"):
             turn = writing_turn("He go.", model="gpt-6-luna", effort="xhigh", speed=speed)

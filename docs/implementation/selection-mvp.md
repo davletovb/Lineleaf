@@ -1,6 +1,6 @@
 # B-01–B-05 — Explicit selection prototype
 
-This development extension adds selected-text proofreading and six deliberate rewrite modes (improve it, paraphrase, clearer, shorter, more formal, friendlier) through the existing shared Seatline companion. The panel is the only rewrite surface when the inline assistant is off. It rewrites a selection (or pasted text) only and shows a compact before → after preview with Accept, Dismiss and Copy; the inline card, built on demand with Alt Shift L even when automatic checking is off, also rewrites the caret paragraph and shows Original/Suggested text with Replace, Try again and Back. It has no automatic checking or inline underlines. Live provider quality/latency and actual Chrome/macOS companion setup remain acceptance gates. Codex is the candidate provider; use subscription sign-in and a runtime reporting tool isolation.
+This development extension adds selected-text proofreading and six deliberate rewrite modes (improve it, paraphrase, clearer, shorter, more formal, friendlier) through the existing shared Seatline companion. The panel is the only rewrite surface when the inline assistant is off. It rewrites a selection (or pasted text) only and shows a compact before → after preview with Accept, Dismiss and Copy; the inline card, built on demand with Alt Shift L even when automatic checking is off, also rewrites the caret paragraph and shows Original/Suggested text with Replace, Try again and Back. It has no automatic checking or inline underlines. Live provider quality/latency and actual Chrome/macOS companion setup remain acceptance gates. Codex, Claude Code, Gemini through Antigravity, and Grok are candidate providers. Select a provider and its native model ID in Settings. Codex, Claude Code and Grok require subscription sign-in; Gemini additionally requires explicit Antigravity cloud opt-in. Every route requires tool isolation.
 
 ## Build and load
 
@@ -14,7 +14,7 @@ Load `dist/lineleaf` unpacked through `chrome://extensions` with Developer mode 
 Authorize with the existing shared companion:
 
 ```sh
-seatline-companion authorize lineleaf codex chrome-extension://lnbkadelggojehiapgnhonicnfonobal/
+seatline-companion authorize lineleaf codex,claude,gemini,grok chrome-extension://lnbkadelggojehiapgnhonicnfonobal/
 ```
 
 This replaces the Lineleaf grant. If you retain additional Lineleaf origins or providers, use the [authorization helper](../investigations/extension-authorization.md) with all of them. Do not install a second companion.

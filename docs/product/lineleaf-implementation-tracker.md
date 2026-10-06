@@ -19,9 +19,9 @@ E-01–E-03 implementation: [PR #5](https://github.com/davletovb/Lineleaf/pull/5
 
 ## Progress
 
-- Planned implementation items: **27**
+- Planned implementation items: **29**
 - DONE: **8**
-- IMPLEMENTED — VERIFY: **19**
+- IMPLEMENTED — VERIFY: **21**
 - IN PROGRESS: **0**
 - BLOCKED: **0**
 - TODO: **0**
@@ -52,7 +52,8 @@ A staged decision can have separate dependency gates only when the decision log 
 | D | Validate real editors and investigate complex surfaces | D-01 through D-03 |
 | E | Evaluate quality, coexistence, and beta packaging | E-01 through E-03 |
 | F | Add Grammarly-style inline rewriting | F-01 through F-03 |
-| G | Reduce manual-check latency and expose saved effort/timings | G-01 through G-03 |
+| G | Reduce manual-check latency and expose saved effort/timings | G-01 through G-04 |
+| H | Expose additional existing Seatline provider adapters | H-01 |
 
 ## Work items
 
@@ -185,3 +186,13 @@ Local evidence: all 123 Node units and 39 Python checks pass; Seatline's 53 focu
 Owner: Lineleaf/Seatline maintainers. Status: **IMPLEMENTED — VERIFY**. [Lineleaf #20’s review](https://github.com/davletovb/Lineleaf/pull/20#pullrequestreview-5424304799) is addressed with a saved Provider default speed choice, now the initial preference. It omits the tier, respects Codex configuration and does not require the new tier capability. Explicit Standard/Fast still require support, including the status delivered ahead of protected sends, and retain model/effort. The minimum contract revision retains the prior reasoning-effort baseline for omission; the current pin includes Seatline #14’s wire correction. Timing null after a send identifies Provider default without claiming a served tier; old missing records remain unavailable. The UI links to current official usage information instead of hard-coding its multiplier. Benchmark/evaluation omission follows Settings, while controlled comparisons use fixed explicit Standard/Fast and `xhigh`. Regressions cover omitted fields, older-capability operation, zero sends for an explicit unsupported tier, reload/stale settings, model/effort preservation and hash-bound evaluation settings. Source/fixture/config parsing do not replace live account/model acceptance; that gate stays open and slice E stays deferred.
 
 Review-fix local validation: all 124 Node units and 40 Python checks pass. Build/package and blocked review-candidate packaging pass with the corrected Seatline pin. Provider default, Standard and Fast synthetic evaluator runs each complete all 380 cases at fixed `xhigh`; the fixture benchmark preserves `gpt-6-luna`/`xhigh` and records null for omitted speed. Linux/macOS browser, installed-extension and current/legacy companion checks are recorded on the PR, since this workspace denies their required sockets. Real Codex CLI 0.156.0 parses the explicit overrides, but is not authenticated; Standard generation without Fast eligibility and the fixed-model/effort latency/quality comparison remain live/device gates.
+
+## H-01 — Saved provider selection — 2026-10-06
+
+Owner: Lineleaf maintainers. Status: **IMPLEMENTED — VERIFY**. The owner explicitly selected Claude Code, Gemini through Antigravity, and Grok alongside Codex. Inspected merged Lineleaf `96ab32e98988522e796f79a6d3b39485e8f0ccb8` and Seatline `af245676209803013d5df5ff8431270efc1af9df`, with no conflicting open PRs. The existing companion pin already supplies every adapter; Seatline's app-server slice E remains deferred.
+
+| ID | Status | Implemented evidence | Remaining acceptance |
+| --- | --- | --- | --- |
+| H-01 | IMPLEMENTED — VERIFY | Settings saves the global provider and independent model profiles; Codex-only effort/speed disabled and omitted elsewhere. Antigravity's cloud classification requires explicit default-off opt-in, with billing/sign-in disclosure. Native readiness/preparation/diagnostics/protected sends and original-target cancellation carry provider identity. Stale saves and late results are refused; provider backoff/holds are separate, automatic budget shared. Timing v3 and evaluation hashes identify provider; authorization covers all four adapters. | Linux/macOS browser, installed-extension and shared-companion CI; owner runtime installation/sign-in, cancellation, model defaults/IDs and permission checks for each provider; same-corpus live quality/latency evaluation with independent review before advertised support or beta. |
+
+Local evidence: 135 Node units and 41 Python checks pass; package/build, all 380 corpus cases in the evaluator fixture, and blocked beta review-candidate packaging pass. Unit/fixture regressions cover all writing modes on all four routes, reload/restored profiles, stale provider/profile saves, invalid/unsupported settings, sign-in refusals before sending, cancellation during readiness/generation, provider-specific rate limits and the shared automatic budget. Browser coverage checks saved selector/model/budget/opt-in behavior and timing display. Evaluation/benchmark fixtures validate provider and cloud-policy metadata without provider accounts. This workspace cannot create Chromium/broker sockets, so browser, installed-extension, typing and real shared-broker validation run in the PR’s Linux/macOS CI. Fixture passes cannot close live/device gates. No writing prompts, provider sessions, app workers or credentials were added to Seatline.

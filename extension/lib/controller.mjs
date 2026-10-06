@@ -1,18 +1,20 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, originOf, sitePattern, preferences, writingTurn, requireReady, requireWritingSettings, statusView, errorCode, LineleafError, exactKeys, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, allowedSignIn, originOf, sitePattern, preferences, providerSettings, PROVIDERS, writingTurn, requireReady, requireWritingSettings, statusView, errorCode, LineleafError, exactKeys, isObject, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 import {checkTiming} from './check-timing.mjs';
 
 export function installController(api, {now = Date.now, clock = () => performance.now()} = {}) {
-  let active = null, diagnostic = false, backoffUntil = 0, automaticHold = 0; // automaticHold: no background requests after the provider failed to answer in time
+  let active = null, diagnostic = false;
+  const backoffUntil = Object.fromEntries(PROVIDERS.map(id => [id, 0])), automaticHold = {...backoffUntil};
   const peers = new Set();
   let timingEpoch = 0, timingWrites = Promise.resolve(), resetting = false;
   const read = async () => preferences((await api.storage.local.get('preferences')).preferences);
   // One native connection serves every request until it has been idle for LINK_IDLE, so a check pays for neither a new companion process nor,
   // usually, a new provider probe. `readinessApi` is what the companion at the other end has shown: Seatline's readiness API (true), a
   // companion that predates it (false), or not yet known (null). It is forgotten whenever the connection closes, so an updated companion is noticed.
-  let link = null, linkTimer = 0, readinessApi = null, warming = null, warmedAt = -Infinity;
+  let link = null, linkTimer = 0, readinessApi = null, warming = null;
+  const warmedAt = Object.fromEntries(PROVIDERS.map(id => [id, -Infinity]));
   // Whether the companion has refused to receive writing: it lacks Seatline's protected send. Its readiness answers say nothing about that,
   // so Check Seatline would report "ready" for a companion that can never check text. A refusal is remembered (also across a worker restart)
   // until a protected send is accepted, which only an updated and restarted companion does.
@@ -29,12 +31,12 @@ export function installController(api, {now = Date.now, clock = () => performanc
     linkTimer = setTimeout(() => { if (active || diagnostic || warming) idleLink(); else link?.close(); }, LINK_IDLE);
   };
   // The provider's readiness: from Seatline's cache when `freshness` allows, or, for a companion without the readiness API, a status probe.
-  async function readiness(connection, signal, freshness) {
+  async function readiness(connection, signal, freshness, provider) {
     if (readinessApi !== false) {
-      try { const status = await connection.request('readiness', freshness, {signal, timeout: PHASES.status}); readinessApi = true; return {status, modern: true}; }
+      try { const status = await connection.request('readiness', freshness, {provider, signal, timeout: PHASES.status}); readinessApi = true; return {status, modern: true}; }
       catch (error) { if (readinessApi === true || errorCode(error) !== 'INVALID_REQUEST') throw error; readinessApi = false; }
     }
-    return {status: await connection.request('status', null, {signal, timeout: PHASES.status}), modern: false};
+    return {status: await connection.request('status', null, {provider, signal, timeout: PHASES.status}), modern: false};
   }
   // Foreground work starts only after optional preparation has detached. Closing
   // its port removes timeout/drain callbacks before a new request can use it.
@@ -46,12 +48,13 @@ export function installController(api, {now = Date.now, clock = () => performanc
     attempt.connection.close();
   }
   // Gets the provider ready without a prompt or model turn. Failure is silent.
-  async function prepare() {
-    if (active || diagnostic || warming || readinessApi === false || now() < backoffUntil || now() < automaticHold || now() - warmedAt < PREPARE_INTERVAL) return 'skipped';
+  async function prepare({settings}) {
+    const provider = settings.provider;
+    if (active || diagnostic || warming || readinessApi === false || now() < backoffUntil[provider] || now() < automaticHold[provider] || now() - warmedAt[provider] < PREPARE_INTERVAL) return 'skipped';
     const attempt = {connection: native(), abort: new AbortController()};
-    warming = attempt; warmedAt = now();
+    warming = attempt; warmedAt[provider] = now();
     try {
-      await attempt.connection.request('prepare', READINESS.cached, {timeout: PHASES.status, signal: attempt.abort.signal});
+      await attempt.connection.request('prepare', READINESS.cached, {provider, timeout: PHASES.status, signal: attempt.abort.signal});
       if (warming !== attempt) return 'skipped';
       readinessApi = true; return 'prepared';
     } catch (error) {
@@ -61,8 +64,10 @@ export function installController(api, {now = Date.now, clock = () => performanc
   }
   const initialized = Promise.all([api.storage.local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'}), api.storage.session.get(['providerBackoff', 'automaticHold', 'companionOutdated'])])
     .then(([, saved]) => {
-      if (Number.isFinite(saved.providerBackoff) && saved.providerBackoff > now()) backoffUntil = Math.min(saved.providerBackoff, now() + 60000);
-      if (Number.isFinite(saved.automaticHold) && saved.automaticHold > now()) automaticHold = Math.min(saved.automaticHold, now() + AUTOMATIC_HOLD);
+      for (const [key, target, ceiling] of [['providerBackoff', backoffUntil, 60000], ['automaticHold', automaticHold, AUTOMATIC_HOLD]]) {
+        const values = Number.isFinite(saved[key]) ? {codex: saved[key]} : saved[key];
+        for (const provider of PROVIDERS) if (Number.isFinite(values?.[provider]) && values[provider] > now()) target[provider] = Math.min(values[provider], now() + ceiling);
+      }
       outdated = saved.companionOutdated === true;
     });
   const ui = sender => sender.id === api.runtime.id && !sender.incognito && !sender.tab?.incognito
@@ -119,7 +124,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
     peer.abort = new AbortController(); const signal = peer.abort.signal;
     const timing = checkTiming(request.mode, automatic ? 'automatic' : 'manual', clock);
     const epoch = timingEpoch;
-    let connection;
+    let connection, provider = 'codex';
     const saveTiming = outcome => {
       if (!connection || automatic || outcome === 'CANCELLED' || epoch !== timingEpoch) return;
       const record = timing.finish(outcome);
@@ -132,14 +137,15 @@ export function installController(api, {now = Date.now, clock = () => performanc
     try {
       if (resetting) throw new LineleafError('CANCELLED');
       await initialized; const {settings} = await eligible(peer.sender);
+      provider = settings.provider;
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
       if (request.mode === 'clarity' && !settings.clarity) throw new LineleafError('CLARITY_DISABLED');
       if (!automatic && active?.automatic) { const previous = active; cancelPeer(previous); await previous.done; await eligible(peer.sender); }
       if (active || diagnostic) throw new LineleafError('BUSY');
-      if (now() < backoffUntil) throw waiting('PROVIDER_RATE_LIMITED', backoffUntil - now());
+      if (now() < backoffUntil[provider]) throw waiting('PROVIDER_RATE_LIMITED', backoffUntil[provider] - now());
       // A provider that just failed to answer in time is not given more background work (each turn is a process on the user's machine).
-      if (automatic && now() < automaticHold) throw waiting('AUTO_PAUSED', Math.min(automaticHold - now(), AUTOMATIC_HOLD));
+      if (automatic && now() < automaticHold[provider]) throw waiting('AUTO_PAUSED', Math.min(automaticHold[provider] - now(), AUTOMATIC_HOLD));
       active = peer;
       if (automatic) await automaticBudget();
       if (signal.aborted) throw new LineleafError('CANCELLED');
@@ -151,12 +157,13 @@ export function installController(api, {now = Date.now, clock = () => performanc
         // Lineleaf's own policy (subscription sign-in, no-tools requests) is enforced here, from Seatline's readiness, before anything is sent.
         const readyAt = clock();
         let status, modern;
-        try { ({status, modern} = await readiness(connection, signal, verification)); }
+        try { ({status, modern} = await readiness(connection, signal, verification, provider)); }
         finally { timing.readiness(clock() - readyAt); }
-        requireReady(status);
         // Permissions/settings may have changed while readiness was being checked.
         const latest = await eligible(peer.sender);
         if (signal.aborted) throw new LineleafError('CANCELLED');
+        if (latest.settings.provider !== provider) throw new LineleafError('CANCELLED');
+        requireReady(status, latest.settings);
         if (automatic && !latest.settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
         if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
         requireWritingSettings(status, latest.settings);
@@ -169,8 +176,8 @@ export function installController(api, {now = Date.now, clock = () => performanc
           timing.sending(latest.settings);
           // The status Seatline reports ahead of the turn shows that it accepted the protected send: from then on the companion is not the
           // problem, whatever the turn or the sign-in check does next.
-          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: ['subscription']},
-            {signal, timeout, onEvent: type => timing.event(type), onStatus: status => { remember(false); requireReady(status); requireWritingSettings(status, latest.settings); }});
+          answer = await connection.request('send_ready_with_policy', {turn, freshness: READINESS.cached, allowed_sign_in: allowedSignIn(latest.settings)},
+            {provider, signal, timeout, onEvent: type => timing.event(type), onStatus: status => { remember(false); requireReady(status, latest.settings); requireWritingSettings(status, latest.settings); }});
           break;
         } catch (error) {
           if (modern && ['INVALID_REQUEST', 'READINESS_UNSUPPORTED'].includes(errorCode(error))) { remember(true); throw new LineleafError('COMPANION_UPDATE_REQUIRED'); }
@@ -181,19 +188,20 @@ export function installController(api, {now = Date.now, clock = () => performanc
       }
       const final = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
+      if (final.settings.provider !== provider) throw new LineleafError('CANCELLED');
       timing.validating();
       const edits = filterDictionary(candidates(answer, request.text, request.mode), final.settings);
       void saveTiming('completed');
       send(peer.port, {type: 'result', id: request.id, edits});
-      if (automaticHold) { automaticHold = 0; await api.storage.session.set({automaticHold: 0}).catch(() => {}); } // It answered, so background checks may resume.
+      if (automaticHold[provider]) { automaticHold[provider] = 0; await api.storage.session.set({automaticHold: {...automaticHold}}).catch(() => {}); }
     } catch (error) {
       const code = errorCode(error);
       void saveTiming(code);
-      if (code === 'PROVIDER_TIMEOUT') { automaticHold = now() + AUTOMATIC_HOLD; await api.storage.session.set({automaticHold}).catch(() => {}); }
-      if (code === 'PROVIDER_RATE_LIMITED' && !error.local) backoffUntil = now() + 60000;
-      else if (code === 'QUEUE_FULL') backoffUntil = now() + 5000;
-      if (backoffUntil > now()) await api.storage.session.set({providerBackoff: backoffUntil}).catch(() => {});
-      send(peer.port, {type: 'error', id: request.id, code, retryAfterMs: error.retryAfterMs ?? Math.max(0, backoffUntil - now())});
+      if (code === 'PROVIDER_TIMEOUT') { automaticHold[provider] = now() + AUTOMATIC_HOLD; await api.storage.session.set({automaticHold: {...automaticHold}}).catch(() => {}); }
+      if (code === 'PROVIDER_RATE_LIMITED' && !error.local) backoffUntil[provider] = now() + 60000;
+      else if (code === 'QUEUE_FULL') backoffUntil[provider] = now() + 5000;
+      if (backoffUntil[provider] > now()) await api.storage.session.set({providerBackoff: {...backoffUntil}}).catch(() => {});
+      send(peer.port, {type: 'error', id: request.id, code, retryAfterMs: error.retryAfterMs ?? Math.max(0, backoffUntil[provider] - now())});
     } finally {
       if (connection) idleLink(); // The connection stays for the next request; a closed or failed one reconnects by itself.
       peer.connection = null; peer.running = false; peer.abort = null;
@@ -228,7 +236,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
   }
   let sync = Promise.resolve();
   const schedule = () => { sync = sync.catch(() => {}).then(reconcile).catch(() => {}); };
-  api.storage.onChanged.addListener((_changes, area) => { if (area === 'local') { for (const peer of peers) cancelPeer(peer); schedule(); } });
+  api.storage.onChanged.addListener((_changes, area) => { if (area === 'local') { stopPreparation(); for (const peer of peers) cancelPeer(peer); schedule(); } });
   api.permissions.onRemoved.addListener(() => { for (const peer of peers) cancelPeer(peer); schedule(); });
   api.tabs.onRemoved.addListener(id => { for (const peer of peers) if (peer.sender.tab?.id === id) cancelPeer(peer); });
   api.tabs.onUpdated.addListener((id, change) => { if (change.status === 'loading' || change.url) for (const peer of peers) if (peer.sender.tab?.id === id) cancelPeer(peer); });
@@ -241,20 +249,31 @@ export function installController(api, {now = Date.now, clock = () => performanc
       const next = {...settings, paused: p.paused}; await api.storage.local.set({preferences: next}); return next;
     }
     if (message.type === 'save-settings' && exactKeys(p, ['changes', 'expected', 'dictionary'])) {
-      const fields = ['model', 'effort', 'speed', 'variant', 'automatic', 'clarity'];
-      if (!p.changes || !exactKeys(p.expected, Object.keys(p.changes)) || !exactKeys(p.changes, Object.keys(p.expected))
-          || !Object.keys(p.changes).every(key => fields.includes(key)) || !exactKeys(p.dictionary, ['add', 'remove'])
-          || !['add', 'remove'].every(key => Array.isArray(p.dictionary[key]) && p.dictionary[key].length <= 500 && Array.from(p.dictionary[key]).every(word => dictionaryWord(word)))) throw new LineleafError('INVALID_REQUEST');
-      for (const values of [p.changes, p.expected]) {
-        const validated = preferences({...settings, ...values});
-        if (!Object.keys(values).every(key => validated[key] === values[key])) throw new LineleafError('INVALID_REQUEST');
+      const fields = ['provider', 'model', 'effort', 'speed', 'allowCloud', 'variant', 'automatic', 'clarity'];
+      if (!isObject(p.changes) || !Object.keys(p.changes).every(key => fields.includes(key))
+          || !exactKeys(p.dictionary, ['add', 'remove'])
+          || !['add', 'remove'].every(key => Array.isArray(p.dictionary[key]) && p.dictionary[key].length <= 500 && p.dictionary[key].every(word => dictionaryWord(word)))) throw new LineleafError('INVALID_REQUEST');
+      const scoped = Object.keys(p.changes).some(key => ['provider', 'model', 'effort', 'speed', 'allowCloud'].includes(key));
+      const switching = Object.hasOwn(p.changes, 'provider') && p.changes.provider !== p.expected?.provider;
+      const expectedKeys = [...new Set([...Object.keys(p.changes), ...(scoped ? ['provider'] : []), ...(switching ? ['providerSettings'] : [])])];
+      if (!exactKeys(p.expected, expectedKeys)) throw new LineleafError('INVALID_REQUEST');
+      const target = p.changes.provider ?? settings.provider;
+      if (!PROVIDERS.includes(target)) throw new LineleafError('INVALID_REQUEST');
+      const base = {...settings, provider: target, ...settings.providerSettings[target]};
+      const validated = preferences({...base, ...p.changes});
+      if (!Object.keys(p.changes).every(key => validated[key] === p.changes[key])) throw new LineleafError('INVALID_REQUEST');
+      // Bind provider preferences to the provider the panel loaded. A switch also guards the stored profiles.
+      for (const key of expectedKeys) {
+        if (key === 'providerSettings') {
+          if (!exactKeys(p.expected[key], PROVIDERS) || !PROVIDERS.every(id => exactKeys(p.expected[key][id], ['model', 'effort', 'speed', 'allowCloud']))) throw new LineleafError('INVALID_REQUEST');
+          if (!PROVIDERS.every(id => ['model', 'effort', 'speed', 'allowCloud'].every(field => p.expected[key][id][field] === settings.providerSettings[id][field]))) throw new LineleafError('SETTINGS_CHANGED');
+        } else if (settings[key] !== p.expected[key]) throw new LineleafError('SETTINGS_CHANGED');
       }
-      // Compare only deliberately edited fields; dictionary deltas merge with current words.
-      if (!Object.keys(p.changes).every(key => settings[key] === p.expected[key])) throw new LineleafError('SETTINGS_CHANGED');
       const remove = new Set(p.dictionary.remove.map(dictionaryWord));
       const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(dictionaryWord)])];
       if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
-      const next = {...settings, ...p.changes, dictionary}; next.clarity = next.automatic && next.clarity; // Turning automatic checking off turns clearer wording off with it.
+      const bank = {...settings.providerSettings, [target]: providerSettings(validated, target)};
+      const next = preferences({...validated, providerSettings: bank, dictionary});
       if (JSON.stringify(next) !== JSON.stringify(settings)) await api.storage.local.set({preferences: next});
       return next;
     }
@@ -304,14 +323,15 @@ export function installController(api, {now = Date.now, clock = () => performanc
     if (message.type === 'prepare' && exactKeys(p, ['tabId']) && Number.isInteger(p.tabId)) {
       const tab = await api.tabs.get(p.tabId), origin = originOf(tab.url);
       if (!origin || tab.incognito || !allowed(settings, origin) || !await api.permissions.contains({origins: [sitePattern(origin)]})) throw new LineleafError('SITE_DISABLED');
-      return prepare();
+      return prepare({settings});
     }
     if (message.type === 'check-connection' && p === null) {
       if (active || diagnostic) throw new LineleafError('BUSY'); diagnostic = true;
       stopPreparation();
       try { // The user asked: always a fresh probe, which later checks may then reuse. A companion that cannot receive writing is not "ready".
-        const {status, modern} = await readiness(native(), undefined, READINESS.fresh);
-        return {...statusView(status), update_required: !modern || outdated || Boolean((settings.effort && status?.capabilities?.reasoning_effort !== true) || (settings.speed && status?.capabilities?.service_tier !== true))};
+        const {status, modern} = await readiness(native(), undefined, READINESS.fresh, settings.provider);
+        if ((await read()).provider !== settings.provider) throw new LineleafError('SETTINGS_CHANGED');
+        return {provider: settings.provider, ...statusView(status), sign_in_allowed: allowedSignIn(settings).includes(status?.sign_in), update_required: !modern || outdated || Boolean((settings.effort && status?.capabilities?.reasoning_effort !== true) || (settings.speed && status?.capabilities?.service_tier !== true))};
       } finally { diagnostic = false; idleLink(); }
     }
     throw new LineleafError('INVALID_REQUEST');

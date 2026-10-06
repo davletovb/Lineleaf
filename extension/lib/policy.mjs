@@ -31,6 +31,17 @@ export const AUTO_IDLE = 1500;
 export const AUTO_INTERVAL = 10000;
 export const EFFORTS = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
 export const SPEEDS = ['', 'standard', 'fast'];
+export const PROVIDERS = ['codex', 'claude', 'gemini', 'grok'];
+export const PROVIDER_LABELS = {codex: 'Codex', claude: 'Claude Code', gemini: 'Gemini · Antigravity', grok: 'Grok'};
+export const providerDefaults = provider => ({model: '', effort: provider === 'codex' ? 'low' : '', speed: '', allowCloud: false});
+export const validModel = model => typeof model === 'string' && /^(?:[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127})?$/.test(model);
+export function providerSettings(value, provider) {
+  const x = isObject(value) ? value : {}, defaults = providerDefaults(provider);
+  return {model: validModel(x.model) ? x.model : '',
+    effort: provider === 'codex' && EFFORTS.includes(x.effort) ? x.effort : defaults.effort,
+    speed: provider === 'codex' && SPEEDS.includes(x.speed) ? x.speed : '',
+    allowCloud: provider === 'gemini' && x.allowCloud === true};
+}
 export const DEFAULTS = Object.freeze({provider: 'codex', model: '', effort: 'low', speed: '', variant: 'US', paused: false, automatic: false, clarity: false, dictionary: [], sites: []});
 export const isObject = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 export const exactKeys = (x, keys) => isObject(x) && Object.keys(x).length === keys.length && keys.every(k => Object.hasOwn(x, k));
@@ -48,9 +59,10 @@ export function sitePattern(origin) {
 }
 export function preferences(value) {
   const x = isObject(value) ? value : {};
-  return {provider: 'codex', model: typeof x.model === 'string' && /^(?:[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127})?$/.test(x.model) ? x.model : '',
-    effort: EFFORTS.includes(x.effort) ? x.effort : DEFAULTS.effort,
-    speed: SPEEDS.includes(x.speed) ? x.speed : DEFAULTS.speed,
+  const provider = PROVIDERS.includes(x.provider) ? x.provider : DEFAULTS.provider;
+  const profiles = Object.fromEntries(PROVIDERS.map(id => [id, providerSettings(x.providerSettings?.[id], id)]));
+  profiles[provider] = providerSettings({...profiles[provider], ...Object.fromEntries(['model', 'effort', 'speed', 'allowCloud'].filter(key => Object.hasOwn(x, key)).map(key => [key, x[key]]))}, provider);
+  return {provider, ...profiles[provider], providerSettings: profiles,
     variant: x.variant === 'UK' ? 'UK' : 'US', paused: x.paused === true, automatic: x.automatic === true,
     clarity: x.automatic === true && x.clarity === true, // Clearer-wording checks are extra automatic requests, so they need the automatic opt-in too.
     dictionary: Array.isArray(x.dictionary) ? [...new Set(x.dictionary.map(dictionaryWord).filter(Boolean))].slice(0, 500) : [],
@@ -96,11 +108,12 @@ export function statusView(status) {
   return {...Object.fromEntries(['availability', 'authentication', 'sign_in'].map(k => [k, enums.has(status?.[k]) ? status[k] : 'unknown'])),
     tool_isolation: status?.capabilities?.tool_isolation === true};
 }
-export function requireReady(status) {
+export const allowedSignIn = settings => settings?.provider === 'gemini' && settings.allowCloud === true ? ['cloud'] : ['subscription'];
+export function requireReady(status, settings) {
   const s = statusView(status);
   if (s.availability !== 'available') throw new LineleafError('EXECUTABLE_NOT_FOUND');
   if (s.authentication !== 'authenticated') throw new LineleafError('LOGIN_REQUIRED');
-  if (s.sign_in !== 'subscription') throw new LineleafError('SUBSCRIPTION_REQUIRED');
+  if (!allowedSignIn(settings).includes(s.sign_in)) throw new LineleafError(settings?.provider === 'gemini' && s.sign_in === 'cloud' ? 'CLOUD_SIGN_IN_REQUIRED' : 'SUBSCRIPTION_REQUIRED');
   if (!s.tool_isolation) throw new LineleafError('TOOL_ISOLATION_UNAVAILABLE');
 }
 export function requireWritingSettings(status, settings) {

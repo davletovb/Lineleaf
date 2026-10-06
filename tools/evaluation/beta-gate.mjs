@@ -24,7 +24,7 @@ export async function betaGate(corpus, context, evidence, {directory = '.', read
       if (!result.releaseEligible || run.configuration.packageHash !== context.packageHash || run.configuration.engineHash !== context.engineHash
           || run.configuration.seatlineRevision !== context.seatlineRevision) throw new Error();
       if (qualities.some(q => q.configurationHash === result.configurationHash)) throw new Error();
-      qualities.push({configurationHash: result.configurationHash, model: result.configuration.model, providerVersion: result.configuration.providerVersion,
+      qualities.push({configurationHash: result.configurationHash, provider: result.configuration.provider, model: result.configuration.model, providerVersion: result.configuration.providerVersion,
         humanPrecision: result.metrics.proofread.humanPrecision, referenceRecall: result.metrics.proofread.referenceRecall,
         minimumReferenceRecall: result.minimumReferenceRecall});
     } catch { fail('LIVE_QUALITY_REQUIRED'); }

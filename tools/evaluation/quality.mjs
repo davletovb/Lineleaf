@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {candidates} from '../../extension/lib/candidates.mjs';
-import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS, SPEEDS} from '../../extension/lib/policy.mjs';
+import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS, SPEEDS, PROVIDERS} from '../../extension/lib/policy.mjs';
 
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 const fail = () => { throw new Error('INVALID_EVALUATION_DATA'); };
@@ -61,13 +61,16 @@ export function validateRun(corpus, run) {
   // Old evidence remains readable; new runs hash effort and requested speed
   // so comparisons cannot silently change either choice.
   const hasEffort = Object.hasOwn(run?.configuration ?? {}, 'effort');
+  const hasCloud = Object.hasOwn(run?.configuration ?? {}, 'allowCloud');
   const hasSpeed = Object.hasOwn(run?.configuration ?? {}, 'speed');
   if (!exactKeys(run, ['schema', 'id', 'kind', 'corpusHash', 'configuration', 'configurationHash', 'createdAt', 'timingBoundary', 'rows']) || run.schema !== 1
       || !id(run.id) || !['fixture', 'live', 'planned'].includes(run.kind) || run.corpusHash !== sha256(corpus)
-      || !exactKeys(run.configuration, ['provider', 'model', 'providerVersion', 'seatlineRevision', 'engineHash', 'packageHash', 'runtime', ...(hasEffort ? ['effort'] : []), ...(hasSpeed ? ['speed'] : [])])
+      || !exactKeys(run.configuration, ['provider', 'model', 'providerVersion', 'seatlineRevision', 'engineHash', 'packageHash', 'runtime', ...(hasEffort ? ['effort'] : []), ...(hasSpeed ? ['speed'] : []), ...(hasCloud ? ['allowCloud'] : [])])
       || (hasEffort && !EFFORTS.includes(run.configuration.effort))
       || (hasSpeed && !SPEEDS.includes(run.configuration.speed))
-      || run.configuration.provider !== 'codex' || !validText(run.configuration.model, 128)
+      || (hasCloud && (typeof run.configuration.allowCloud !== 'boolean' || (run.configuration.allowCloud && run.configuration.provider !== 'gemini')))
+      || (run.configuration.provider !== 'codex' && (run.configuration.effort || run.configuration.speed))
+      || !PROVIDERS.includes(run.configuration.provider) || !validText(run.configuration.model, 128)
       || !validText(run.configuration.providerVersion, 128) || !/^[a-f0-9]{40}$/.test(run.configuration.seatlineRevision)
       || !hash(run.configuration.engineHash) || !hash(run.configuration.packageHash)
       || !exactKeys(run.configuration.runtime, ['platform', 'arch', 'cpu', 'memoryGB'])
@@ -76,7 +79,7 @@ export function validateRun(corpus, run) {
       || !Number.isFinite(run.configuration.runtime.memoryGB) || run.configuration.runtime.memoryGB <= 0
       || run.configurationHash !== sha256(run.configuration) || typeof run.createdAt !== 'string'
       || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(run.createdAt) || !Number.isFinite(Date.parse(run.createdAt))
-      || run.timingBoundary !== 'fresh-native-ready-status-send-validation'
+      || !['fresh-native-ready-status-send-validation', 'fresh-native-readiness-protected-send-validation'].includes(run.timingBoundary)
       || !Array.isArray(run.rows) || run.rows.length > corpus.cases.length) fail();
   if (run.kind === 'live' && (run.configuration.model === 'fixture-reference' || run.configuration.providerVersion === 'fixture')) fail();
   const seen = new Set();

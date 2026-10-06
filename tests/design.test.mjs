@@ -4,6 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {extname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {preferences} from '../extension/lib/policy.mjs';
 import {panelFor} from './fixtures/panel-driver.mjs';
 // The look of every surface: shared tokens meet WCAG AA in light and dark, and the redesigned popup, settings page, inline badge,
 // underlines and word popover behave the way their design says. Editing and request behaviour is covered by the other suites.
@@ -54,11 +55,17 @@ const CONTRAST = '(' + function (el) {
 }.toString() + ')';
 const TYPES = {'.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascript', '.js': 'text/javascript', '.png': 'image/png', '.svg': 'image/svg+xml'};
 const stub = ({sites = [], paused = false, automatic = false, clarity = false, url = 'https://mail.example.com/compose'} = {}) => `
-  const settings = {variant: 'US', model: '', effort: 'low', speed: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
+  const settings = JSON.parse(sessionStorage.getItem('lineleafSettings') ?? 'null') ?? {provider: 'codex', allowCloud: false, providerSettings: ${JSON.stringify(preferences(null).providerSettings)}, variant: 'US', model: '', effort: 'low', speed: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
   window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type, payload}) {
-      if (type === 'save-settings') Object.assign(settings, payload.changes);
+      if (type === 'save-settings') {
+        const provider = payload.changes.provider ?? settings.provider;
+        if (provider !== settings.provider) Object.assign(settings, settings.providerSettings[provider]);
+        Object.assign(settings, payload.changes);
+        settings.providerSettings[provider] = {model: settings.model, effort: settings.effort, speed: settings.speed, allowCloud: settings.allowCloud};
+      }
       if (type === 'get-check-timing') return {ok: true, value: window.lastTiming ?? null};
       if (type === 'check-connection') return {ok: true, value: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', tool_isolation: true, update_required: window.outdated === true}};
+      sessionStorage.setItem('lineleafSettings', JSON.stringify(settings));
       return {ok: true, value: settings};
     }}, tabs: {async query() { return [{id: 1, url: ${JSON.stringify(url)}, incognito: false}]; }}, permissions: {async request() { return true; }}};`;
 async function extensionPage(file, options = {}, {scheme = 'light', viewport = {width: 360, height: 640}, reducedMotion = 'no-preference'} = {}) {
@@ -137,7 +144,7 @@ test('settings: the authorization command can be copied', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin: 'https://ext.lineleaf.test'}); await settled(page, '#authorize');
   await page.getByRole('button', {name: 'Copy'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Command copied.');
-  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'seatline-companion authorize lineleaf codex chrome-extension://abcdefghijklmnopabcdefghijklmnop/');
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'seatline-companion authorize lineleaf codex,claude,gemini,grok chrome-extension://abcdefghijklmnopabcdefghijklmnop/');
   await context.close();
 });
 test('settings: saved model, effort and speed stay together and timings label the requested speed', async () => {
@@ -263,4 +270,25 @@ test('the inline card is legible and calm in dark mode and with reduced motion',
     assert.ok(await inline.locator('.card').evaluate(el => parseFloat(getComputedStyle(el).animationDuration) <= 0.001), 'reduced motion removes the pop-in');
     await context.close();
   }
+});
+test('settings saves provider-specific models and shows Codex-only budgets and explicit Gemini cloud opt-in', async () => {
+  const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 800}});
+  await settled(page, '#authorize');
+  const save = async () => { await page.getByRole('button', {name: 'Save preferences'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.'); };
+  await page.locator('#model').fill('gpt-6-sol'); await page.locator('#effort').selectOption('xhigh'); await page.locator('#speed').selectOption('fast'); await save();
+  for (const provider of ['claude', 'gemini', 'grok']) {
+    await page.getByLabel('Provider', {exact: true}).selectOption(provider);
+    assert.equal(await page.locator('#model').inputValue(), '');
+    for (const id of ['effort', 'speed']) { assert.equal(await page.locator(`#${id}`).isDisabled(), true); assert.equal(await page.locator(`#${id}`).inputValue(), ''); }
+    assert.equal(await page.locator('#cloud-setting').isVisible(), provider === 'gemini');
+    if (provider === 'gemini') { assert.equal(await page.locator('#allow-cloud').isChecked(), false); await page.locator('#allow-cloud').check(); }
+    await page.locator('#model').fill(`${provider}-model`); await save();
+  }
+  await page.reload(); await settled(page, '#authorize');
+  assert.equal(await page.locator('#provider').inputValue(), 'grok'); assert.equal(await page.locator('#model').inputValue(), 'grok-model');
+  await page.locator('#provider').selectOption('codex');
+  assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol'); assert.equal(await page.locator('#effort').inputValue(), 'xhigh'); assert.equal(await page.locator('#speed').inputValue(), 'fast');
+  assert.equal(await page.locator('#effort').isEnabled(), true);
+  await page.locator('#provider').selectOption('gemini'); assert.equal(await page.locator('#allow-cloud').isChecked(), true); assert.equal(await page.locator('#model').inputValue(), 'gemini-model');
+  await context.close();
 });

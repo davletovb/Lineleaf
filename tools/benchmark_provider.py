@@ -132,7 +132,7 @@ def launched(log, before):
     return {key: now[key] - before[key] for key in now}
 
 
-def provider_ready(connection, provider, timeout, report, readiness="legacy", effort=None, speed=""):
+def provider_ready(connection, provider, timeout, report, readiness="legacy", effort=None, speed="", allow_cloud=False):
     method, params = ("status", None) if readiness == "legacy" else ("readiness", READINESS_CACHED)
     events = connection.collect(connection.start(provider, method, params), timeout=min(timeout, 30))
     state = next((x.get("status") for x in events if x["type"] == "status"), None)
@@ -144,7 +144,7 @@ def provider_ready(connection, provider, timeout, report, readiness="legacy", ef
                                 for key in ("availability", "authentication", "sign_in")}
     if state.get("availability") != "available" or state.get("authentication") != "authenticated":
         return "PROVIDER_NOT_READY"
-    if state.get("sign_in") != "subscription":
+    if state.get("sign_in") != ("cloud" if provider == "gemini" and allow_cloud else "subscription"):
         return "SUBSCRIPTION_SIGN_IN_REQUIRED"
     if not isinstance(state.get("capabilities"), dict) or state["capabilities"].get("tool_isolation") is not True:
         return "TOOL_ISOLATION_UNAVAILABLE"
@@ -153,15 +153,15 @@ def provider_ready(connection, provider, timeout, report, readiness="legacy", ef
     return None
 
 
-def start_turn(connection, provider, source, model, readiness, effort=None, speed=""):
+def start_turn(connection, provider, source, model, readiness, effort=None, speed="", allow_cloud=False):
     if readiness == "legacy":
         return connection.start(provider, "send", writing_turn(source, model, effort=effort, speed=speed))
     # Sent under the readiness just checked, so Seatline repeats no sign-in probe.
     return connection.start(provider, "send_ready_with_policy", {"turn": writing_turn(source, model, check_sign_in=False, effort=effort, speed=speed),
-                                                      "freshness": READINESS_CACHED, "allowed_sign_in": ["subscription"]})
+                                                      "freshness": READINESS_CACHED, "allowed_sign_in": ["cloud" if provider == "gemini" and allow_cloud else "subscription"]})
 
 
-def measure_turn(connection, provider, model, case, repetition, phase, timeout, readiness="legacy", log=None, effort=None, speed=""):
+def measure_turn(connection, provider, model, case, repetition, phase, timeout, readiness="legacy", log=None, effort=None, speed="", allow_cloud=False):
     case_id, source = case
     before = log.count() if log else None
     started = time.monotonic()
@@ -169,7 +169,7 @@ def measure_turn(connection, provider, model, case, repetition, phase, timeout, 
            "phase": phase, "first_delta_ms": None, "terminal": "interrupted", "structured_valid": False}
     answer, request = "", None
     try:
-        request = start_turn(connection, provider, source, model, readiness, effort, speed)
+        request = start_turn(connection, provider, source, model, readiness, effort, speed, allow_cloud)
         deadline = started + timeout
         for _ in range(4096):
             try:
@@ -243,17 +243,21 @@ def finalize(report):
 
 
 def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=30, cancel_after=0.1, fixture=False,
-                  readiness="legacy", launch_log=None, effort=None, speed=""):
+                  readiness="legacy", launch_log=None, effort=None, speed="", allow_cloud=False):
     """`readiness`: "legacy" asks `status` and sends with `send` (Seatline probes sign-in again inside every turn); "cached" asks
     `readiness` (reused for up to 30 s) and sends with `send_ready_with_policy`. `launch_log`: a fake provider's launch record, to count launches."""
     contract = json.loads((ROOT / "config/seatline-contract.json").read_text())
+    if provider not in ("codex", "claude", "gemini", "grok") or (allow_cloud and (provider != "gemini" or readiness != "cached")):
+        raise ValueError("cloud opt-in requires Gemini and protected cached readiness")
+    if provider != "codex" and (effort or speed):
+        raise ValueError("effort and speed overrides are supported for Codex only")
     if effort is not None and effort not in EFFORTS:
         raise ValueError("invalid reasoning effort")
     if speed not in SPEEDS:
         raise ValueError("invalid speed")
     log = LaunchLog(launch_log) if launch_log else None
     report = {"status": "blocked", "kind": "fixture" if fixture else "live",
-              "seatline_revision": os.environ.get("SEATLINE_REVISION") or contract["revision"], "provider": provider, "model": model, "reasoning_effort": effort, "requested_service_tier": speed or None, "readiness": readiness,
+              "seatline_revision": os.environ.get("SEATLINE_REVISION") or contract["revision"], "provider": provider, "allow_cloud": allow_cloud, "model": model, "reasoning_effort": effort, "requested_service_tier": speed or None, "readiness": readiness,
               "samples_per_case": samples, "measurements": [], "connections_opened": 0,
               "warming": "Fresh client connection/process per repetition; first vs subsequent is not model cold vs warm.",
               "case_order": "Rotates each repetition to avoid always measuring the same first case.",
@@ -264,7 +268,7 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
             with NativeConnection(command, timeout=min(timeout, 10)) as connection:
                 report["connections_opened"] += 1
                 before = log.count() if log else None
-                reason = provider_ready(connection, provider, timeout, report, readiness, effort, speed)
+                reason = provider_ready(connection, provider, timeout, report, readiness, effort, speed, allow_cloud)
                 if log:
                     report["readiness_launches"] = [*report.get("readiness_launches", []), launched(log, before)]
                 if reason:
@@ -273,7 +277,7 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
                 at = repetition % len(CASES)
                 for index, case in enumerate(CASES[at:] + CASES[:at]):
                     row = measure_turn(connection, provider, model, case, repetition,
-                                       "first_request" if index == 0 else "subsequent_request", timeout, readiness, log, effort, speed)
+                                       "first_request" if index == 0 else "subsequent_request", timeout, readiness, log, effort, speed, allow_cloud)
                     report["measurements"].append(row)
                     if row.get("reason") == "PROVIDER_RATE_LIMITED":
                         report["limits"]["rate_limit_observed"] = True
@@ -284,7 +288,7 @@ def run_benchmark(command, *, provider="codex", model=None, samples=1, timeout=3
                 if repetition == samples - 1:
                     before_cancel = log.count() if log else None
                     try:
-                        target = start_turn(connection, provider, CASES[0][1], model, readiness, effort, speed)
+                        target = start_turn(connection, provider, CASES[0][1], model, readiness, effort, speed, allow_cloud)
                         time.sleep(cancel_after)
                         cancel_sent = time.monotonic()
                         connection.cancel(target)
@@ -307,6 +311,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--companion", default="seatline-companion")
     parser.add_argument("--provider", choices=["codex", "claude", "gemini", "grok"], default="codex")
+    parser.add_argument("--allow-cloud", action="store_true", help="Explicit Gemini/Antigravity cloud opt-in; requires --readiness cached")
     parser.add_argument("--model")
     parser.add_argument("--effort", choices=EFFORTS, help="Reasoning budget for the whole run; omit to use the provider default")
     parser.add_argument("--speed", choices=SPEEDS, default="", help="Requested processing speed for the whole run; omit or pass an empty string for Provider default")
@@ -320,8 +325,12 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.timeout <= 120 or not 0 <= args.cancel_after <= 2:
         parser.error("timeout must be 1–120 seconds and cancel-after 0–2 seconds")
+    if args.allow_cloud and (args.provider != "gemini" or args.readiness != "cached"):
+        parser.error("--allow-cloud requires --provider gemini --readiness cached")
+    if args.provider != "codex" and (args.effort or args.speed):
+        parser.error("effort and speed overrides are available for Codex only")
     if args.fixture:
-        command = [sys.executable, str(ROOT / "tests/fixtures/companion.py"), "--hold-turn", str(len(CASES) + 1)]
+        command = [sys.executable, str(ROOT / "tests/fixtures/companion.py"), "--hold-turn", str(len(CASES) + 1), *(["--cloud"] if args.provider == "gemini" else [])]
     else:
         binary = shutil.which(args.companion)
         if binary is None:
@@ -330,7 +339,7 @@ def main():
         command = [binary, "connect", "lineleaf"]
     report = run_benchmark(command, provider=args.provider, model=args.model, samples=args.samples,
                            timeout=args.timeout, cancel_after=args.cancel_after, fixture=args.fixture,
-                           readiness=args.readiness, launch_log=args.launch_log, effort=args.effort, speed=args.speed)
+                           readiness=args.readiness, launch_log=args.launch_log, effort=args.effort, speed=args.speed, allow_cloud=args.allow_cloud)
     print(json.dumps(report, indent=2))
     return 0 if report["status"] == "completed" else 2
 
