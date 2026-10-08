@@ -160,3 +160,25 @@ test('two options pages preserve newer pause/consent/dictionary and reject same-
   await other.close(); await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
 });
+test('the language setting offers Türkçe, keeps the clearer-wording choice while Turkish is selected, and survives a reload', async () => {
+  await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'US' && document.querySelector('#status').textContent === '');
+  assert.deepEqual(await options.locator('#variant option').evaluateAll(list => list.map(option => [option.value, option.textContent])), [['US', 'English · US'], ['UK', 'English · UK'], ['TR', 'Türkçe']]);
+  const save = async () => {
+    await options.getByRole('button', {name: 'Save preferences'}).click();
+    await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  };
+  const stored = () => worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+  // A direct click: the fixed save bar can cover a switch near the bottom of the window, which would swallow a pointer click.
+  const toggle = id => options.locator(id).evaluate(el => el.click());
+  await toggle('#automatic'); await toggle('#clarity'); await save();
+  assert.equal((await stored()).clarity, true);
+  await options.locator('#variant').selectOption('TR');
+  assert.equal(await options.locator('#clarity').isDisabled(), true); assert.equal(await options.locator('#clarity').isChecked(), true); // kept, not offered
+  await save(); await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'TR');
+  assert.equal(await options.locator('#clarity').isDisabled(), true); assert.equal(await options.locator('#clarity').isChecked(), true);
+  assert.deepEqual([(await stored()).variant, (await stored()).clarity], ['TR', true]);
+  await options.locator('#variant').selectOption('US'); // back to English: the choice is still there and can be changed
+  assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true);
+  await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
+});

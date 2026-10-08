@@ -29,12 +29,12 @@ The preservation promise concerns authorship, intent, and control. It does not r
 
 | Capability | First usable release | Later expansion |
 | --- | --- | --- |
-| Proofreading | Grammar, spelling, punctuation; minimal suggested edits | Additional languages and advanced style rules |
+| Proofreading | Grammar, spelling, punctuation; minimal suggested edits in English and, added after the first plan, in Turkish | Further languages and advanced style rules |
 | Inline interaction | Underlines/cards, accept, dismiss, pause | More polished positioning and grouped suggestions |
 | Rewriting | Selected text, or the caret paragraph in the inline card: improve it, paraphrase, clearer, shorter, more formal, friendlier; explicit actions with a before/after preview, available without the automatic opt-in; optional, off-by-default clearer-wording underlines that need automatic checking and are labelled apart from corrections | Multiple alternatives, custom tone presets and broader draft assistance |
 | Explanations | Brief optional explanation for a correction | Learner-focused explanations and recurring patterns |
 | Editing support | Textarea, supported text inputs, basic contenteditable | Dedicated rich-editor and site adapters |
-| Preferences | English, US/UK variant, site enablement, personal dictionary | Other English variants, multilingual support, style profiles |
+| Preferences | English with a US/UK variant, Turkish (proofreading only), site enablement, personal dictionary | Other English variants, further languages, Turkish rewrites and clearer wording, style profiles |
 | Provider connection | Existing Seatline companion; one validated provider initially | Additional validated providers and capability-aware routing |
 
 Chrome desktop is the initial browser target. Platform coverage follows what the existing Seatline installation supports; start development on macOS and validate further platforms separately. Edge and Firefox need explicit compatibility work rather than an assumed free port.
@@ -78,6 +78,7 @@ Capture only the active supported field/selection and necessary surrounding text
 These are proposed targets, not measured results:
 
 - Build at least 150 reviewed writing cases: real errors, already-correct text, informal voice, names/numbers, negation, ambiguous sentences, and second-language English. Use independent human review for labels and meaning preservation, with an explicit per-case reference decision. Include paragraph-length, multi-error and US/UK-sensitive cases and distinct rewrite sources.
+- Turkish is scored as its own stratum and is not covered by the English set above: it needs independently reviewed Turkish cases (including dotted and dotless i, the apostrophe before a suffix on a proper noun, and text typed without diacritics) and the same precision target before it counts toward beta quality.
 - Target at least 95% precision for emitted grammar/spelling/punctuation corrections on that set. Report exact-reference recall separately and require a meaningful independently approved minimum per corpus/provider configuration, chosen before the live run. Hiding almost every suggestion must not count as success. Report optional style suggestions separately.
 - No accepted rewrite may alter a name, number, date, negation, or factual meaning in the reviewed beta set without making the change explicit for user review.
 - All deterministic stale-response, ambiguous-match, Unicode, editor-removal, and session-isolation scenarios must pass. No text-loss or corruption in the supported-editor regression suite.

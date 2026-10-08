@@ -139,6 +139,17 @@ test('the panel offers Improve it and Paraphrase through the production worker, 
   await panel.locator('#status').waitFor(el => /No change suggested/.test(el.textContent));
   assert.equal(await panel.button('Accept').count(), 0);
 });
+test('the panel offers only Proofread for Turkish, says why, and sends the Turkish prompt', async () => {
+  await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
+  await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
+  await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
+  await page.locator('#textarea').fill('Bugun okula gidiyorum.'); await open('textarea', 0, 22);
+  await panel.locator('#mode-note').waitFor(el => !el.hidden);
+  assert.deepEqual(await panel.locator('#mode').evaluate(el => [...el.options].filter(option => !option.disabled).map(option => option.value)), ['proofread']);
+  await check(); assert.equal(await panel.locator('details .explanation').textContent(), 'Türkçe karakter eksik.');
+  assert.match((await page.evaluate(() => fixture.worker.turns)).at(-1).params.system, /Turkish Language Association/);
+  await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'Bugün okula gidiyorum.');
+});
 test('typing and ABA changes cancel work and discard a late response', async () => {
   await page.evaluate(() => { fixture.hold = true; }); await open();
   await panel.button('Check selection').click();

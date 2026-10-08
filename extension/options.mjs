@@ -3,6 +3,9 @@ import {errorCode, dictionaryWord, PROVIDER_LABELS, preferences} from './lib/pol
 import {messageFor, connectionSummary} from './lib/messages.mjs';
 const query = x => document.querySelector(x), show = text => { query('#status').textContent = text; };
 let loaded, lastTiming, profiles, selectedProvider;
+// Clearer wording needs automatic checking and an English setting. The saved choice is kept while Turkish is selected, so it is
+// still there when the writer returns to English.
+const syncClarity = () => { query('#clarity').disabled = !query('#automatic').checked || query('#variant').value === 'TR'; };
 function renderProvider(provider) {
   const values = profiles[provider]; selectedProvider = provider; query('#provider').value = provider;
   query('#model').value = values.model; query('#effort').value = values.effort; query('#speed').value = values.speed;
@@ -32,7 +35,7 @@ async function loadTiming() {
 async function load() {
   const settings = preferences(await command('get-settings')); loaded = settings; profiles = structuredClone(settings.providerSettings); renderProvider(settings.provider); query('#variant').value = settings.variant;
   query('#paused').checked = settings.paused;
-  query('#automatic').checked = settings.automatic; query('#clarity').checked = settings.clarity; query('#clarity').disabled = !settings.automatic;
+  query('#automatic').checked = settings.automatic; query('#clarity').checked = settings.clarity; syncClarity();
   query('#dictionary').value = settings.dictionary.join('\n');
   query('#authorize').textContent = `seatline-companion authorize lineleaf ${settings.provider} chrome-extension://${chrome.runtime.id}/`;
   query('#sites').replaceChildren();
@@ -64,7 +67,8 @@ query('#preferences').addEventListener('submit', async event => {
   try { await command('save-settings', {changes, expected, dictionary: delta, ...(Object.keys(patches).length ? {profiles: patches} : {})}); await load(); show('Preferences saved.'); }
   catch (error) { show(messageFor(errorCode(error))); }
 });
-query('#automatic').addEventListener('change', () => { query('#clarity').disabled = !query('#automatic').checked; if (!query('#automatic').checked) query('#clarity').checked = false; });
+query('#automatic').addEventListener('change', () => { syncClarity(); if (!query('#automatic').checked) query('#clarity').checked = false; });
+query('#variant').addEventListener('change', syncClarity);
 query('#paused').addEventListener('change', async () => {
   const previous = !query('#paused').checked;
   query('#paused').disabled = true;

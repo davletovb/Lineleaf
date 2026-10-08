@@ -184,6 +184,23 @@ test('dictionary, UK variant, global pause and reset change the production check
   await page.evaluate(() => fixture.worker.rpc('reset')); await type(); await idle(); assert.equal((await sends()).length, 2);
   assert.deepEqual(await page.evaluate(() => fixture.worker.data), {});
 });
+test('Turkish: the check uses the Turkish prompt, the correction applies, rewrites are not offered, and English brings them back', async () => {
+  await settings({variant: 'TR'});
+  await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
+  await type('textarea', 'Bugun okula gidiyorum.'); await result(); await open();
+  assert.equal(await inline.locator('.category').textContent(), 'Spelling');
+  assert.equal(await inline.locator('.explanation').textContent(), 'Türkçe karakter eksik.');
+  assert.equal(await inline.locator('[data-rewrite]').count(), 0);
+  assert.match(await inline.locator('[data-rewrite-note]').textContent(), /English-only/);
+  const request = (await sends()).at(-1).params;
+  assert.match(request.system, /Turkish Language Association/); assert.doesNotMatch(request.system, /American|British/);
+  assert.deepEqual(JSON.parse(request.messages[0].text), {text: 'Bugun okula gidiyorum.'});
+  await inline.button('Accept').evaluate(el => el.focus()); await page.keyboard.press('Enter');
+  assert.equal(await page.locator('#textarea').inputValue(), 'Bugün okula gidiyorum.');
+  await settings({variant: 'US'}); await type('textarea', 'He go to work.'); await open();
+  await inline.locator('[data-rewrite]').waitFor(); assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+  assert.equal(await inline.locator('[data-rewrite-note]').count(), 0);
+});
 test('underlines follow textarea scrolling and layout shifts without editing its DOM', async () => {
   await page.locator('#textarea').evaluate(el => { el.value = 'Unrelated first line.\nHe go to work.\n' + 'Other line.\n'.repeat(20); el.style.height = '100px'; el.focus(); const caret = el.value.indexOf('He go') + 'He go to work.'.length; el.setSelectionRange(caret, caret); });
   await page.keyboard.type(' '); await result();
