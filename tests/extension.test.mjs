@@ -941,3 +941,17 @@ test('the language is a saved preference: Turkish can be chosen and left again, 
   assert.equal((await save({variant: 'FR'}, {variant: 'TR'})).code, 'INVALID_REQUEST'); assert.equal(f.data.preferences.variant, 'TR');
   assert.equal((await save({variant: 'UK'}, {variant: 'TR'})).ok, true); assert.equal(f.data.preferences.variant, 'UK');
 });
+test('Turkish dictionary entries are cased the Turkish way where they are stored and sent, and English entries keep English casing', async () => {
+  const tr = preferences({...turkish, dictionary: ['Işık', 'IŞIK', 'İstanbul', 'Ankara']});
+  assert.deepEqual(tr.dictionary, ['ışık', 'istanbul', 'ankara']); // Işık and IŞIK are one word
+  assert.deepEqual(JSON.parse(writingTurn('Işık okula gidiyor.', 'proofread', tr).messages[0].text), {text: 'Işık okula gidiyor.', dictionary: ['ışık', 'istanbul', 'ankara']});
+  assert.deepEqual(preferences({dictionary: ['Işık']}).dictionary, ['işık']);
+  assert.deepEqual(filterDictionary([{...correction('Işık', 'Işik'), category: 'spelling'}], tr), []); // still hidden, whichever way the text spells its capital I
+  // Through the settings save, under the language that is being saved, and from the card's "Add to dictionary".
+  const f = fakeChrome({variant: 'TR'}); installController(f.api);
+  const save = (changes, expected, dictionary) => f.rpc('save-settings', {changes, expected, dictionary: {add: [], remove: [], ...dictionary}});
+  assert.equal((await save({}, {}, {add: ['Işık', 'Ankara']})).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ışık', 'ankara']);
+  assert.equal((await save({}, {}, {remove: ['IŞIK']})).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ankara']);
+  assert.equal((await f.rpc('add-word', {word: 'IŞIK'}, f.sender)).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ankara', 'ışık']);
+  assert.equal((await save({variant: 'US'}, {variant: 'TR'}, {add: ['Işık']})).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ankara', 'ışık', 'işık']); // saved as English
+});

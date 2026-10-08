@@ -70,13 +70,15 @@ export function preferences(value) {
   return {provider, ...profiles[provider], providerSettings: profiles,
     variant: VARIANTS.includes(x.variant) ? x.variant : 'US', paused: x.paused === true, automatic: x.automatic === true,
     clarity: x.automatic === true && x.clarity === true, // Clearer-wording checks are extra automatic requests, so they need the automatic opt-in too.
-    dictionary: Array.isArray(x.dictionary) ? [...new Set(x.dictionary.map(dictionaryWord).filter(Boolean))].slice(0, 500) : [],
+    dictionary: Array.isArray(x.dictionary) ? [...new Set(x.dictionary.map(word => dictionaryWord(word, x.variant)).filter(Boolean))].slice(0, 500) : [],
     sites: Array.isArray(x.sites) ? [...new Set(x.sites.filter(s => typeof s === 'string' && originOf(s) === s))].slice(0, 64) : []};
 }
-export function dictionaryWord(word) {
+// `variant` is the writing language the entry is typed under: Turkish lowercases I to dotless ı and İ to i, every other language I to i, so "Işık"
+// is stored as "ışık" for a Turkish writer and the dictionary the provider receives spells the word the way the text does.
+export function dictionaryWord(word, variant = 'US') {
   if (typeof word !== 'string' || word.length > 64 || !word.isWellFormed()) return null;
-  // Lowercasing the Turkish capital dotted İ leaves a combining dot (U+0307) behind the i; it is the same letter as a plain i.
-  const normalized = word.normalize('NFC').toLocaleLowerCase('en').replace(/i\u0307/gu, 'i');
+  // Lowercasing the Turkish capital dotted İ the English way leaves a combining dot (U+0307) behind the i; it is the same letter as a plain i.
+  const normalized = word.normalize('NFC').toLocaleLowerCase(variant === 'TR' ? 'tr' : 'en').replace(/i\u0307/gu, 'i');
   return normalized.length <= 64 && /^\p{L}[\p{L}\p{M}]*(?:['’-]\p{L}[\p{L}\p{M}]*)*$/u.test(normalized) ? normalized : null;
 }
 // In Turkish text the dictionary treats dotted and dotless i as one letter: a sentence-initial "Işık" must still match a stored "ışık", and

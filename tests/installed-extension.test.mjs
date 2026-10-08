@@ -177,6 +177,9 @@ test('the language setting offers Türkçe, keeps the clearer-wording choice whi
   await save(); await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'TR');
   assert.equal(await options.locator('#clarity').isDisabled(), true); assert.equal(await options.locator('#clarity').isChecked(), true);
   assert.deepEqual([(await stored()).variant, (await stored()).clarity], ['TR', true]);
+  // Dictionary words typed under Türkçe are cased the Turkish way (capital I is dotless), which is also what the provider receives.
+  await options.locator('#dictionary').fill('Işık\nAnkara'); await save();
+  assert.deepEqual((await stored()).dictionary, ['ışık', 'ankara']); assert.equal(await options.locator('#dictionary').inputValue(), 'ışık\nankara');
   await options.locator('#variant').selectOption('US'); // back to English: the choice is still there and can be changed
   assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true);
   await options.getByRole('button', {name: 'Reset preferences and site access'}).click();

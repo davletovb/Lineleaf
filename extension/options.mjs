@@ -61,7 +61,7 @@ query('#preferences').addEventListener('submit', async event => {
   const patches = Object.fromEntries(Object.entries(profiles).filter(([id, profile]) => ['model', 'effort', 'speed', 'allowCloud'].some(key => profile[key] !== loaded.providerSettings[id][key])));
   if (Object.keys(patches).length || Object.keys(changes).some(key => ['provider', 'model', 'effort', 'speed', 'allowCloud'].includes(key))) expected.provider = loaded.provider;
   if (values.provider !== loaded.provider || Object.keys(patches).length) expected.providerSettings = loaded.providerSettings;
-  const words = [...new Set(dictionary.map(dictionaryWord))];
+  const words = [...new Set(dictionary.map(word => dictionaryWord(word, query('#variant').value)))]; // The language being saved decides the casing.
   const delta = {add: words.filter(word => !loaded.dictionary.includes(word)), remove: loaded.dictionary.filter(word => !words.includes(word))};
   show('Saving preferences…');
   try { await command('save-settings', {changes, expected, dictionary: delta, ...(Object.keys(patches).length ? {profiles: patches} : {})}); await load(); show('Preferences saved.'); }
