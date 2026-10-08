@@ -150,6 +150,10 @@ class InlineView {
   // Explicit, optional rewrites of the selection, or of the caret paragraph when nothing is selected.
   rewriteRow() {
     const group = node('div', '', {class: 'rewrite', role: 'group', 'aria-label': 'Rewrite'});
+    if (!this.actions.rewritable()) {
+      group.append(node('p', 'Rewrite', {class: 'label', 'aria-hidden': 'true'}), node('p', 'Rewrites are English-only for now. Turkish gets spelling, grammar and punctuation checks.', {class: 'muted', 'data-rewrite-note': ''}));
+      return group;
+    }
     group.append(node('p', 'Rewrite', {class: 'label', 'aria-hidden': 'true'}), node('p', 'Rewrite your selection, or this paragraph if nothing is selected.', {class: 'muted'}));
     const chips = node('div', '', {class: 'chips'});
     for (const mode of ['improve', 'paraphrase']) chips.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode, class: 'chip lead'}, 'sparkle'));
@@ -316,7 +320,7 @@ export function mountInline(api) {
         if (!eligibleDOM()) { drop(); return; }
       } else { drop(); return; }
       view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { if (edit.rewrite && restoreHeld('Rewrite dismissed. Your text is unchanged.')) { view.open(); return; } edits = edits.filter(x => x !== edit); update(edits.length ? (replaceable() ? 'Review each suggestion before accepting.' : 'Review each suggestion. Copy one to use it.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
-        check: () => { stop(); void run(false); }, rewrite: rewriteMode => { stop(); void run(false, rewriteMode); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); view?.open(); },
+        rewritable: () => policy?.variant !== 'TR', check: () => { stop(); void run(false); }, rewrite: rewriteMode => { stop(); void run(false, rewriteMode); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); view?.open(); },
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },
         settings: async () => { const result = await rpc('open-settings'); if (!result.ok) view?.status(messageFor(result.code)); }});

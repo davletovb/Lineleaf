@@ -1,5 +1,5 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, allowedSignIn, originOf, sitePattern, preferences, providerSettings, PROVIDERS, writingTurn, requireReady, requireWritingSettings, statusView, errorCode, LineleafError, exactKeys, isObject, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
+import {allowed, allowedSignIn, originOf, sitePattern, preferences, providerSettings, PROVIDERS, writingTurn, requireReady, requireWritingSettings, statusView, errorCode, LineleafError, exactKeys, isObject, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary, isTurkish} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 import {checkTiming} from './check-timing.mjs';
@@ -140,6 +140,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
       provider = settings.provider;
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
+      if (isTurkish(settings) && request.mode !== 'proofread') throw new LineleafError('LANGUAGE_UNSUPPORTED'); // Before anything is probed or sent.
       if (request.mode === 'clarity' && !settings.clarity) throw new LineleafError('CLARITY_DISABLED');
       if (!automatic && active?.automatic) { const previous = active; cancelPeer(previous); await previous.done; await eligible(peer.sender); }
       if (active || diagnostic) throw new LineleafError('BUSY');
@@ -273,8 +274,9 @@ export function installController(api, {now = Date.now, clock = () => performanc
           if (!PROVIDERS.every(id => ['model', 'effort', 'speed', 'allowCloud'].every(field => p.expected[key][id][field] === settings.providerSettings[id][field]))) throw new LineleafError('SETTINGS_CHANGED');
         } else if (settings[key] !== p.expected[key]) throw new LineleafError('SETTINGS_CHANGED');
       }
-      const remove = new Set(p.dictionary.remove.map(dictionaryWord));
-      const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(dictionaryWord)])];
+      const normalize = word => dictionaryWord(word, validated.variant); // Under the language the settings will have once saved.
+      const remove = new Set(p.dictionary.remove.map(normalize));
+      const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(normalize)])];
       if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
       const bank = {...settings.providerSettings, ...patches, [target]: providerSettings(validated, target)};
       const next = preferences({...validated, providerSettings: bank, dictionary});
@@ -345,7 +347,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
     const operation = mutations.catch(() => {}).then(async () => {
       const {settings} = await eligible(sender, true), p = message.payload;
       if (message.type === 'add-word' && exactKeys(p, ['word']) && dictionaryWord(p.word)) {
-        const dictionary = [...new Set([...settings.dictionary, dictionaryWord(p.word)])];
+        const dictionary = [...new Set([...settings.dictionary, dictionaryWord(p.word, settings.variant)])];
         if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
         await api.storage.local.set({preferences: {...settings, dictionary}}); return true;
       }
@@ -359,7 +361,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
   };
   api.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'site-state' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
-      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
+      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity && !isTurkish(settings), variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
     } else if (message?.type === 'prepare' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
       eligible(sender).then(prepare).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {
