@@ -14,7 +14,7 @@ import {readPackage} from './evaluation/package.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const CORPUS = join(ROOT, 'evaluation/writing-corpus.json');
-const ENGINE = ['extension/lib/policy.mjs', 'extension/lib/candidates.mjs', 'extension/lib/native-seatline.mjs'];
+const ENGINE = ['extension/lib/policy.mjs', 'extension/lib/candidates.mjs', 'extension/lib/turkish-negation.mjs', 'extension/lib/turkish-verbs.mjs', 'extension/lib/native-seatline.mjs'];
 export async function engineHash() { return sha256(await Promise.all(ENGINE.map(async path => [path, sha256(await readFile(join(ROOT, path)))]))); }
 export async function privateJSON(path, value) {
   await mkdir(resolve(path, '..'), {recursive: true, mode: 0o700});

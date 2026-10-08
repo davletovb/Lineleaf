@@ -14,7 +14,7 @@ before(async () => {
   await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/rich.html');
+    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'turkish-negation.mjs', 'turkish-verbs.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/rich.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
@@ -33,6 +33,23 @@ const label = () => inline.locator('.badge').evaluate(el => el.getAttribute('ari
 const text = host => page.locator(host).innerText().then(value => value.replace(/ /g, ' '));
 // The paragraph under test, without the spacing and trailing break an editor's markup adds to innerText.
 const line = host => text(host).then(value => value.split('\n').find(row => row.startsWith('He ')));
+
+test('a Turkish inline rewrite warns about negation, stays advisory, and preserves Replace and Undo for an unchanged negative clause', async () => {
+  await load();
+  await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
+  await rewriteAnswer('Ben geldim.'); await useTextarea('Ben gelmedim.'); await openCard();
+  assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+  await press('Improve it'); await suggested();
+  assert.match(await inline.locator('.warn').textContent(), /a negation/);
+  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim.');
+  assert.match((await page.evaluate(() => fixture.worker.turns))[0].params.system, /Turkish verbal negation/);
+  await press('Back');
+  await rewriteAnswer('Ben gelmedim!'); await press('Improve it'); await suggested();
+  assert.equal(await inline.locator('.warn').count(), 0);
+  await press('Replace'); await inline.button('Undo last edit').waitFor();
+  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim!');
+  await press('Undo last edit'); assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim.');
+});
 // Put the field in focus with its caret at the end (or a selection) the way a user would.
 async function useTextarea(value, selection = null) {
   await page.evaluate(([value, selection]) => {

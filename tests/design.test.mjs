@@ -201,7 +201,7 @@ async function inlinePage({scheme = 'light', reducedMotion = 'no-preference'} = 
   await page.route('https://design.lineleaf.test/**', async route => {
     const path = new URL(route.request().url()).pathname;
     const files = new Map([['/content.js', 'dist/lineleaf/content.js'], ['/controller-bridge.mjs', 'tests/fixtures/controller-bridge.mjs'], ['/test-api.mjs', 'tests/fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `dist/lineleaf${path}` : 'tests/fixtures/selection.html');
+    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'turkish-negation.mjs', 'turkish-verbs.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `dist/lineleaf${path}` : 'tests/fixtures/selection.html');
     let body = await readFile(ROOT + file, 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});

@@ -160,7 +160,7 @@ test('two options pages preserve newer pause/consent/dictionary and reject same-
   await other.close(); await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
 });
-test('the language setting offers Türkçe, keeps the clearer-wording choice while Turkish is selected, and survives a reload', async () => {
+test('the language setting offers Türkçe, enables opted-in clearer wording, and survives a reload', async () => {
   await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'US' && document.querySelector('#status').textContent === '');
   assert.deepEqual(await options.locator('#variant option').evaluateAll(list => list.map(option => [option.value, option.textContent])), [['US', 'English · US'], ['UK', 'English · UK'], ['TR', 'Türkçe']]);
   const save = async () => {
@@ -173,9 +173,9 @@ test('the language setting offers Türkçe, keeps the clearer-wording choice whi
   await toggle('#automatic'); await toggle('#clarity'); await save();
   assert.equal((await stored()).clarity, true);
   await options.locator('#variant').selectOption('TR');
-  assert.equal(await options.locator('#clarity').isDisabled(), true); assert.equal(await options.locator('#clarity').isChecked(), true); // kept, not offered
+  assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true); // offered after the automatic opt-in
   await save(); await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'TR');
-  assert.equal(await options.locator('#clarity').isDisabled(), true); assert.equal(await options.locator('#clarity').isChecked(), true);
+  assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true);
   assert.deepEqual([(await stored()).variant, (await stored()).clarity], ['TR', true]);
   // Dictionary words typed under Türkçe are cased the Turkish way (capital I is dotless), which is also what the provider receives.
   await options.locator('#dictionary').fill('Işık\nAnkara'); await save();

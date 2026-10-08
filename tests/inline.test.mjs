@@ -12,7 +12,7 @@ before(async () => {
   await page.route('https://inline.lineleaf.test/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
+    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'turkish-negation.mjs', 'turkish-verbs.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
@@ -184,14 +184,13 @@ test('dictionary, UK variant, global pause and reset change the production check
   await page.evaluate(() => fixture.worker.rpc('reset')); await type(); await idle(); assert.equal((await sends()).length, 2);
   assert.deepEqual(await page.evaluate(() => fixture.worker.data), {});
 });
-test('Turkish: the check uses the Turkish prompt, the correction applies, rewrites are not offered, and English brings them back', async () => {
+test('Turkish: the check uses the Turkish prompt, the correction applies, and all six rewrite modes are offered', async () => {
   await settings({variant: 'TR'});
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
   await type('textarea', 'Bugun okula gidiyorum.'); await result(); await open();
   assert.equal(await inline.locator('.category').textContent(), 'Spelling');
   assert.equal(await inline.locator('.explanation').textContent(), 'Türkçe karakter eksik.');
-  assert.equal(await inline.locator('[data-rewrite]').count(), 0);
-  assert.match(await inline.locator('[data-rewrite-note]').textContent(), /English-only/);
+  assert.equal(await inline.locator('[data-rewrite]').count(), 6);
   const request = (await sends()).at(-1).params;
   assert.match(request.system, /Turkish Language Association/); assert.doesNotMatch(request.system, /American|British/);
   assert.deepEqual(JSON.parse(request.messages[0].text), {text: 'Bugun okula gidiyorum.'});
@@ -199,7 +198,6 @@ test('Turkish: the check uses the Turkish prompt, the correction applies, rewrit
   assert.equal(await page.locator('#textarea').inputValue(), 'Bugün okula gidiyorum.');
   await settings({variant: 'US'}); await type('textarea', 'He go to work.'); await open();
   await inline.locator('[data-rewrite]').waitFor(); assert.equal(await inline.locator('[data-rewrite]').count(), 6);
-  assert.equal(await inline.locator('[data-rewrite-note]').count(), 0);
 });
 test('underlines follow textarea scrolling and layout shifts without editing its DOM', async () => {
   await page.locator('#textarea').evaluate(el => { el.value = 'Unrelated first line.\nHe go to work.\n' + 'Other line.\n'.repeat(20); el.style.height = '100px'; el.focus(); const caret = el.value.indexOf('He go') + 'He go to work.'.length; el.setSelectionRange(caret, caret); });

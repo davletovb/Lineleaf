@@ -3,9 +3,8 @@ import {errorCode, dictionaryWord, PROVIDER_LABELS, preferences} from './lib/pol
 import {messageFor, connectionSummary} from './lib/messages.mjs';
 const query = x => document.querySelector(x), show = text => { query('#status').textContent = text; };
 let loaded, lastTiming, profiles, selectedProvider;
-// Clearer wording needs automatic checking and an English setting. The saved choice is kept while Turkish is selected, so it is
-// still there when the writer returns to English.
-const syncClarity = () => { query('#clarity').disabled = !query('#automatic').checked || query('#variant').value === 'TR'; };
+// Clearer wording spends the automatic budget and requires its opt-in for either writing language.
+const syncClarity = () => { query('#clarity').disabled = !query('#automatic').checked; };
 function renderProvider(provider) {
   const values = profiles[provider]; selectedProvider = provider; query('#provider').value = provider;
   query('#model').value = values.model; query('#effort').value = values.effort; query('#speed').value = values.speed;
