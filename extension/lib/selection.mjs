@@ -1,5 +1,5 @@
 import {EditorAdapter} from '../../prototypes/editor/editor-adapter.mjs';
-import {boundaries} from './candidates.mjs';
+import {boundaries} from './boundaries.mjs';
 import {validText, LineleafError} from './policy.mjs';
 
 import {EXCLUDED, excluded, rangeFor, selectionFor, contextFor, contextCurrent, embeddingAllowed} from './editor-context.mjs';

@@ -14,7 +14,7 @@ import {readPackage} from './evaluation/package.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const CORPUS = join(ROOT, 'evaluation/writing-corpus.json');
-const ENGINE = ['extension/lib/policy.mjs', 'extension/lib/candidates.mjs', 'extension/lib/native-seatline.mjs'];
+const ENGINE = ['extension/lib/policy.mjs', 'extension/lib/candidates.mjs', 'extension/lib/boundaries.mjs', 'extension/lib/turkish-negation.mjs', 'extension/lib/turkish-verbs.mjs', 'extension/lib/native-seatline.mjs'];
 export async function engineHash() { return sha256(await Promise.all(ENGINE.map(async path => [path, sha256(await readFile(join(ROOT, path)))]))); }
 export async function privateJSON(path, value) {
   await mkdir(resolve(path, '..'), {recursive: true, mode: 0o700});
@@ -77,7 +77,7 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
       row.response = await native.request('send_ready_with_policy', {turn: writingTurn(c.source, c.mode, settings, {checkSignIn: false}), freshness: READINESS.cached, allowed_sign_in: allowedSignIn(settings)}, {provider: config.provider, timeout, onStatus: status => { requireReady(status, settings); requireWritingSettings(status, settings); }});
       bytes += Buffer.byteLength(row.response);
       if (bytes > 4 * 1048576) { row.response = ''; row.code = 'EVALUATION_OUTPUT_LIMIT'; }
-      else { candidates(row.response, c.source, c.mode); row.status = 'completed'; }
+      else { candidates(row.response, c.source, c.mode, settings); row.status = 'completed'; }
     } catch (error) { row.code = errorCode(error); if (checkingReadiness) readiness = row.code; }
     finally { row.elapsedMs = Math.round((performance.now() - started) * 1000) / 1000; native?.close(); }
     run.rows.push(row);
@@ -88,10 +88,10 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
 }
 const readJSON = readData;
 export async function main(argv = process.argv.slice(2)) {
-  const {values} = parseArgs({args: argv, options: {provider: {type: 'string'}, 'allow-cloud': {type: 'boolean'}, prepare: {type: 'boolean'}, fixture: {type: 'boolean'}, companion: {type: 'string'}, model: {type: 'string'}, effort: {type: 'string'}, speed: {type: 'string'},
+  const {values} = parseArgs({args: argv, options: {corpus: {type: 'string', default: CORPUS}, provider: {type: 'string'}, 'allow-cloud': {type: 'boolean'}, prepare: {type: 'boolean'}, fixture: {type: 'boolean'}, companion: {type: 'string'}, model: {type: 'string'}, effort: {type: 'string'}, speed: {type: 'string'},
     'provider-version': {type: 'string'}, out: {type: 'string', default: 'test-results/quality'}, run: {type: 'string'},
     labels: {type: 'string'}, judgments: {type: 'string'}, acceptance: {type: 'string'}, timeout: {type: 'string', default: '30'}}});
-  const corpus = validateCorpus(await readJSON(CORPUS)), out = resolve(values.out);
+  const corpus = validateCorpus(await readJSON(resolve(values.corpus))), out = resolve(values.out);
   if (values.prepare && (values.fixture || values.run || values.labels || values.judgments || values.acceptance)) throw new Error('PREPARATION_OPTIONS_CONFLICT');
   let run, readiness;
   if (values.run) {

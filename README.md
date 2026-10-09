@@ -10,7 +10,7 @@ Lineleaf is a browser writing assistant designed to help with grammar, spelling,
 - Rewrites of a selection or paragraph: improve it, paraphrase, or change clarity, length or tone.
 - Optional, off-by-default suggestions for clearer wording, kept apart from corrections.
 - Explicit acceptance, dismissal, and undo.
-- A personal dictionary, English variants, Turkish proofreading, and controls for each site.
+- A personal dictionary, English variants, Turkish proofreading and guarded writing styles, and controls for each site.
 - Conservative edits that preserve your intent and authorship.
 
 Choose Codex, Claude Code, Gemini through Antigravity, or Grok in Settings, using the corresponding installed Seatline adapter. Provider integrations remain development candidates pending live validation.

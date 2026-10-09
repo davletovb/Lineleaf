@@ -1,5 +1,5 @@
 import {NativeSeatline} from './native-seatline.mjs';
-import {allowed, allowedSignIn, originOf, sitePattern, preferences, providerSettings, PROVIDERS, writingTurn, requireReady, requireWritingSettings, statusView, errorCode, LineleafError, exactKeys, isObject, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary, isTurkish} from './policy.mjs';
+import {allowed, allowedSignIn, originOf, sitePattern, preferences, providerSettings, PROVIDERS, writingTurn, requireReady, requireWritingSettings, statusView, errorCode, LineleafError, exactKeys, isObject, validText, MODES, AUTOMATIC_MODES, AUTO_INTERVAL, AUTOMATIC_HOLD, REQUEST_TIMEOUT, PHASES, READINESS, READINESS_REFUSALS, LINK_IDLE, PREPARE_INTERVAL, dictionaryWord, filterDictionary} from './policy.mjs';
 import {candidates} from './candidates.mjs';
 import {EXCLUDED} from './editor-policy.mjs';
 import {checkTiming} from './check-timing.mjs';
@@ -140,7 +140,6 @@ export function installController(api, {now = Date.now, clock = () => performanc
       provider = settings.provider;
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (automatic && !settings.automatic) throw new LineleafError('AUTOMATIC_DISABLED');
-      if (isTurkish(settings) && request.mode !== 'proofread') throw new LineleafError('LANGUAGE_UNSUPPORTED'); // Before anything is probed or sent.
       if (request.mode === 'clarity' && !settings.clarity) throw new LineleafError('CLARITY_DISABLED');
       if (!automatic && active?.automatic) { const previous = active; cancelPeer(previous); await previous.done; await eligible(peer.sender); }
       if (active || diagnostic) throw new LineleafError('BUSY');
@@ -153,7 +152,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
       stopPreparation();
       connection = native(); peer.connection = connection;
       send(peer.port, {type: 'progress', id: request.id, stage: 'connecting'});
-      let verification = READINESS.cached, answer;
+      let verification = READINESS.cached, answer, writingVariant;
       for (let attempt = 0; ; attempt++) {
         // Lineleaf's own policy (subscription sign-in, no-tools requests) is enforced here, from Seatline's readiness, before anything is sent.
         const readyAt = clock();
@@ -169,6 +168,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
         if (request.mode === 'clarity' && !latest.settings.clarity) throw new LineleafError('CLARITY_DISABLED');
         requireWritingSettings(status, latest.settings);
         send(peer.port, {type: 'progress', id: request.id, stage: 'checking'});
+        writingVariant = latest.settings.variant;
         const turn = writingTurn(request.text, request.mode, latest.settings, {checkSignIn: !modern}), timeout = REQUEST_TIMEOUT[automatic ? 'automatic' : 'manual'];
         try {
           // `send_ready_with_policy` is sent under the readiness just checked, so Seatline repeats no probe; it refuses, without starting a turn, if that
@@ -189,9 +189,9 @@ export function installController(api, {now = Date.now, clock = () => performanc
       }
       const final = await eligible(peer.sender);
       if (signal.aborted) throw new LineleafError('CANCELLED');
-      if (final.settings.provider !== provider) throw new LineleafError('CANCELLED');
+      if (final.settings.provider !== provider || final.settings.variant !== writingVariant) throw new LineleafError('CANCELLED');
       timing.validating();
-      const edits = filterDictionary(candidates(answer, request.text, request.mode), final.settings);
+      const edits = filterDictionary(candidates(answer, request.text, request.mode, final.settings), final.settings);
       void saveTiming('completed');
       send(peer.port, {type: 'result', id: request.id, edits});
       if (automaticHold[provider]) { automaticHold[provider] = 0; await api.storage.session.set({automaticHold: {...automaticHold}}).catch(() => {}); }
@@ -361,7 +361,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
   };
   api.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'site-state' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
-      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity && !isTurkish(settings), variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
+      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity}}), error => respond({ok: false, code: errorCode(error)}));
     } else if (message?.type === 'prepare' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
       eligible(sender).then(prepare).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {

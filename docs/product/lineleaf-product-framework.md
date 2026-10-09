@@ -34,7 +34,7 @@ The preservation promise concerns authorship, intent, and control. It does not r
 | Rewriting | Selected text, or the caret paragraph in the inline card: improve it, paraphrase, clearer, shorter, more formal, friendlier; explicit actions with a before/after preview, available without the automatic opt-in; optional, off-by-default clearer-wording underlines that need automatic checking and are labelled apart from corrections | Multiple alternatives, custom tone presets and broader draft assistance |
 | Explanations | Brief optional explanation for a correction | Learner-focused explanations and recurring patterns |
 | Editing support | Textarea, supported text inputs, basic contenteditable | Dedicated rich-editor and site adapters |
-| Preferences | English with a US/UK variant, Turkish (proofreading only), site enablement, personal dictionary | Other English variants, further languages, Turkish rewrites and clearer wording, style profiles |
+| Preferences | English with a US/UK variant, Turkish with guarded rewrites and clearer wording, site enablement, personal dictionary | Other English variants, further languages, style profiles |
 | Provider connection | Existing Seatline companion; one validated provider initially | Additional validated providers and capability-aware routing |
 
 Chrome desktop is the initial browser target. Platform coverage follows what the existing Seatline installation supports; start development on macOS and validate further platforms separately. Edge and Firefox need explicit compatibility work rather than an assumed free port.

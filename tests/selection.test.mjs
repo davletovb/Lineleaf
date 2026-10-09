@@ -3,6 +3,7 @@ import {test, before, after, beforeEach} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {isPackagedLibraryModule} from '../tools/evaluation/browser-fixtures.mjs';
 import {panelFor} from './fixtures/panel-driver.mjs';
 let browser, page, panel;
 before(async () => {
@@ -13,7 +14,7 @@ before(async () => {
   await page.route('https://selection.lineleaf.test/**', async route => {
     const url = new URL(route.request().url()), path = url.pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
+    const file = files.get(path) ?? (await isPackagedLibraryModule(path) ? `../dist/lineleaf${path}` : './fixtures/selection.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (url.searchParams.has('controller')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html',
@@ -139,16 +140,20 @@ test('the panel offers Improve it and Paraphrase through the production worker, 
   await panel.locator('#status').waitFor(el => /No change suggested/.test(el.textContent));
   assert.equal(await panel.button('Accept').count(), 0);
 });
-test('the panel offers only Proofread for Turkish, says why, and sends the Turkish prompt', async () => {
+test('the panel offers proofreading and six rewrites for Turkish, with guarded previews and a Turkish prompt', async () => {
   await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
   await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
   await page.locator('#textarea').fill('Bugun okula gidiyorum.'); await open('textarea', 0, 22);
-  await panel.locator('#mode-note').waitFor(el => !el.hidden);
-  assert.deepEqual(await panel.locator('#mode').evaluate(el => [...el.options].filter(option => !option.disabled).map(option => option.value)), ['proofread']);
+  assert.deepEqual(await panel.locator('#mode').evaluate(el => [...el.options].filter(option => !option.disabled).map(option => option.value)), ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
   await check(); assert.equal(await panel.locator('details .explanation').textContent(), 'Türkçe karakter eksik.');
   assert.match((await page.evaluate(() => fixture.worker.turns)).at(-1).params.system, /Turkish Language Association/);
   await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'Bugün okula gidiyorum.');
+  await page.locator('#textarea').fill('Ben gelmedim.'); await open('textarea', 0, 13);
+  await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Ben geldim.'}); });
+  await panel.locator('#mode').selectOption('improve'); await check();
+  assert.match(await panel.locator('.warn').textContent(), /a negation/);
+  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim.'); // A warning never applies the advisory result.
 });
 test('typing and ABA changes cancel work and discard a late response', async () => {
   await page.evaluate(() => { fixture.hold = true; }); await open();

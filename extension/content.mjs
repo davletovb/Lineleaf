@@ -111,7 +111,6 @@ export function mountContent(api) {
         node('label', 'What would you like to do?', {for: 'mode'}),
         node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['improve', 'Rewrite · improve it'], ['paraphrase', 'Rewrite · paraphrase'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
           ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
-        node('p', 'Rewrites are English-only for now. Turkish gets spelling, grammar and punctuation checks.', {id: 'mode-note', class: 'muted', hidden: ''}),
         node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''}), node('button', 'Pause Lineleaf', {id: 'pause', class: 'quiet'})]),
         node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('div', '', {id: 'results'})
       ])
@@ -152,13 +151,6 @@ export function mountContent(api) {
     try { return await api.runtime.sendMessage({type: 'site-state', payload: null}); }
     catch { return {ok: false, code: 'UNAVAILABLE'}; }
   }
-  // Turkish is proofread only: the rewrite modes are English-only, so the panel offers just the one that works.
-  function limitModes(state) {
-    const turkish = state?.ok === true && state.value?.variant === 'TR';
-    for (const option of query('#mode').options) option.disabled = turkish && option.value !== 'proofread';
-    if (turkish) query('#mode').value = 'proofread';
-    query('#mode-note').hidden = !turkish;
-  }
   async function open() {
     // Capture while the original field still holds its selection, before focusing panel controls.
     let next, failure;
@@ -179,7 +171,6 @@ export function mountContent(api) {
     if (root !== openedRoot || capture !== selected) return;
     if (!state?.ok) { stop(); status(messageFor(state?.code ?? 'SITE_DISABLED')); query('#check').disabled = true; }
     else {
-      limitModes(state);
       try { void Promise.resolve(api.runtime.sendMessage({type: 'prepare', payload: null})).catch(() => {}); } catch { /* worker restarted */ } // The user is about to check: get the provider ready. No text goes with it.
     }
     query('#mode').focus();
@@ -192,7 +183,6 @@ export function mountContent(api) {
     const state = await siteState();
     if (!starting || capture !== selected || stale || !root) return;
     if (!state?.ok) { starting = false; status(messageFor(state?.code ?? 'SITE_DISABLED')); return; }
-    limitModes(state); // The language may have changed since the panel opened.
     edits = []; render(); query('#check').disabled = true; query('#cancel').hidden = false;
     const id = crypto.randomUUID(); requestId = id;
     try {

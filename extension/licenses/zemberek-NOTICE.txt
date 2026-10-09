@@ -1,0 +1,11 @@
+Zemberek-NLP dictionary data
+Copyright 2018 Ahmet A. Akın, Mehmet D. Akın
+Licensed under the Apache License, Version 2.0; see zemberek-Apache-2.0.txt.
+
+Upstream: https://github.com/ahmetaa/zemberek-nlp
+Revision: 037202c7e18b977c95181a76db05cb1e95846554
+Source: morphology/src/main/resources/tr/master-dictionary.dict
+
+Lineleaf derives a list of verb stems and voiced variants from this dictionary.
+The generated file is extension/lib/turkish-verbs.mjs. No Zemberek runtime is included.
+This attribution file was added by Lineleaf; it is not an upstream NOTICE file.

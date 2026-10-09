@@ -28,7 +28,6 @@ export const MESSAGES = {
   AUTOMATIC_DISABLED: 'Automatic checking is off. Enable it in settings after reviewing the provider disclosure.',
   AUTO_PAUSED: 'Automatic checking is paused for a few minutes because the provider did not answer in time. Choose Check now to try again.',
   CLARITY_DISABLED: 'Clearer-wording suggestions are off. Enable them in settings after reviewing the provider disclosure.',
-  LANGUAGE_UNSUPPORTED: 'Rewrites and clearer wording are English-only for now. For Turkish, Lineleaf checks spelling, grammar and punctuation.',
   SETTINGS_CHANGED: 'Preferences changed elsewhere. Reload settings before saving your changes.',
   OFFLINE: 'You are offline. Check your connection, then retry when ready.',
   CANCELLED: 'Cancelled. No changes were made.', STALE: 'The selection changed. Select text and check again.',

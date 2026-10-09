@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {candidates} from '../../extension/lib/candidates.mjs';
-import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS, SPEEDS, PROVIDERS} from '../../extension/lib/policy.mjs';
+import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS, SPEEDS, PROVIDERS, VARIANTS} from '../../extension/lib/policy.mjs';
 
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 const fail = () => { throw new Error('INVALID_EVALUATION_DATA'); };
@@ -15,11 +15,11 @@ export function validateCorpus(corpus) {
   const seen = new Set(), texts = new Set();
   for (const c of corpus.cases) {
     if (!exactKeys(c, ['id', 'source', 'mode', 'variant', 'strata', 'protected', 'proposal']) || !id(c.id) || seen.has(c.id)
-        || !validText(c.source) || !MODES.includes(c.mode) || !['US', 'UK'].includes(c.variant)
+        || !validText(c.source) || !MODES.includes(c.mode) || !VARIANTS.includes(c.variant)
         || !Array.isArray(c.strata) || !c.strata.length || !c.strata.every(x => STRATA.includes(x))
         || !Array.isArray(c.protected) || c.protected.length > 32 || !c.protected.every(x => validText(x, 120) && c.source.includes(x))) fail();
     const key = `${c.mode}:${c.variant}:${c.source}`; if (texts.has(key)) fail(); texts.add(key); seen.add(c.id);
-    candidates(JSON.stringify(c.proposal), c.source, c.mode);
+    candidates(JSON.stringify(c.proposal), c.source, c.mode, {variant: c.variant});
     if (c.mode === 'shorter' && c.proposal.rewrite.length >= c.source.length) fail();
   }
   const rewrites = corpus.cases.filter(c => REWRITE_MODES.includes(c.mode));
@@ -43,8 +43,8 @@ export function validateLabels(corpus, labels) {
       if (row.reference !== null) fail();
       rejected.push(row.id); result.set(row.id, []); continue;
     }
-    const edits = candidates(JSON.stringify(row.reference), c.source, c.mode);
-    const unchanged = sha256(edits) === sha256(candidates(JSON.stringify(c.proposal), c.source, c.mode));
+    const edits = candidates(JSON.stringify(row.reference), c.source, c.mode, {variant: c.variant});
+    const unchanged = sha256(edits) === sha256(candidates(JSON.stringify(c.proposal), c.source, c.mode, {variant: c.variant}));
     if ((row.decision === 'approved') !== unchanged) fail();
     result.set(row.id, edits);
   }
@@ -118,28 +118,36 @@ function changed(source, edits) { for (const e of [...edits].reverse()) source =
 export function score(corpus, run, {labels = null, judgments = null, acceptance = null} = {}) {
   validateCorpus(corpus); validateRun(corpus, run);
   const labelReview = labels ? validateLabels(corpus, labels) : null;
-  const references = labelReview?.references ?? new Map(corpus.cases.map(c => [c.id, candidates(JSON.stringify(c.proposal), c.source, c.mode)]));
+  const references = labelReview?.references ?? new Map(corpus.cases.map(c => [c.id, candidates(JSON.stringify(c.proposal), c.source, c.mode, {variant: c.variant})]));
   const minimumRecall = acceptance ? validateAcceptance(corpus, run, acceptance) : null;
   const decoded = new Map(), invalid = [];
   for (const row of run.rows) {
     if (row.status !== 'completed') { if (row.code === 'INVALID_OUTPUT') invalid.push(row.id); continue; }
     const c = corpus.cases.find(x => x.id === row.id);
-    try { decoded.set(c.id, candidates(row.response, c.source, c.mode)); } catch { invalid.push(c.id); }
+    try { decoded.set(c.id, candidates(row.response, c.source, c.mode, {variant: c.variant})); } catch { invalid.push(c.id); }
   }
   const reviewed = judgments ? validateJudgments(corpus, run, judgments, decoded) : null;
   const metrics = {proofread: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0, falsePositives: 0},
     clarity: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0, falsePositives: 0},
     style: {cases: 0, emitted: 0, humanApproved: 0, notShorter: 0}, protectedViolations: 0, meaningViolations: 0, explanationErrors: 0};
+  const languages = {};
   const strata = Object.fromEntries(STRATA.map(s => [s, {cases: 0, expected: 0, emitted: 0, referenceMatches: 0}]));
   for (const c of corpus.cases) {
     const edits = decoded.get(c.id) ?? [], gold = references.get(c.id), judgment = reviewed?.get(c.id);
     const kind = c.mode === 'proofread' ? 'proofread' : c.mode === 'clarity' ? 'clarity' : 'style', suggests = kind !== 'style';
     const matches = suggests ? edits.filter(e => gold.some(g => sameEdit(e, g))).length : 0;
     const group = metrics[kind]; group.cases++; group.emitted += edits.length;
+    const language = c.variant === 'TR' ? 'TR' : 'EN';
+    languages[language] ??= {proofread: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0},
+      clarity: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0}, style: {cases: 0, emitted: 0, humanApproved: 0}, modes: []};
+    const languageGroup = languages[language][kind]; languageGroup.cases++; languageGroup.emitted += edits.length;
+    if (!languages[language].modes.includes(c.mode)) languages[language].modes.push(c.mode);
     if (suggests) {
       group.expected += gold.length; group.referenceMatches += matches;
+      languageGroup.expected += gold.length; languageGroup.referenceMatches += matches;
+      if (judgment) languageGroup.humanCorrect += judgment.suggestions.filter(x => x.correct).length;
       if (judgment) { group.humanCorrect += judgment.suggestions.filter(x => x.correct).length; group.falsePositives += judgment.suggestions.filter(x => !x.correct).length; }
-    } else if (judgment?.meaningPreserved && judgment.suggestions.every(x => x.correct)) group.humanApproved++;
+    } else if (judgment?.meaningPreserved && judgment.suggestions.every(x => x.correct)) { group.humanApproved++; languageGroup.humanApproved++; }
     if (kind !== 'clarity') for (const tag of c.strata) {
       strata[tag].cases++; strata[tag].expected += c.mode === 'proofread' ? gold.length : 0;
       strata[tag].emitted += edits.length; strata[tag].referenceMatches += matches;
@@ -184,12 +192,30 @@ export function score(corpus, run, {labels = null, judgments = null, acceptance 
   if (metrics.protectedViolations || metrics.meaningViolations) reasons.push('MEANING_PRESERVATION_GATE_NOT_MET');
   if (metrics.explanationErrors) reasons.push('EXPLANATION_REVIEW_GATE_NOT_MET');
   if (metrics.style.notShorter) reasons.push('SHORTER_REWRITE_LENGTH_GATE_NOT_MET');
+  // A large English set cannot hide Turkish false positives or absent Turkish style review.
+  for (const language of Object.values(languages)) {
+    if (!language.proofread.cases || language.clarity.cases < CLARITY_MIN_CASES || REWRITE_MODES.some(mode => !language.modes.includes(mode))) {
+      reasons.push('LANGUAGE_COVERAGE_INCOMPLETE');
+    }
+    for (const kind of ['proofread', 'clarity']) {
+      const group = language[kind];
+      group.humanPrecision = reviewed && group.emitted ? group.humanCorrect / group.emitted : null;
+      group.referenceRecall = group.expected ? group.referenceMatches / group.expected : null;
+      if (group.cases && (group.humanPrecision === null || group.humanPrecision < .95)) {
+        reasons.push(kind === 'proofread' ? 'LANGUAGE_PRECISION_GATE_NOT_MET' : 'LANGUAGE_CLARITY_PRECISION_GATE_NOT_MET');
+      }
+      if (group.cases && acceptance && (group.referenceRecall === null || group.referenceRecall < minimumRecall)) reasons.push('LANGUAGE_RECALL_GATE_NOT_MET');
+    }
+    if (REWRITE_MODES.some(mode => !language.modes.includes(mode)) || language.style.humanApproved !== language.style.cases) {
+      reasons.push('LANGUAGE_REWRITE_REVIEW_GATE_NOT_MET');
+    }
+  }
   const times = run.rows.filter(x => x.status === 'completed').map(x => x.elapsedMs).sort((a, b) => a - b);
   const percentile = p => times.length ? times[Math.max(0, Math.ceil(times.length * p) - 1)] : null;
   return {schema: 1, runId: run.id, runHash: sha256(run), kind: run.kind, corpusHash: run.corpusHash,
     configurationHash: run.configurationHash, configuration: run.configuration,
-    referenceKind: labels ? 'independently-human-reviewed' : 'unreviewed-proposals',
-    outputReview: reviewed && !unreviewed.length ? 'independent-human' : reviewed ? 'partial-independent-human' : 'pending', releaseEligible: reasons.length === 0, reasons,
+    referenceKind: labels ? 'independently-human-reviewed' : 'unreviewed-proposals', languages,
+    outputReview: reviewed && !unreviewed.length ? 'independent-human' : reviewed ? 'partial-independent-human' : 'pending', releaseEligible: reasons.length === 0, reasons: [...new Set(reasons)],
     attempted: run.rows.length, completed: decoded.size, invalidCaseIds: invalid, unreviewedCaseIds: unreviewed,
     missingCaseIds: corpus.cases.filter(c => !run.rows.some(r => r.id === c.id)).map(c => c.id),
     failedCases: run.rows.filter(r => r.status === 'failed').map(r => ({id: r.id, code: r.code})),
@@ -204,7 +230,7 @@ export function reviewTemplates(corpus, run) {
     labels: {schema: 1, corpusHash: sha256(corpus), review: {...review}, cases: corpus.cases.map(c => ({id: c.id, decision: 'pending', reference: structuredClone(c.proposal)}))},
     judgments: {schema: 1, runId: run.id, runHash: sha256(run), review: {...review}, cases: corpus.cases.map(c => {
       const row = run.rows.find(x => x.id === c.id); let edits = [];
-      try { if (row?.status === 'completed') edits = candidates(row.response, c.source, c.mode); } catch { /* Never preapprove a failed response. */ }
+      try { if (row?.status === 'completed') edits = candidates(row.response, c.source, c.mode, {variant: c.variant}); } catch { /* Never preapprove a failed response. */ }
       return {id: c.id, suggestions: edits.map(() => ({correct: null, explanationAccurate: null})), meaningPreserved: null};
     })}};
 }

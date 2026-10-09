@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile, mkdtemp, writeFile, rm, mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {sha256, validateCorpus, validateRun, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
+import {sha256, validateCorpus, validateRun, validateLabels, score, reviewTemplates} from '../tools/evaluation/quality.mjs';
 import {parseData, readData} from '../tools/evaluation/json.mjs';
 import {evaluate, plannedRun, configuration} from '../tools/evaluate-writing.mjs';
 import {betaGate, CI_CHECKS, COEXISTENCE_CHECKS, DEVICE_CHECKS} from '../tools/evaluation/beta-gate.mjs';
@@ -40,6 +40,44 @@ function data() {
   return {run, ...templates}; // In-memory test data, never an attestation of actual human/live results.
 }
 function reviewed(d) { d.judgments.runHash = sha256(d.run); return score(corpus, d.run, {labels: d.labels, judgments: d.judgments, acceptance: d.acceptance}); }
+test('Turkish corpus evaluation, labels, scoring and judgment templates use the case language', async () => {
+  const caseOf = (id, source, mode, proposal) => ({id, source, mode, proposal, variant: 'TR', strata: ['negation'], protected: []});
+  const tr = validateCorpus({schema: 1, id: 'turkish-fixture', author: 'codex', kind: 'synthetic', cases: [
+    caseOf('tr-proofread', 'Bugun gelmedim.', 'proofread', {corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' gelmedim.', category: 'spelling', explanation: 'Türkçe karakter.'}]}),
+    caseOf('tr-rewrite', 'Ben gelmiyom.', 'improve', {rewrite: 'Ben geliyom.'}),
+    caseOf('tr-clarity-unsafe', "Ali'siz geldim.", 'clarity', {suggestions: [{before: "Ali'siz", after: "Ali'yle", left: '', right: ' geldim.', explanation: 'İfade.'}]}),
+    caseOf('tr-clarity-safe', 'Bu çalışma acil bir şekilde tamamlanmalı.', 'clarity', {suggestions: [{before: 'acil bir şekilde', after: 'acilen', left: 'çalışma ', right: ' tamamlanmalı.', explanation: 'Kısa ifade.'}]})
+  ]});
+  assert.throws(() => validateCorpus({...tr, cases: [{...tr.cases[0], variant: 'FR'}]}), /INVALID_EVALUATION_DATA/);
+  const {run} = await evaluate(tr, config, {fixture: true});
+  assert.ok(run.rows.every(row => row.status === 'completed'));
+  const report = score(tr, run); assert.equal(report.completed, 4); assert.deepEqual(report.invalidCaseIds, []);
+  assert.equal(report.languages.TR.proofread.emitted, 1); assert.equal(report.languages.TR.clarity.emitted, 1);
+  assert.equal(Object.hasOwn(report.languages, 'EN'), false); assert.equal(report.releaseEligible, false);
+  const templates = reviewTemplates(tr, run);
+  assert.deepEqual(templates.judgments.cases.map(row => row.suggestions.length), [1, 1, 0, 1]);
+  templates.labels.review = {...human}; templates.labels.cases.forEach(row => { row.decision = 'approved'; });
+  assert.deepEqual(validateLabels(tr, templates.labels).references.get('tr-rewrite')[0].flags, ['negation']);
+});
+test('English precision cannot mask a failed Turkish precision stratum', () => {
+  const tr = {id: 'tr-proofread', source: 'Bugun geldim.', mode: 'proofread', variant: 'TR', strata: ['spelling'], protected: [],
+    proposal: {corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' geldim.', category: 'spelling', explanation: 'Türkçe karakter.'}]}};
+  const mixed = validateCorpus({...structuredClone(corpus), cases: [...structuredClone(corpus.cases), tr]});
+  const d = data(); d.run.corpusHash = sha256(mixed);
+  d.run.rows.push({id: tr.id, inputHash: sha256(tr.source), status: 'completed', response: JSON.stringify(tr.proposal), elapsedMs: 12, code: null});
+  const templates = reviewTemplates(mixed, d.run);
+  templates.labels.review = templates.judgments.review = templates.acceptance.review = {...human}; templates.acceptance.minimumReferenceRecall = .8;
+  templates.labels.cases.forEach(row => { row.decision = 'approved'; });
+  templates.judgments.cases.forEach(row => { row.meaningPreserved = true; row.suggestions.forEach(x => { x.correct = row.id !== tr.id; x.explanationAccurate = true; }); });
+  const report = score(mixed, d.run, templates);
+  assert.ok(report.metrics.proofread.humanPrecision > .95); assert.equal(report.languages.TR.proofread.humanPrecision, 0);
+  assert.equal(report.languages.EN.proofread.humanPrecision, 1); assert.equal(report.releaseEligible, false);
+  assert.ok(report.reasons.includes('LANGUAGE_PRECISION_GATE_NOT_MET'));
+  templates.judgments.cases.find(row => row.id === tr.id).suggestions[0].correct = true;
+  const sparse = score(mixed, d.run, templates);
+  assert.equal(sparse.languages.TR.proofread.humanPrecision, 1); assert.equal(sparse.releaseEligible, false);
+  assert.ok(sparse.reasons.includes('LANGUAGE_COVERAGE_INCOMPLETE'));
+});
 test('corpus covers paragraph/multi-edit/variant/boundary inputs and distinct genuinely shorter rewrites', () => {
   const proof = corpus.cases.filter(c => c.mode === 'proofread');
   assert.equal(proof.length, 326);
@@ -204,7 +242,7 @@ test('Node investigation port transports the real framed fixture through product
   try {
     assert.equal((await native.request('status')).sign_in, 'subscription');
     const response = await native.request('send', {system: null, messages: [{role: 'user', text: JSON.stringify({text: 'Zoë: He go to work.'})}], model: null, tools: 'none', session: 'ephemeral', continuation: null, cleanup_group: null, check_sign_in: true});
-    assert.equal(candidates(response, 'Zoë: He go to work.', 'proofread').length, 1);
+    assert.equal(candidates(response, 'Zoë: He go to work.', 'proofread', {variant: 'US'}).length, 1);
   } finally { native.close(); }
 });
 function acceptedEvidence(d) {
@@ -264,7 +302,7 @@ test('a clearer-wording answer outside the contract is an invalid output, and a 
   const d = data(); d.run.rows.find(r => r.id === 'clarity-001').response = '{"corrections":[]}';
   const s = score(corpus, d.run); assert.deepEqual(s.invalidCaseIds, ['clarity-001']);
   const changesNumber = data(); changesNumber.run.rows.find(r => r.id === 'clarity-006').response = JSON.stringify({suggestions: [{before: '80 percent', after: '90 percent', left: 'total of ', right: ' of the work', explanation: 'x'}]});
-  assert.deepEqual(candidates(changesNumber.run.rows.find(r => r.id === 'clarity-006').response, corpus.cases.find(c => c.id === 'clarity-006').source, 'clarity'), []);
+  assert.deepEqual(candidates(changesNumber.run.rows.find(r => r.id === 'clarity-006').response, corpus.cases.find(c => c.id === 'clarity-006').source, 'clarity', {variant: 'US'}), []);
 });
 
 test('evaluation accepts a fixed effort for the whole run and preserves provider default omission', async () => {
