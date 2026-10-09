@@ -90,15 +90,13 @@ function signals(text) {
       certain.push(words.map(word => word.text).join(' '));
       continue;
     }
-    let from = 0;
-    for (const clause of sentence.split(/[;,:]+/u)) {
+    for (const {0: clause, index: from} of sentence.matchAll(/[^;,:]+/gu)) {
       const indexes = words.flatMap((word, at) => word.at >= from && word.at < from + clause.length ? [at] : []);
       if (indexes.some(at => kinds[at] === 2)) certain.push(indexes.map(at => words[at].text).join(' '));
       else for (const at of indexes) {
         // Keep the possible prohibition and its preceding subject/context, not unrelated words after it.
         if (kinds[at] === 1) ambiguous.push(indexes.filter(index => index <= at).map(index => words[index].text).join(' '));
       }
-      from += clause.length + 1;
     }
   }
   return {certain, ambiguous};

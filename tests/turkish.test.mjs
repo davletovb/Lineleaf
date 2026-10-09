@@ -29,7 +29,8 @@ const pairs = [
   ['bilmiyom', 'biliyom'], ['gelmiyo', 'geliyo'], ['gelmiyoz', 'geliyoz'], ['yapmıycam', 'yapacam'],
   ["Ali'siz geldim.", "Ali'yle geldim."], ['Ali’sizdi.', 'Ali’yleydi.'], ["Arzu'suz geldim.", "Arzu'yla geldim."],
   ['Param yoksa borç alabilir mi?', 'Param varsa borç alabilir mi?'],
-  ['Ne Ali ne Ayşe geldi?', 'Ali ve Ayşe geldi?'], ['Ne yağmur yağdı, ne kar?', 'Yağmur ve kar yağdı?']
+  ['Ne Ali ne Ayşe geldi?', 'Ali ve Ayşe geldi?'], ['Ne yağmur yağdı, ne kar?', 'Yağmur ve kar yağdı?'],
+  ['Ali geldi,,,,,,,,,,,, Ayşe gelmedi.', 'Ali geldi,,,,,,,,,,,, Ayşe geldi.']
 ];
 test('Turkish verbal, lexical, inability and privative negations flag removals and additions in every rewrite mode', () => {
   for (const [negative, positive] of pairs) {
