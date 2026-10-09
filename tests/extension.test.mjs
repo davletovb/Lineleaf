@@ -1027,6 +1027,9 @@ test('dictionary entries are cased by the letters they show, in storage and in w
   assert.deepEqual(settings.dictionary, ['ışık', 'istanbul', 'ankara']); // Işık and IŞIK are one word; İstanbul and Istanbul are one word
   assert.deepEqual(JSON.parse(writingTurn('Işık okula gidiyor.', 'proofread', settings).messages[0].text), {text: 'Işık okula gidiyor.', dictionary: ['ışık', 'istanbul', 'ankara']});
   assert.equal(dictionaryWord('ISIK'), 'isik'); // no Turkish letter to go by: the English lowercase
+  // The Turkish letter may be written as a base plus a combining mark (Ş as S + U+0327, İ as I + U+0307); it is the same word once composed.
+  assert.equal(dictionaryWord('IS\u0327IK'), 'ışık'); assert.equal(dictionaryWord('I\u0307STANBUL'), 'istanbul'); assert.equal(dictionaryWord('C\u0327IG'), 'çıg');
+  assert.deepEqual(preferences({dictionary: ['IS\u0327IK', 'IŞIK', 'Işık']}).dictionary, ['ışık']); // one word, however it was typed
   assert.deepEqual(filterDictionary([{...correction('Işık', 'Işik'), category: 'spelling'}], {...settings, language: 'tr'}), []); // still hidden, whichever way the text spells its capital I
   // Through the settings save and from the card's "Add to dictionary": the same casing, whichever English spelling is saved.
   const f = fakeChrome({variant: 'UK'}); installController(f.api);

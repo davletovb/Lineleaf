@@ -78,7 +78,8 @@ const TURKISH_CASING = /[çğışİÇĞŞ]/u;
 export function dictionaryWord(word) {
   if (typeof word !== 'string' || word.length > 64 || !word.isWellFormed()) return null;
   // Lowercasing the Turkish capital dotted İ the English way leaves a combining dot (U+0307) behind the i; it is the same letter as a plain i.
-  const normalized = word.normalize('NFC').toLocaleLowerCase(TURKISH_CASING.test(word) ? 'tr' : 'en').replace(/i\u0307/gu, 'i');
+  // Compose first: a Turkish letter written as a base plus a combining mark (S + U+0327 for Ş) shows its letter only once composed.
+  const composed = word.normalize('NFC'), normalized = composed.toLocaleLowerCase(TURKISH_CASING.test(composed) ? 'tr' : 'en').replace(/i\u0307/gu, 'i');
   return normalized.length <= 64 && /^\p{L}[\p{L}\p{M}]*(?:['’-]\p{L}[\p{L}\p{M}]*)*$/u.test(normalized) ? normalized : null;
 }
 // Unless the text is plainly English (judged from `text`, the text the edits were made against, which the worker passes; given neither a text nor
