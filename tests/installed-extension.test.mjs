@@ -160,9 +160,11 @@ test('two options pages preserve newer pause/consent/dictionary and reject same-
   await other.close(); await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
 });
-test('the language setting offers Türkçe, enables opted-in clearer wording, and survives a reload', async () => {
+test('the settings choose only the English spelling: no language to pick, a stored Turkish choice reads as US, and dictionary words keep Turkish casing', async () => {
   await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'US' && document.querySelector('#status').textContent === '');
-  assert.deepEqual(await options.locator('#variant option').evaluateAll(list => list.map(option => [option.value, option.textContent])), [['US', 'English · US'], ['UK', 'English · UK'], ['TR', 'Türkçe']]);
+  assert.equal(await options.locator('label[for="variant"]').textContent(), 'English spelling');
+  assert.deepEqual(await options.locator('#variant option').evaluateAll(list => list.map(option => [option.value, option.textContent])), [['US', 'English · US'], ['UK', 'English · UK']]);
+  assert.match(await options.locator('#writing').textContent(), /works out the language of what you write, so you never switch it/);
   const save = async () => {
     await options.getByRole('button', {name: 'Save preferences'}).click();
     await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
@@ -172,18 +174,17 @@ test('the language setting offers Türkçe, enables opted-in clearer wording, an
   const toggle = id => options.locator(id).evaluate(el => el.click());
   await toggle('#automatic'); await toggle('#clarity'); await save();
   assert.equal((await stored()).clarity, true);
-  await options.locator('#variant').selectOption('TR');
-  assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true); // offered after the automatic opt-in
-  await save(); await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'TR');
-  assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true);
   const disclosure = await options.locator('label[for="clarity"] .muted').textContent();
   assert.match(disclosure, /English and Turkish/); assert.doesNotMatch(disclosure, /English setting/);
-  assert.deepEqual([(await stored()).variant, (await stored()).clarity], ['TR', true]);
-  // Dictionary words typed under Türkçe are cased the Turkish way (capital I is dotless), which is also what the provider receives.
+  // A "TR" saved while Turkish was a setting reads as US: the page shows US, and a save from it works.
+  await worker.evaluate(async () => { const { preferences } = await chrome.storage.local.get('preferences'); await chrome.storage.local.set({preferences: {...preferences, variant: 'TR'}}); });
+  await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'US' && document.querySelector('#status').textContent === '');
+  await options.locator('#variant').selectOption('UK'); await save(); assert.equal((await stored()).variant, 'UK');
+  // Dictionary words with Turkish letters are cased the Turkish way (capital I is dotless), which is also what the provider receives.
   await options.locator('#dictionary').fill('Işık\nAnkara'); await save();
   assert.deepEqual((await stored()).dictionary, ['ışık', 'ankara']); assert.equal(await options.locator('#dictionary').inputValue(), 'ışık\nankara');
-  await options.locator('#variant').selectOption('US'); // back to English: the choice is still there and can be changed
-  assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true);
+  assert.equal(await options.locator('#clarity').isChecked(), true); // the clearer-wording choice is not tied to a language
   await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));
 });
+

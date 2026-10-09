@@ -23,6 +23,7 @@ test('the content bundle has no candidate validator or Turkish dictionary depend
   assert.ok(!Object.keys(built.metafile.inputs).some(path => /\/(?:candidates|turkish-negation|turkish-verbs)\.mjs$/u.test(path)));
   assert.ok(Object.keys(built.metafile.inputs).some(path => path.endsWith('/boundaries.mjs')));
   assert.doesNotMatch(built.outputFiles[0].text, /TURKISH_VERB_STEMS|FOLDED_STEMS/u);
+  assert.doesNotMatch(built.outputFiles[0].text, /TURKISH_WORD|ENGLISH_WORD|detectLanguage/u); // the language is decided in the worker, not in every page
 });
 
 test('positions are UTF-16 source matches; context disambiguates repeated phrases', () => {
@@ -892,15 +893,31 @@ test('one settings save commits all edited profiles, including inactive cloud re
   await saveProvider(f, {provider: 'gemini'});
   assert.equal((await f.rpc('get-settings')).value.allowCloud, false);
 });
-// Turkish: explicit language, language-aware style guards and a dictionary that understands the Turkish i.
-const turkish = {variant: 'TR'};
-test('Turkish is a writing language of its own and unknown languages fall back to US English', () => {
-  assert.equal(preferences(turkish).variant, 'TR'); assert.equal(preferences({variant: 'UK'}).variant, 'UK');
-  for (const variant of ['tr', 'FR', 'turkish', null, 7]) assert.equal(preferences({variant}).variant, 'US');
-  assert.match(writingTurn('Ben okula gidiyorum.', 'proofread', preferences({variant: 'US'})).system, /American English/);
+// Turkish and English together: the language of each text is detected, the setting only chooses the English spelling, the guards and prompts follow
+// the text, and a dictionary that understands the Turkish i.
+const turkish = {...preferences(null), language: 'tr'}; // The language fixed, so each part is tested on its own.
+test('the only saved language choice is the English spelling: Turkish is no longer a setting, and a stored "TR" reads as US', () => {
+  assert.equal(preferences({variant: 'UK'}).variant, 'UK'); assert.equal(preferences({variant: 'US'}).variant, 'US');
+  for (const variant of ['TR', 'tr', 'FR', 'turkish', null, 7]) assert.equal(preferences({variant}).variant, 'US');
+  assert.equal(Object.hasOwn(preferences({variant: 'US', language: 'tr'}), 'language'), false); // the language is never stored
+});
+test('the prompt follows the detected language: English keeps its exact instruction, Turkish and mixed text get theirs, nobody picks one', () => {
+  const uk = preferences({variant: 'UK'}), system = text => writingTurn(text, 'proofread', uk).system;
+  assert.match(system('I will not be there tomorrow, sorry.'), /Use British English\./);
+  assert.doesNotMatch(system('I will not be there tomorrow, sorry.'), /Turkish/);
+  const unknown = system('Quarterly revenue grew significantly'); // too little to tell: both languages' rules, nothing claimed about mixing
+  assert.match(unknown, /in English or in Turkish/); assert.match(unknown, /Use British English for English/); assert.doesNotMatch(unknown, /mixes/); assert.match(unknown, /Never translate/);
+  assert.match(writingTurn('Ali gelme.', 'friendly', uk).system, /Preserve negation in both languages/);
+  const turkishSystem = system('Bugün okula gidiyorum ama yarın gelmeyeceğim.');
+  assert.match(turkishSystem, /The text is Turkish/); assert.doesNotMatch(turkishSystem, /British|American/);
+  assert.match(system('bugun okula gidiyorum ama yarin gelmeyecegim'), /The text is Turkish/); // typed without the special letters
+  const mixed = system('Meeting’e geç kaldım because the train was late');
+  assert.match(mixed, /mixes English and Turkish/); assert.match(mixed, /Use British English for the English parts/); assert.match(mixed, /Never translate/);
+  assert.doesNotMatch(mixed, /Preserve negation in both languages/); // proofreading keeps its own contract
+  assert.match(writingTurn('Meeting’e geç kaldım because the train was late', 'shorter', uk).system, /Preserve negation in both languages/);
 });
 test('the Turkish prompt asks for standard Turkish, no translation and Turkish explanations, and still keeps the proofreading contract', () => {
-  const turn = writingTurn('Bugun okula gidiyorum.', 'proofread', preferences(turkish));
+  const turn = writingTurn('Bugun okula gidiyorum.', 'proofread', turkish);
   assert.match(turn.system, /Turkish Language Association/); assert.match(turn.system, /Never translate or change the language/); assert.match(turn.system, /every explanation in Turkish/);
   assert.match(turn.system, /Check it against standard modern Turkish/); assert.doesNotMatch(turn.system, /Preserve Turkish verbal negation/);
   assert.doesNotMatch(turn.system, /American|British/);
@@ -909,7 +926,7 @@ test('the Turkish prompt asks for standard Turkish, no translation and Turkish e
 });
 test('every Turkish writing mode keeps its strict contract and asks to preserve verbal negation and its scope', () => {
   for (const mode of ['clarity', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']) {
-    const turn = writingTurn('Gelmedi.', mode, preferences(turkish));
+    const turn = writingTurn('Gelmedi.', mode, turkish);
     assert.match(turn.system, /Turkish verbal negation/); assert.match(turn.system, /their scope/);
     assert.match(turn.system, /Never translate/); assert.match(turn.system, /every explanation in Turkish/);
     assert.match(turn.system, mode === 'clarity' ? /"suggestions"/ : /"rewrite"/);
@@ -927,66 +944,122 @@ test('Turkish corrections with ç ğ ı İ ö ş ü are matched by UTF-16 positi
   assert.equal(fixed, 'İstanbul\'a gidiyorum, çünkü orada ailem yaşıyor.');
   rejects(() => candidates(output([{...correction('s', 'z'), category: 'spelling'}]), 'aş'.normalize('NFD'), 'proofread')); // half of a decomposed ş
 });
-test('the dictionary treats Turkish dotted and dotless i as one letter, and a proper noun with a suffix as its noun, only in Turkish', () => {
+test('the dictionary treats Turkish dotted and dotless i as one letter, and a proper noun with a suffix as its noun, unless the text is plainly English', () => {
   assert.equal(dictionaryWord('İstanbul'), 'istanbul'); assert.equal(dictionaryWord('İ'), 'i');
   const spelling = (before, after) => ({...correction(before, after), category: 'spelling'});
-  const words = ['ışık', 'Ankara'], tr = preferences({...turkish, dictionary: words}), en = preferences({dictionary: words});
+  const dictionary = ['ışık', 'ankara'], settings = language => ({...preferences({dictionary}), language});
   const light = spelling('Işık', 'Işik'), suffixed = spelling('Ankara\'da', 'Ankara\'ya'), other = spelling('kitab', 'kitap');
-  assert.deepEqual(filterDictionary([light, suffixed, other], tr), [other]);
-  assert.deepEqual(filterDictionary([light, suffixed, other], en), [light, suffixed, other]);
+  assert.deepEqual(filterDictionary([light, suffixed, other], settings('tr')), [other]);
+  assert.deepEqual(filterDictionary([light, suffixed, other], settings('mixed')), [other]); // either reading may be the right one
+  // Plainly English text keeps the English reading of an apostrophe; a word that itself shows Turkish letters is still cased the Turkish way.
+  assert.deepEqual(filterDictionary([light, suffixed, other], settings('en')), [suffixed, other]);
+  assert.deepEqual(filterDictionary([light, suffixed, other], preferences({dictionary})), [suffixed, other]); // no language and no text: English, as before
+  // Given the text the edits were made against, the worker's path: Turkish text reads the Turkish way, English text the English way.
+  assert.deepEqual(filterDictionary([light, suffixed, other], preferences({dictionary}), 'Işık Ankara\'da kitab alıyorum ama çok pahalı.'), [other]);
+  assert.deepEqual(filterDictionary([suffixed, other], preferences({dictionary}), 'We met in Ankara\'da with the kitab and the rest of them.'), [suffixed, other]);
+  // English possessives still work for English and mixed text.
+  const possessive = spelling('Maya\'s', 'Mayas'); assert.deepEqual(filterDictionary([possessive], {...preferences({dictionary: ['maya']}), language: 'en'}), []);
+  assert.deepEqual(filterDictionary([possessive], {...preferences({dictionary: ['maya']}), language: 'mixed'}), []);
 });
-test('the controller sends Turkish proofreading, guarded rewrites and opted-in clearer wording with the saved language', async () => {
+test('the controller handles Turkish and English in one session with no language setting: prompts, guards and clearer wording follow each text', async () => {
   const answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]});
-  const f = fakeChrome({variant: 'TR', automatic: true, clarity: true, answer}); installController(f.api);
-  const state = (await f.rpc('site-state', null, f.sender)).value; assert.equal(state.clarity, true); assert.equal(Object.hasOwn(state, 'variant'), false);
-  const port = f.connect({documentId: 'document-three'}); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: 'Bugun okula gidiyorum.', mode: 'proofread'});
-  await waitFor(() => port.received.some(x => x.type === 'result'));
-  assert.deepEqual(port.received.find(x => x.type === 'result').edits.map(x => x.after), ['Bugün']);
-  assert.match(turnOf(f.calls.find(sent)).system, /Turkish Language Association/);
+  let clock = 100000; // Automatic requests share one interval, so the test lets it pass between them.
+  const f = fakeChrome({automatic: true, clarity: true, answer}); installController(f.api, {now: () => clock});
+  const state = (await f.rpc('site-state', null, f.sender)).value; assert.equal(state.clarity, true);
+  const ask = (text, mode, kind = 'manual', documentId = undefined) => {
+    const port = f.connect(documentId ? {documentId} : {}); port.onMessage.emit({type: 'start', kind, id: crypto.randomUUID(), text, mode}); return port;
+  };
+  const result = async port => { await waitFor(() => port.received.some(x => x.type === 'result' || x.type === 'error')); return port.received.find(x => x.type === 'result' || x.type === 'error'); };
+  // Turkish text: the Turkish proofreading prompt, with the saved settings untouched.
+  assert.deepEqual((await result(ask('Bugun okula gidiyorum.', 'proofread'))).edits.map(x => x.after), ['Bugün']);
+  assert.match(turnOf(f.calls.filter(sent).at(-1)).system, /The text is Turkish/);
+  // English text straight afterwards: the English prompt, still no setting changed.
+  f.answer = JSON.stringify({corrections: []});
+  assert.deepEqual((await result(ask('I will not be there tomorrow.', 'proofread', 'manual', 'document-two'))).edits, []);
+  assert.match(turnOf(f.calls.filter(sent).at(-1)).system, /Use American English/); assert.doesNotMatch(turnOf(f.calls.filter(sent).at(-1)).system, /Turkish/);
+  assert.equal(f.data.preferences.variant, 'US');
+  // Turkish rewrites are checked by the Turkish guard, English ones by the English guard.
   f.answer = JSON.stringify({rewrite: 'Ben geldim.'});
   for (const mode of ['improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']) {
-    const rewrite = f.connect(); rewrite.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: 'Ben gelmedim.', mode});
-    await waitFor(() => rewrite.received.some(x => x.type === 'result'));
-    assert.ok(rewrite.received.find(x => x.type === 'result').edits[0].flags.includes('negation'), mode);
+    const outcome = await result(ask('Ben gelmedim.', mode, 'manual', `document-${mode}`));
+    assert.ok(outcome.edits[0].flags.includes('negation'), mode);
   }
+  f.answer = JSON.stringify({rewrite: 'I agree.'});
+  assert.deepEqual((await result(ask('I do not agree.', 'improve', 'manual', 'document-english'))).edits[0].flags, ['negation']);
+  // Automatic clearer wording drops a Turkish edit that reverses a negation and an English one alike.
   f.answer = JSON.stringify({suggestions: [{before: 'gelmedim', after: 'geldim', left: 'Ben ', right: '.', explanation: 'Daha kısa.'}]});
-  const wording = f.connect(); clarityStart(wording, 'Ben gelmedim.');
-  await waitFor(() => wording.received.some(x => x.type === 'result'));
-  assert.deepEqual(wording.received.find(x => x.type === 'result').edits, []);
-  assert.ok(f.calls.filter(sent).every(call => /Turkish/.test(turnOf(call).system)));
+  assert.deepEqual((await result(ask('Ben gelmedim.', 'clarity', 'automatic', 'document-tr-wording'))).edits, []);
+  clock += 11000;
+  f.answer = JSON.stringify({suggestions: [{before: 'do not agree', after: 'agree', left: 'I ', right: ' with this.', explanation: 'Shorter.'}]});
+  assert.deepEqual((await result(ask('I do not agree with this.', 'clarity', 'automatic', 'document-en-wording'))).edits, []);
 });
-test('the language is a saved preference: Turkish can be chosen and left again, and only a known language is accepted', async () => {
+test('text that mixes the two languages, or is too short to classify, is checked by both guards', () => {
+  const uk = preferences({variant: 'UK'});
+  // Mixed: a Turkish negation is caught inside an English sentence, and an English one inside a Turkish sentence.
+  assert.ok(preservationFlags('Meeting’e gelmedim because the train was late.', 'Meeting’e geldim because the train was late.', uk).includes('negation'));
+  assert.ok(preservationFlags('Yarın toplantıya geliyorum ama I will not stay late.', 'Yarın toplantıya geliyorum ama I will stay late.', uk).includes('negation'));
+  // Too short to classify: both guards run, so neither language's negation slips by.
+  assert.ok(preservationFlags('Ahmet gelmedi', 'Ahmet geldi', uk).includes('negation'));
+  assert.ok(preservationFlags('Do not stop', 'Stop', uk).includes('negation'));
+  // The flags keep a fixed order and "possible" never repeats a certain negation.
+  assert.deepEqual(preservationFlags('Ben 5 gelmedim.', 'Ben geldim.', {...uk, language: 'tr'}), ['number', 'negation']);
+});
+test('a stale options page cannot save Turkish as a language, and English spelling changes still cancel stale delivery, including delayed storage events', async () => {
   const f = fakeChrome(); installController(f.api);
   const save = (changes, expected) => f.rpc('save-settings', {changes, expected, dictionary: {add: [], remove: []}});
-  assert.equal((await save({variant: 'TR'}, {variant: 'US'})).ok, true); assert.equal(f.data.preferences.variant, 'TR');
-  assert.equal((await save({variant: 'FR'}, {variant: 'TR'})).code, 'INVALID_REQUEST'); assert.equal(f.data.preferences.variant, 'TR');
-  assert.equal((await save({variant: 'UK'}, {variant: 'TR'})).ok, true); assert.equal(f.data.preferences.variant, 'UK');
-});
-test('any saved language change cancels stale delivery, including US/UK and delayed storage events', async () => {
-  for (const [from, to, source, rewrite] of [['TR', 'US', 'Ben gelmedim.', 'Ben geldim.'],
-    ['US', 'UK', 'The color is nice.', 'The colour is nice.'], ['UK', 'US', 'The colour is nice.', 'The color is nice.']]) {
-    const f = fakeChrome({variant: from, hang: true}); installController(f.api);
-    const port = f.connect(); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: source, mode: 'improve'});
-    await waitFor(() => f.calls.some(sent));
-    const request = f.calls.find(sent);
-    f.data.preferences.variant = to; // The stored preference changes before Chrome delivers onChanged.
-    f.ports.at(-1).reply(request.id, {type: 'delta', text: JSON.stringify({rewrite})});
-    f.ports.at(-1).reply(request.id, {type: 'completed'});
+  assert.equal((await save({variant: 'TR'}, {variant: 'US'})).code, 'INVALID_REQUEST'); assert.equal(f.data.preferences.variant, 'US');
+  assert.equal((await save({variant: 'UK'}, {variant: 'US'})).ok, true); assert.equal(f.data.preferences.variant, 'UK');
+  for (const [from, to, source, rewrite] of [['US', 'UK', 'The color is nice.', 'The colour is nice.'], ['UK', 'US', 'The colour is nice.', 'The color is nice.']]) {
+    const g = fakeChrome({variant: from, hang: true}); installController(g.api);
+    const port = g.connect(); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: source, mode: 'improve'});
+    await waitFor(() => g.calls.some(sent));
+    const request = g.calls.find(sent);
+    g.data.preferences.variant = to; // The stored preference changes before Chrome delivers onChanged.
+    g.ports.at(-1).reply(request.id, {type: 'delta', text: JSON.stringify({rewrite})});
+    g.ports.at(-1).reply(request.id, {type: 'completed'});
     await waitFor(() => port.received.some(message => message.code === 'CANCELLED'));
     assert.equal(port.received.some(message => message.type === 'result'), false);
   }
 });
-test('Turkish dictionary entries are cased the Turkish way where they are stored and sent, and English entries keep English casing', async () => {
-  const tr = preferences({...turkish, dictionary: ['Işık', 'IŞIK', 'İstanbul', 'Ankara']});
-  assert.deepEqual(tr.dictionary, ['ışık', 'istanbul', 'ankara']); // Işık and IŞIK are one word
-  assert.deepEqual(JSON.parse(writingTurn('Işık okula gidiyor.', 'proofread', tr).messages[0].text), {text: 'Işık okula gidiyor.', dictionary: ['ışık', 'istanbul', 'ankara']});
-  assert.deepEqual(preferences({dictionary: ['Işık']}).dictionary, ['işık']);
-  assert.deepEqual(filterDictionary([{...correction('Işık', 'Işik'), category: 'spelling'}], tr), []); // still hidden, whichever way the text spells its capital I
-  // Through the settings save, under the language that is being saved, and from the card's "Add to dictionary".
-  const f = fakeChrome({variant: 'TR'}); installController(f.api);
-  const save = (changes, expected, dictionary) => f.rpc('save-settings', {changes, expected, dictionary: {add: [], remove: [], ...dictionary}});
+test('dictionary entries are cased by the letters they show, in storage and in what the provider receives, with no language setting involved', async () => {
+  const dictionary = ['Işık', 'IŞIK', 'İstanbul', 'Ankara', 'Istanbul'];
+  const settings = preferences({dictionary});
+  assert.deepEqual(settings.dictionary, ['ışık', 'istanbul', 'ankara']); // Işık and IŞIK are one word; İstanbul and Istanbul are one word
+  assert.deepEqual(JSON.parse(writingTurn('Işık okula gidiyor.', 'proofread', settings).messages[0].text), {text: 'Işık okula gidiyor.', dictionary: ['ışık', 'istanbul', 'ankara']});
+  assert.equal(dictionaryWord('ISIK'), 'isik'); // no Turkish letter to go by: the English lowercase
+  // The Turkish letter may be written as a base plus a combining mark (Ş as S + U+0327, İ as I + U+0307); it is the same word once composed.
+  assert.equal(dictionaryWord('IS\u0327IK'), 'ışık'); assert.equal(dictionaryWord('I\u0307STANBUL'), 'istanbul'); assert.equal(dictionaryWord('C\u0327IG'), 'çıg');
+  assert.deepEqual(preferences({dictionary: ['IS\u0327IK', 'IŞIK', 'Işık']}).dictionary, ['ışık']); // one word, however it was typed
+  assert.deepEqual(filterDictionary([{...correction('Işık', 'Işik'), category: 'spelling'}], {...settings, language: 'tr'}), []); // still hidden, whichever way the text spells its capital I
+  // Through the settings save and from the card's "Add to dictionary": the same casing, whichever English spelling is saved.
+  const f = fakeChrome({variant: 'UK'}); installController(f.api);
+  const save = (changes, expected, words) => f.rpc('save-settings', {changes, expected, dictionary: {add: [], remove: [], ...words}});
   assert.equal((await save({}, {}, {add: ['Işık', 'Ankara']})).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ışık', 'ankara']);
   assert.equal((await save({}, {}, {remove: ['IŞIK']})).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ankara']);
   assert.equal((await f.rpc('add-word', {word: 'IŞIK'}, f.sender)).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ankara', 'ışık']);
-  assert.equal((await save({variant: 'US'}, {variant: 'TR'}, {add: ['Işık']})).ok, true); assert.deepEqual(f.data.preferences.dictionary, ['ankara', 'ışık', 'işık']); // saved as English
+});
+test('the worker reads the dictionary by the language of the request: a suffixed Turkish proper noun is covered in Turkish text, not in English text', async () => {
+  const run = async (text, before, after) => {
+    const answer = JSON.stringify({corrections: [{before, after, left: text.slice(0, text.indexOf(before)), right: text.slice(text.indexOf(before) + before.length), category: 'spelling', explanation: 'x'}]});
+    const f = fakeChrome({dictionary: ['ankara'], answer}); installController(f.api);
+    const port = f.connect(); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text, mode: 'proofread'});
+    await waitFor(() => port.received.some(x => x.type === 'result' || x.type === 'error'));
+    return port.received.find(x => x.type === 'result').edits.length;
+  };
+  assert.equal(await run('Ben Ankara\'da yaşıyorum ama çok pahalı.', 'Ankara\'da', 'Ankara\'ya'), 0); // Turkish: "Ankara" is the word, so the edit is hidden
+  assert.equal(await run('We met in Ankara\'da with the rest of them, but it was far.', 'Ankara\'da', 'Ankara\'ya'), 1); // English: read as one word, so it is kept
+});
+test('a currency symbol is part of the amount in English too: dropping or swapping it warns, keeping it does not', () => {
+  const us = preferences({variant: 'US'});
+  for (const [source, rewrite] of [['Pay $5 now', 'Pay 5 now'], ['Costs €5', 'Costs £5'], ['It was 12.50£', 'It was 12.50'], ['Pay $5 now', 'Pay 5 dollars now']]) assert.ok(preservationFlags(source, rewrite, us).includes('number'), `${source} -> ${rewrite}`);
+  // A space, even a no-break one, between the symbol and the digits does not take it out of the amount.
+  for (const [source, rewrite] of [['I paid € 5 in total.', 'I spent £ 5 altogether.'], ['I paid 5 € in total.', 'I spent 5 £ altogether.'],
+    ['I paid 5\u00a0€ in total.', 'I spent 5\u00a0£ altogether.'], ['I paid 5\u202f€ in total.', 'I spent 5 altogether.'], ['I paid $ 5 in total.', 'I paid 5 in total.']]) {
+    assert.ok(preservationFlags(source, rewrite, us).includes('number'), `${source} -> ${rewrite}`);
+  }
+  assert.deepEqual(preservationFlags('I paid € 5 in total.', 'I spent € 5 altogether.', us), []);
+  assert.deepEqual(preservationFlags('I paid €5 in total.', 'I spent 5 € altogether.', us), []);
+  assert.deepEqual(preservationFlags('Pay $5 now', 'Pay $5 today', us), []);
+  assert.deepEqual(preservationFlags('Maya paid $1,250 on Monday.', 'Maya paid $1,250 that Monday.', us), []);
+  assert.deepEqual(validateCandidates(JSON.stringify({suggestions: [{before: '$5 now', after: '5 now', left: 'Pay ', right: '.', explanation: 'Shorter.'}]}), 'Pay $5 now.', 'clarity', us), []); // an automatic suggestion that drops it is dropped
 });

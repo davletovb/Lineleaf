@@ -8,13 +8,13 @@ import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {candidates} from '../extension/lib/candidates.mjs';
 import {writingTurn, preferences, requireReady, requireWritingSettings, errorCode, EFFORTS, SPEEDS, PROVIDERS, providerDefaults, allowedSignIn, READINESS} from '../extension/lib/policy.mjs';
 import {nativePort} from './evaluation/native-port.mjs';
-import {sha256, validateCorpus, score, reviewTemplates} from './evaluation/quality.mjs';
+import {sha256, validateCorpus, score, reviewTemplates, caseSettings} from './evaluation/quality.mjs';
 import {readData} from './evaluation/json.mjs';
 import {readPackage} from './evaluation/package.mjs';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const CORPUS = join(ROOT, 'evaluation/writing-corpus.json');
-const ENGINE = ['extension/lib/policy.mjs', 'extension/lib/candidates.mjs', 'extension/lib/boundaries.mjs', 'extension/lib/turkish-negation.mjs', 'extension/lib/turkish-verbs.mjs', 'extension/lib/native-seatline.mjs'];
+const ENGINE = ['extension/lib/policy.mjs', 'extension/lib/candidates.mjs', 'extension/lib/boundaries.mjs', 'extension/lib/language.mjs', 'extension/lib/turkish-negation.mjs', 'extension/lib/turkish-verbs.mjs', 'extension/lib/native-seatline.mjs'];
 export async function engineHash() { return sha256(await Promise.all(ENGINE.map(async path => [path, sha256(await readFile(join(ROOT, path)))]))); }
 export async function privateJSON(path, value) {
   await mkdir(resolve(path, '..'), {recursive: true, mode: 0o700});
@@ -49,7 +49,7 @@ function fixtureConnection(corpus) {
           request = {...request, params: request.params.turn};
           const source = JSON.parse(request.params.messages[0].text).text;
           // The case whose exact production prompt this is, so every mode (including future ones) is matched the same way.
-          const c = corpus.cases.find(c => c.source === source && request.params.system === writingTurn(c.source, c.mode, preferences({variant: c.variant})).system);
+          const c = corpus.cases.find(c => c.source === source && request.params.system === writingTurn(c.source, c.mode, caseSettings(c)).system);
           emit({id: request.id, event: {type: 'delta', text: JSON.stringify(c.proposal)}});
         }
         emit({id: request.id, event: {type: 'completed'}});
@@ -64,7 +64,7 @@ export async function evaluate(corpus, config, {fixture = false, companion = 'se
   const open = connectionFactory ?? (() => fixture ? fixtureConnection(corpus) : new NativeSeatline(() => nativePort(companion)));
   let readiness = null, bytes = 0;
   for (const c of corpus.cases) {
-    const started = performance.now(), settings = preferences({provider: config.provider, allowCloud: config.allowCloud, model: fixture ? '' : config.model, effort: config.effort, speed: config.speed, variant: c.variant});
+    const started = performance.now(), settings = caseSettings(c, {provider: config.provider, allowCloud: config.allowCloud, model: fixture ? '' : config.model, effort: config.effort, speed: config.speed});
     const row = {id: c.id, inputHash: sha256(c.source), status: 'failed', response: '', elapsedMs: 0, code: null};
     let native, checkingReadiness = true;
     try {

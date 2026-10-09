@@ -185,20 +185,36 @@ test('dictionary, UK variant, global pause and reset change the production check
   await page.evaluate(() => fixture.worker.rpc('reset')); await type(); await idle(); assert.equal((await sends()).length, 2);
   assert.deepEqual(await page.evaluate(() => fixture.worker.data), {});
 });
-test('Turkish: the check uses the Turkish prompt, the correction applies, and all six rewrite modes are offered', async () => {
-  await settings({variant: 'TR'});
+test('Turkish and English in one session need no language setting: each text is checked in its own language, and the six rewrites are offered for both', async () => {
+  const before = await page.evaluate(() => structuredClone(fixture.worker.data.preferences));
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
   await type('textarea', 'Bugun okula gidiyorum.'); await result(); await open();
   assert.equal(await inline.locator('.category').textContent(), 'Spelling');
   assert.equal(await inline.locator('.explanation').textContent(), 'Türkçe karakter eksik.');
   assert.equal(await inline.locator('[data-rewrite]').count(), 6);
-  const request = (await sends()).at(-1).params;
-  assert.match(request.system, /Turkish Language Association/); assert.doesNotMatch(request.system, /American|British/);
-  assert.deepEqual(JSON.parse(request.messages[0].text), {text: 'Bugun okula gidiyorum.'});
+  const turkish = (await sends()).at(-1).params;
+  assert.match(turkish.system, /The text is Turkish/); assert.match(turkish.system, /Turkish Language Association/); assert.doesNotMatch(turkish.system, /American|British/);
+  assert.deepEqual(JSON.parse(turkish.messages[0].text), {text: 'Bugun okula gidiyorum.'});
   await inline.button('Accept').evaluate(el => el.focus()); await page.keyboard.press('Enter');
   assert.equal(await page.locator('#textarea').inputValue(), 'Bugün okula gidiyorum.');
-  await settings({variant: 'US'}); await type('textarea', 'He go to work.'); await open();
-  await inline.locator('[data-rewrite]').waitFor(); assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+  // The same field, straight afterwards, in English. Nothing was switched anywhere.
+  await page.evaluate(() => { fixture.worker.answer = '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'; });
+  await type('textarea', 'He go to work.'); await open(); await inline.button('Check now').click();
+  await page.waitForFunction(() => fixture.worker.turns.length === 2);
+  const english = (await sends()).at(-1).params.system;
+  assert.match(english, /Use American English\./); assert.doesNotMatch(english, /Turkish/);
+  await inline.locator('.underline').waitFor(); await open(); assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+  assert.deepEqual(await page.evaluate(() => fixture.worker.data.preferences), before);
+});
+test('a paragraph that switches language gets the prompt for both, and a short selection gets the neutral one', async () => {
+  await page.evaluate(() => { fixture.worker.answer = '{"corrections":[]}'; });
+  await type('textarea', 'Meeting’e geç kaldım because the train was late.'); await page.waitForFunction(() => fixture.worker.turns.length === 1);
+  const mixed = (await sends()).at(-1).params.system;
+  assert.match(mixed, /mixes English and Turkish/); assert.match(mixed, /Use American English for the English parts/); assert.match(mixed, /Never translate/);
+  await type('textarea', 'Ali gelme.'); await open(); await inline.button('Check now').click();
+  await page.waitForFunction(() => fixture.worker.turns.length === 2);
+  const short = (await sends()).at(-1).params.system;
+  assert.match(short, /in English or in Turkish/); assert.doesNotMatch(short, /mixes/);
 });
 test('underlines follow textarea scrolling and layout shifts without editing its DOM', async () => {
   await page.locator('#textarea').evaluate(el => { el.value = 'Unrelated first line.\nHe go to work.\n' + 'Other line.\n'.repeat(20); el.style.height = '100px'; el.focus(); const caret = el.value.indexOf('He go') + 'He go to work.'.length; el.setSelectionRange(caret, caret); });

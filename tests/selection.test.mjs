@@ -142,7 +142,6 @@ test('the panel offers Improve it and Paraphrase through the production worker, 
 });
 test('the panel offers proofreading and six rewrites for Turkish, with guarded previews and a Turkish prompt', async () => {
   await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
-  await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
   await page.locator('#textarea').fill('Bugun okula gidiyorum.'); await open('textarea', 0, 22);
   assert.deepEqual(await panel.locator('#mode').evaluate(el => [...el.options].filter(option => !option.disabled).map(option => option.value)), ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);

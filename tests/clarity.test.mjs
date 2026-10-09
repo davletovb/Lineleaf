@@ -50,7 +50,6 @@ const underlineCount = n => inline.locator('.layer').waitFor((el, count) => el.q
 
 test('Turkish automatic clarity drops verbal and punctuated paired negation changes and keeps an independent wording improvement', async () => {
   await load();
-  await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
   await answers(wording(['gelmedim', 'geldim', 'Ben ', '.'],
     ['Ne yağmur yağdı, ne kar', 'Yağmur ve kar yağdı', '', '.'],
     ["Ali'siz", "Ali'yle", '', ' geldim.'], ['gelmicem', 'geleceğim', 'Ben ', '.'], ['degil', '', 'uygun ', '.'],
