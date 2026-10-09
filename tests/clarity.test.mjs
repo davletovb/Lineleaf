@@ -3,6 +3,7 @@ import {test, before, after} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {isPackagedLibraryModule} from '../tools/evaluation/browser-fixtures.mjs';
 import {panelFor} from './fixtures/panel-driver.mjs';
 // F-02: optional clearer-wording suggestions. A second automatic request for the same paragraph, after the corrections and on the
 // shared interval, shown as separately labelled underlines. Off unless its own setting (and automatic checking) is on.
@@ -14,7 +15,7 @@ before(async () => {
   await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'turkish-negation.mjs', 'turkish-verbs.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/rich.html');
+    const file = files.get(path) ?? (await isPackagedLibraryModule(path) ? `../dist/lineleaf${path}` : './fixtures/rich.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});
@@ -52,17 +53,19 @@ test('Turkish automatic clarity drops verbal and punctuated paired negation chan
   await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
   await answers(wording(['gelmedim', 'geldim', 'Ben ', '.'],
     ['Ne yağmur yağdı, ne kar', 'Yağmur ve kar yağdı', '', '.'],
+    ["Ali'siz", "Ali'yle", '', ' geldim.'], ['gelmicem', 'geleceğim', 'Ben ', '.'], ['degil', '', 'uygun ', '.'],
     ['etmek amacıyla', 'etmek için', 'Yardım ', ' aradım.']), []);
-  await typeInField('Ben gelmedim. Ne yağmur yağdı, ne kar. Yardım etmek amacıyla aradım.');
+  const source = "Ben gelmedim. Ne yağmur yağdı, ne kar. Ali'siz geldim. Ben gelmicem. Bu uygun degil. Yardım etmek amacıyla aradım.";
+  await typeInField(source);
   await page.waitForFunction(() => fixture.worker.turns.length === 1 && fixture.checks[0]?.mode === 'proofread');
   await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').startsWith('No corrections suggested.'));
   await skipInterval(); await underlineCount(1);
   assert.deepEqual((await requests()).map(request => request.mode), ['proofread', 'clarity']);
   assert.equal(await underlines('clarity'), 1); await openCard();
   assert.match(await inline.locator('.change').textContent(), /etmek amacıyla → etmek için/);
-  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim. Ne yağmur yağdı, ne kar. Yardım etmek amacıyla aradım. ');
+  assert.equal(await page.locator('#textarea').inputValue(), source + ' ');
   await press('Accept');
-  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim. Ne yağmur yağdı, ne kar. Yardım etmek için aradım. ');
+  assert.equal(await page.locator('#textarea').inputValue(), source.replace('etmek amacıyla', 'etmek için') + ' ');
 });
 
 test('off by default: with only automatic checking on, a paragraph gets corrections and never a wording request', async () => {

@@ -176,6 +176,8 @@ test('the language setting offers Türkçe, enables opted-in clearer wording, an
   assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true); // offered after the automatic opt-in
   await save(); await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'TR');
   assert.equal(await options.locator('#clarity').isDisabled(), false); assert.equal(await options.locator('#clarity').isChecked(), true);
+  const disclosure = await options.locator('label[for="clarity"] .muted').textContent();
+  assert.match(disclosure, /English and Turkish/); assert.doesNotMatch(disclosure, /English setting/);
   assert.deepEqual([(await stored()).variant, (await stored()).clarity], ['TR', true]);
   // Dictionary words typed under Türkçe are cased the Turkish way (capital I is dotless), which is also what the provider receives.
   await options.locator('#dictionary').fill('Işık\nAnkara'); await save();

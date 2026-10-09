@@ -3,6 +3,7 @@ import {test, before, after} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
+import {isPackagedLibraryModule} from '../tools/evaluation/browser-fixtures.mjs';
 import {panelFor} from './fixtures/panel-driver.mjs';
 // Accept in rich editors. The edit must reach the editor as an ordinary edit (so its model, DOM and history agree), the caret and
 // the other suggestions must survive, and any editor that misbehaves must end up copy-only. Fixtures mirror each family's DOM;
@@ -15,7 +16,7 @@ before(async () => {
   await page.route('**/*', async route => {
     const path = new URL(route.request().url()).pathname;
     const files = new Map([['/content.js', '../dist/lineleaf/content.js'], ['/controller-bridge.mjs', './fixtures/controller-bridge.mjs'], ['/test-api.mjs', './fixtures/extension-api.mjs']]);
-    const file = files.get(path) ?? (['controller.mjs', 'native-seatline.mjs', 'policy.mjs', 'candidates.mjs', 'turkish-negation.mjs', 'turkish-verbs.mjs', 'editor-policy.mjs', 'check-timing.mjs'].some(x => path === `/lib/${x}`) ? `../dist/lineleaf${path}` : './fixtures/rich.html');
+    const file = files.get(path) ?? (await isPackagedLibraryModule(path) ? `../dist/lineleaf${path}` : './fixtures/rich.html');
     let body = await readFile(fileURLToPath(new URL(file, import.meta.url)), 'utf8');
     if (file.endsWith('.html')) body = body.replace('<script src="/content.js"></script>', '<script type="module" src="/controller-bridge.mjs"></script>');
     await route.fulfill({body, contentType: /\.m?js$/.test(file) ? 'text/javascript' : 'text/html'});

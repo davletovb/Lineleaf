@@ -67,7 +67,6 @@ query('#preferences').addEventListener('submit', async event => {
   catch (error) { show(messageFor(errorCode(error))); }
 });
 query('#automatic').addEventListener('change', () => { syncClarity(); if (!query('#automatic').checked) query('#clarity').checked = false; });
-query('#variant').addEventListener('change', syncClarity);
 query('#paused').addEventListener('change', async () => {
   const previous = !query('#paused').checked;
   query('#paused').disabled = true;

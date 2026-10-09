@@ -361,7 +361,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
   };
   api.runtime.onMessage.addListener((message, sender, respond) => {
     if (message?.type === 'site-state' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
-      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity, variant: settings.variant}}), error => respond({ok: false, code: errorCode(error)}));
+      eligible(sender).then(({settings}) => respond({ok: true, value: {enabled: true, automatic: settings.automatic, clarity: settings.clarity}}), error => respond({ok: false, code: errorCode(error)}));
     } else if (message?.type === 'prepare' && exactKeys(message, ['type', 'payload']) && message.payload === null) {
       eligible(sender).then(prepare).then(value => respond({ok: true, value}), error => respond({ok: false, code: errorCode(error)}));
     } else if (exactKeys(message, ['type', 'payload']) && ['add-word', 'pause', 'open-settings'].includes(message.type)) {

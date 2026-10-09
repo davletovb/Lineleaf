@@ -1,5 +1,6 @@
-import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError, isTurkish} from './policy.mjs';
-import {turkishNegationChanged} from './turkish-negation.mjs';
+import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError, isTurkish, VARIANTS} from './policy.mjs';
+import {turkishNegationChanges, foldTurkish} from './turkish-negation.mjs';
+import {boundaries} from './boundaries.mjs';
 
 // Bounded recursive JSON parser: JSON.parse alone silently accepts duplicate keys.
 export function strictJSON(source) {
@@ -41,9 +42,6 @@ export function strictJSON(source) {
   }
   const result = value(); space(); if (at !== source.length) bad(); return result;
 }
-export function boundaries(text) {
-  return new Set([text.length, ...Array.from(new Intl.Segmenter('en', {granularity: 'grapheme'}).segment(text), x => x.index)]);
-}
 // Deterministic guard for rewrites: what must not change silently. Numbers and dates, names (capitalised words, @mentions, #tags,
 // links, e-mail addresses) and negations are compared between the source and the rewrite. A difference is not a rejection
 // (shortening may drop a number on purpose); it is reported so the user is asked to check it.
@@ -51,7 +49,7 @@ export function boundaries(text) {
 // so "Maya paid" becoming "Priya paid" or "The invoice was paid" is caught; the price is an occasional flag when a rewrite drops an
 // uncommon first word ("Quickly we left" → "Soon we left"). A new first word in the rewrite is not treated as an added name.
 // Spelled-out numbers and shifts of meaning that keep every tracked token are not detected.
-const NUMBERS = /\p{N}+(?:[.,:/-]\p{N}+)*%?/gu;
+const NUMBERS = /%?\p{N}+(?:[.,:/-]\p{N}+)*%?/gu;
 const HANDLES = /[@#][\p{L}\p{N}_]+|https?:\/\/[^\s)]+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.\p{L}{2,}/gu;
 const NEGATIONS = /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|cannot|without)\b|\b\p{L}*n['’]t\b/giu;
 const WORDS = /\p{Lu}[\p{L}\p{M}'’-]*/gu;
@@ -62,7 +60,7 @@ const OPENERS = new Set(('A An The This That These Those There Here It Its He Sh
   'What Why How Who Whom Which Where Whose All Any Some Each Every Both Many Most More Much Few Several Such One Two Another Other Once').split(' '));
 const TURKISH_OPENERS = new Set(('Ben Sen O Biz Siz Onlar Bu Şu Bunlar Şunlar Bunu Şunu Böyle Şöyle Bir Ve Ama Fakat Ancak Çünkü Eğer ' +
   'İçin İle Hem Ya Veya Ne Nasıl Neden Niçin Kim Hangi Nerede Lütfen Merhaba Selam Teşekkür Teşekkürler Evet Hayır ' +
-  'Değil Yok Asla Hiç Bugün Yarın Dün Şimdi Sonra Önce Bazen Belki Ayrıca Yine Henüz Artık Sadece Çok Daha En').split(' '));
+  'Değil Yok Asla Hiç Bugün Yarın Dün Şimdi Sonra Önce Bazen Belki Ayrıca Yine Henüz Artık Sadece Çok Daha En Not No').split(' ').map(word => foldTurkish(word.toLocaleLowerCase('tr'))));
 const tally = (items) => { const counts = new Map(); for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1); return counts; };
 const sameCounts = (a, b) => a.size === b.size && [...a].every(([key, count]) => b.get(key) === count);
 // Occurrence counts of capitalised words: `all` every one; `kept` those that count as names (sentence openers and "I" excluded);
@@ -77,19 +75,27 @@ function capitalised(text, settings) {
     if (!turkish && head === 'I') continue;
     const before = text.slice(0, match.index);
     const opening = before.trim() === '' || /[.!?…:]["'”’)\]]*\s+$/u.test(before) || /\n\s*$/.test(before);
-    if (opening && openers.has(head)) continue;
+    if (opening && openers.has(turkish ? foldTurkish(head.toLocaleLowerCase('tr')) : head)) continue;
     add(kept, word);
     if (!opening) add(inner, word);
   }
   return {all, kept, inner};
 }
 const negations = text => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS), ([token]) => /n['’]t$|^cannot$/u.test(token) ? 'not' : token));
-export function preservationFlags(source, rewrite, settings = {}) {
+function requireLanguage(settings) {
+  if (!VARIANTS.includes(settings?.variant)) throw new LineleafError('INVALID_REQUEST');
+}
+export function preservationFlags(source, rewrite, settings) {
+  requireLanguage(settings);
   const flags = [], a = capitalised(source, settings), b = capitalised(rewrite, settings);
   if (!sameCounts(tally(source.match(NUMBERS) ?? []), tally(rewrite.match(NUMBERS) ?? []))) flags.push('number');
   if ([...a.kept].some(([word, n]) => (b.all.get(word) ?? 0) < n) || [...b.inner].some(([word, n]) => n > (a.all.get(word) ?? 0))
       || !sameCounts(tally(source.match(HANDLES) ?? []), tally(rewrite.match(HANDLES) ?? []))) flags.push('name');
-  if (!sameCounts(negations(source), negations(rewrite)) || (isTurkish(settings) && turkishNegationChanged(source, rewrite))) flags.push('negation');
+  if (isTurkish(settings)) {
+    const changes = turkishNegationChanges(source, rewrite);
+    if (changes.certain) flags.push('negation');
+    else if (changes.ambiguous) flags.push('possible-negation');
+  } else if (!sameCounts(negations(source), negations(rewrite))) flags.push('negation');
   return flags;
 }
 const EXPLANATIONS = {
@@ -126,7 +132,8 @@ function clarity(data, source, points, settings) {
   }
   return edits.sort((a, b) => a.start - b.start);
 }
-export function candidates(answer, source, mode, settings = {}) {
+export function candidates(answer, source, mode, settings) {
+  requireLanguage(settings);
   const data = strictJSON(answer), points = boundaries(source), edits = [];
   const bad = () => { throw new LineleafError('INVALID_OUTPUT'); };
   if (mode === 'clarity') return clarity(data, source, points, settings);

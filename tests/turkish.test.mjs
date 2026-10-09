@@ -22,7 +22,12 @@ const pairs = [
   ['ne yağmur yağdı, ne kar', 'yağmur ve kar yağdı'],
   ['ne yağmur yağdı; ne kar', 'yağmur ve kar yağdı'],
   ['ne yağmur yağdı: ne kar', 'yağmur ve kar yağdı'],
-  ['ne yağmur, ne kar, ne dolu yağdı', 'yağmur, kar ve dolu yağdı']
+  ['ne yağmur, ne kar, ne dolu yağdı', 'yağmur, kar ve dolu yağdı'],
+  ['bu uygun degil', 'bu uygun'], ['hayir', 'evet'], ['hic gelmedi', 'geldi'],
+  ['anlamiyorum', 'anliyorum'], ['calismiyor', 'calisiyor'], ['gormuyor', 'goruyor'], ['istemiyorum', 'istiyorum'],
+  ['calistirilmadi', 'calistirildi'], ['bugün gelmicem', 'bugün geleceğim'], ['gelmiycem', 'geleceğim'],
+  ['bilmiyom', 'biliyom'], ['gelmiyo', 'geliyo'], ['gelmiyoz', 'geliyoz'], ['yapmıycam', 'yapacam'],
+  ["Ali'siz geldim.", "Ali'yle geldim."], ['Ali’sizdi.', 'Ali’yleydi.'], ["Arzu'suz geldim.", "Arzu'yla geldim."]
 ];
 test('Turkish verbal, lexical, inability and privative negations flag removals and additions in every rewrite mode', () => {
   for (const [negative, positive] of pairs) {
@@ -30,7 +35,7 @@ test('Turkish verbal, lexical, inability and privative negations flag removals a
       assert.ok(turkishNegationChanged(source, rewrite), `${source} → ${rewrite}`);
       for (const mode of REWRITE_MODES) {
         const edit = candidates(JSON.stringify({rewrite}), source, mode, tr)[0];
-        assert.ok(edit.flags.includes('negation'), `${mode}: ${source} → ${rewrite}`);
+        assert.ok(edit.flags.some(flag => ['negation', 'possible-negation'].includes(flag)), `${mode}: ${source} → ${rewrite}`);
       }
     }
   }
@@ -90,6 +95,37 @@ test('Turkish names use apostrophe bases and canonical Unicode while retaining c
   assert.deepEqual(preservationFlags('Ben @ali ile görüştüm.', 'Ben @veli ile görüştüm.', tr), ['name']);
 });
 const suggestion = (before, after, left = '', right = '') => ({before, after, left, right, explanation: 'Daha kısa ifade.'});
+test('positive nominal inflections, clear questions and surname contexts do not claim changed negation', () => {
+  for (const [source, rewrite] of [
+    ['Ödeme alındı', 'Ödeme tahsil edildi'], ['Yapmayı seviyorum', 'Yapmaktan hoşlanıyorum'],
+    ['Onun gelmesini istedim', 'Onun gelişini istedim'], ['Kitap okumayı severim', 'Kitap okumaya bayılırım'],
+    ['Sayın Ahmet Yılmaz yarın gelecek.', 'Sayın Ahmet Yılmaz yarın burada olacak.'],
+    ['Ayşe Durmaz ile görüştüm.', 'Ayşe Durmaz ile konuştum.'], ['Mehmet Sönmez burada.', 'Mehmet Sönmez geldi.'],
+    ['Yarın gelecek misin yoksa evde mi kalacaksın?', 'Yarın gelecek misin ya da evde mi kalacaksın?'],
+    ['Evde kimse var mı?', 'Evde biri var mı?'], ['Hiç Ankara’ya gittin mi?', 'Ankara’ya hiç gittin mi?'],
+    ['Ne istiyorsun, ne arıyorsun?', 'Ne arıyorsun, ne istiyorsun?'],
+    ['Not defterimi getir.', 'Defterimi getir.'], ['No: 5 numaralı oda.', '5 numaralı oda.']
+  ]) assert.equal(turkishNegationChanged(source, rewrite), false, `${source} → ${rewrite}`);
+  const source = 'Bu çalışma çok önemli ve acil bir şekilde tamamlanmalı.';
+  const edits = candidates(JSON.stringify({suggestions: [suggestion('acil bir şekilde', 'acilen', 've ', ' tamamlanmalı.')]}), source, 'clarity', tr);
+  assert.equal(edits.length, 1);
+  assert.equal(candidates(JSON.stringify({rewrite: 'iş'}), 'çalışma', 'improve', tr)[0].flags.includes('possible-negation'), true);
+  // Ambiguity is not permission to silently remove a possible prohibition.
+  assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion('gelme', 'gel')]}), 'gelme', 'clarity', tr), []);
+  for (const [source, rewrite] of [['Ben Gelmedim.', 'Ben Geldim.'], ['Ali gelmez.', 'Ali gelir.'],
+    ['Param yoksa giderim.', 'Param varsa giderim.'], ['Hiç gelmedi mi?', 'Hiç geldi mi?'],
+    ['Ne Ali ne Ayşe geldi mi?', 'Ali ve Ayşe geldi mi?'], ['Onun gelmemesini istedim.', 'Onun gelmesini istedim.']]) {
+    assert.equal(turkishNegationChanged(source, rewrite), true, source);
+  }
+});
+test('Turkish percentage signs are facts, in both directions and all style modes', () => {
+  for (const [source, rewrite] of [['%50 indirim var', '50 indirim var'], ['50 indirim var', '%50 indirim var'],
+    ['50% indirim var', '50 indirim var']]) {
+    assert.ok(preservationFlags(source, rewrite, tr).includes('number'));
+    for (const mode of REWRITE_MODES) assert.ok(candidates(JSON.stringify({rewrite}), source, mode, tr)[0].flags.includes('number'));
+    assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source, rewrite)]}), source, 'clarity', tr), []);
+  }
+});
 test('automatic Turkish clarity drops polarity/scope changes and keeps an independent valid edit', () => {
   const source = 'Ben gelmedim. Yardım etmek amacıyla aradım.';
   const edits = candidates(JSON.stringify({suggestions: [suggestion('gelmedim', 'geldim', 'Ben ', '.'),
@@ -110,10 +146,17 @@ test('automatic Turkish clarity drops polarity/scope changes and keeps an indepe
   // Check the entire source, including when the model changes only a suffix inside the negative verb.
   assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion('me', '', 'Ben gel', 'dim.')]}), 'Ben gelmedim.', 'clarity', tr), []);
 });
-test('the language is explicit; English behavior and Turkish proofreading source matching remain intact', () => {
-  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim'), []);
+test('the language is required; English behavior and Turkish proofreading source matching remain intact', () => {
+  for (const settings of [undefined, {}, {variant: 'FR'}, {variant: 'tr'}]) {
+    assert.throws(() => preservationFlags('ben gelmedim', 'ben geldim', settings), /INVALID_REQUEST/);
+    assert.throws(() => candidates('{"rewrite":"ben geldim"}', 'ben gelmedim', 'improve', settings), /INVALID_REQUEST/);
+    assert.throws(() => candidates('{"corrections":[]}', 'ben gelmedim', 'proofread', settings), /INVALID_REQUEST/);
+  }
+  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US'}), []);
   assert.deepEqual(preservationFlags('I do not agree.', 'I disagree.', {variant: 'US'}), ['negation']);
-  assert.deepEqual(preservationFlags('John did not agree.', 'John agreed.', tr), ['negation']);
+  assert.deepEqual(preservationFlags('John did not agree.', 'John agreed.', tr), []);
+  assert.deepEqual(preservationFlags('Not defterimi getir.', 'Defterimi getir.', tr), []);
+  assert.deepEqual(preservationFlags('No: 5 numaralı oda.', '5 numaralı oda.', tr), []);
   const edit = {before: 'Bugun', after: 'Bugün', left: '', right: ' gelmedim.', category: 'spelling', explanation: 'Türkçe karakter.'};
   assert.equal(candidates(JSON.stringify({corrections: [edit]}), 'Bugun gelmedim.', 'proofread', tr)[0].after, 'Bugün');
 });

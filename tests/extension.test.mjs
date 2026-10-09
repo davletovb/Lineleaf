@@ -1,7 +1,7 @@
 import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-import {candidates, strictJSON, preservationFlags} from '../extension/lib/candidates.mjs';
+import {candidates as validateCandidates, strictJSON, preservationFlags} from '../extension/lib/candidates.mjs';
 import {writingTurn, preferences, sitePattern, originOf, dictionaryWord, filterDictionary, PHASES, REQUEST_TIMEOUT, WATCHDOG} from '../extension/lib/policy.mjs';
 import {NativeSeatline} from '../extension/lib/native-seatline.mjs';
 import {installController} from '../extension/lib/controller.mjs';
@@ -13,7 +13,17 @@ import {closeNativeFixtures} from './fixtures/extension-api.mjs';
 test.afterEach(closeNativeFixtures);
 const correction = (before = 'go', after = 'goes', left = '', right = '') => ({before, after, left, right, category: 'grammar', explanation: 'Subject agreement'});
 const output = corrections => JSON.stringify({corrections});
+// These direct parser fixtures are English; controller tests exercise the actual saved language.
+const candidates = (answer, source, mode) => validateCandidates(answer, source, mode, {variant: 'US'});
 const rejects = fn => assert.throws(fn, /INVALID_OUTPUT/);
+test('the content bundle has no candidate validator or Turkish dictionary dependency', async () => {
+  const {build} = await import('esbuild');
+  const built = await build({entryPoints: [new URL('../extension/content.mjs', import.meta.url).pathname], bundle: true, write: false,
+    format: 'iife', target: 'chrome124', loader: {'.css': 'text'}, legalComments: 'none', charset: 'utf8', metafile: true});
+  assert.ok(!Object.keys(built.metafile.inputs).some(path => /\/(?:candidates|turkish-negation|turkish-verbs)\.mjs$/u.test(path)));
+  assert.ok(Object.keys(built.metafile.inputs).some(path => path.endsWith('/boundaries.mjs')));
+  assert.doesNotMatch(built.outputFiles[0].text, /TURKISH_VERB_STEMS|FOLDED_STEMS/u);
+});
 
 test('positions are UTF-16 source matches; context disambiguates repeated phrases', () => {
   const edits = candidates(output([correction('go', 'goes', 'He ', ' to')]), '👩🏽‍💻 He go to work; they go home.', 'proofread');
@@ -49,7 +59,7 @@ test('improve and paraphrase are explicit optional-style rewrites; \"nothing to 
   assert.match(writingTurn('He go.', 'formal', preferences(null)).system, /Rewrite the selection to be formal\. This is an optional style change\./);
 });
 test('rewrites report silent changes to numbers, names and negation instead of hiding them', () => {
-  const flags = (a, b) => preservationFlags(a, b);
+  const flags = (a, b) => preservationFlags(a, b, {variant: 'US'});
   assert.deepEqual(flags('Maya paid $1,250 on 2026-10-02.', 'Maya paid $1,250 on 2026-10-02.'), []);
   assert.deepEqual(flags('Maya paid $1,250 on 2026-10-02.', 'Maya paid $2,500 on 2026-10-02.'), ['number']);
   assert.deepEqual(flags('We met 3 clients.', 'We met clients.'), ['number']);
@@ -892,6 +902,7 @@ test('Turkish is a writing language of its own and unknown languages fall back t
 test('the Turkish prompt asks for standard Turkish, no translation and Turkish explanations, and still keeps the proofreading contract', () => {
   const turn = writingTurn('Bugun okula gidiyorum.', 'proofread', preferences(turkish));
   assert.match(turn.system, /Turkish Language Association/); assert.match(turn.system, /Never translate or change the language/); assert.match(turn.system, /every explanation in Turkish/);
+  assert.match(turn.system, /Check it against standard modern Turkish/); assert.doesNotMatch(turn.system, /Preserve Turkish verbal negation/);
   assert.doesNotMatch(turn.system, /American|British/);
   assert.match(turn.system, /"category":"grammar\|spelling\|punctuation"/); assert.match(turn.system, /untrusted data/); assert.match(turn.system, /Do not flag spelling of words in the supplied dictionary/);
   assert.equal(turn.tools, 'none'); assert.equal(turn.session, 'ephemeral'); assert.equal(turn.continuation, null);
@@ -927,7 +938,7 @@ test('the dictionary treats Turkish dotted and dotless i as one letter, and a pr
 test('the controller sends Turkish proofreading, guarded rewrites and opted-in clearer wording with the saved language', async () => {
   const answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]});
   const f = fakeChrome({variant: 'TR', automatic: true, clarity: true, answer}); installController(f.api);
-  const state = (await f.rpc('site-state', null, f.sender)).value; assert.equal(state.variant, 'TR'); assert.equal(state.clarity, true);
+  const state = (await f.rpc('site-state', null, f.sender)).value; assert.equal(state.clarity, true); assert.equal(Object.hasOwn(state, 'variant'), false);
   const port = f.connect({documentId: 'document-three'}); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: 'Bugun okula gidiyorum.', mode: 'proofread'});
   await waitFor(() => port.received.some(x => x.type === 'result'));
   assert.deepEqual(port.received.find(x => x.type === 'result').edits.map(x => x.after), ['Bugün']);
@@ -951,16 +962,19 @@ test('the language is a saved preference: Turkish can be chosen and left again, 
   assert.equal((await save({variant: 'FR'}, {variant: 'TR'})).code, 'INVALID_REQUEST'); assert.equal(f.data.preferences.variant, 'TR');
   assert.equal((await save({variant: 'UK'}, {variant: 'TR'})).ok, true); assert.equal(f.data.preferences.variant, 'UK');
 });
-test('changing the language during a turn cannot deliver a Turkish rewrite under the English guard, even with delayed storage events', async () => {
-  const f = fakeChrome({variant: 'TR', hang: true}); installController(f.api);
-  const port = f.connect(); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: 'Ben gelmedim.', mode: 'improve'});
-  await waitFor(() => f.calls.some(sent));
-  const request = f.calls.find(sent);
-  f.data.preferences.variant = 'US'; // The stored preference changes before Chrome delivers onChanged.
-  f.ports.at(-1).reply(request.id, {type: 'delta', text: '{"rewrite":"Ben geldim."}'});
-  f.ports.at(-1).reply(request.id, {type: 'completed'});
-  await waitFor(() => port.received.some(message => message.code === 'CANCELLED'));
-  assert.equal(port.received.some(message => message.type === 'result'), false);
+test('any saved language change cancels stale delivery, including US/UK and delayed storage events', async () => {
+  for (const [from, to, source, rewrite] of [['TR', 'US', 'Ben gelmedim.', 'Ben geldim.'],
+    ['US', 'UK', 'The color is nice.', 'The colour is nice.'], ['UK', 'US', 'The colour is nice.', 'The color is nice.']]) {
+    const f = fakeChrome({variant: from, hang: true}); installController(f.api);
+    const port = f.connect(); port.onMessage.emit({type: 'start', kind: 'manual', id: crypto.randomUUID(), text: source, mode: 'improve'});
+    await waitFor(() => f.calls.some(sent));
+    const request = f.calls.find(sent);
+    f.data.preferences.variant = to; // The stored preference changes before Chrome delivers onChanged.
+    f.ports.at(-1).reply(request.id, {type: 'delta', text: JSON.stringify({rewrite})});
+    f.ports.at(-1).reply(request.id, {type: 'completed'});
+    await waitFor(() => port.received.some(message => message.code === 'CANCELLED'));
+    assert.equal(port.received.some(message => message.type === 'result'), false);
+  }
 });
 test('Turkish dictionary entries are cased the Turkish way where they are stored and sent, and English entries keep English casing', async () => {
   const tr = preferences({...turkish, dictionary: ['Işık', 'IŞIK', 'İstanbul', 'Ankara']});
