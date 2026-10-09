@@ -61,6 +61,7 @@ function surname(words, at) {
 }
 const questionParticle = word => /^(?:mi|mu)(?:s(?:in|un)(?:iz|uz)?|y(?:di|du|mis|mus)\p{L}*)?$/u.test(foldTurkish(word));
 const indefinite = word => /^(?:hic|kimse(?:yi|ye|nin|den|yle)?)$/u.test(foldTurkish(word));
+const whPredicate = word => /^(?:istiyor|ariyor)(?:um|sun|uz|sunuz|lar)?$/u.test(foldTurkish(word));
 
 // Bind each signal to its clause, so keeping one "değil" or one "gelmedi" while moving it to another
 // subject/predicate is still reported. Punctuation/casing/canonical Unicode are ignored, wording is not.
@@ -74,11 +75,18 @@ function signals(text) {
     const kinds = words.map((word, at) => Math.max(classify(word.text, false, surname(words, at)), classify(foldTurkish(word.text), true, surname(words, at))));
     const strong = words.some((word, at) => kinds[at] === 2 && !indefinite(word.text) && word.text !== 'yoksa');
     for (let at = 0; at < words.length; at++) {
-      if (question && particle && ((indefinite(words[at].text) && !strong) || words[at].text === 'yoksa')) kinds[at] = 0;
+      // Disjunctive yoksa follows an earlier question ("gelecek misin yoksa ...?"). A later
+      // particle alone must not erase conditional absence ("param yoksa ... mi?").
+      if (question && particle && ((indefinite(words[at].text) && !strong)
+          || (words[at].text === 'yoksa' && words.slice(0, at).some(word => questionParticle(word.text))))) kinds[at] = 0;
     }
     // Paired ne coordinates clauses even across commas/semicolons. Bind the whole sentence before
     // splitting those clauses; a lone interrogative ne must not pair with one in another sentence.
-    if (words.filter(word => word.text === 'ne').length >= 2 && !(question && !particle && !strong)) {
+    const paired = words.flatMap((word, at) => word.text === 'ne' ? [at] : []);
+    // Narrow repeated WH questions to recognizable predicates. A question mark alone must
+    // not silence paired negation such as "Ne Ali ne Ayşe geldi?".
+    const whQuestion = question && !particle && !strong && paired.every(at => words[at + 1] && whPredicate(words[at + 1].text));
+    if (paired.length >= 2 && !whQuestion) {
       certain.push(words.map(word => word.text).join(' '));
       continue;
     }
