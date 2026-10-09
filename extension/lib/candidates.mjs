@@ -1,6 +1,6 @@
 import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError, VARIANTS} from './policy.mjs';
 import {languageOf, languagesIn} from './language.mjs';
-import {turkishNegationChanges, turkishVerbForm, foldTurkish} from './turkish-negation.mjs';
+import {turkishNegationChanges, turkishVerbForm, hasTurkishNegation, foldTurkish} from './turkish-negation.mjs';
 import {boundaries} from './boundaries.mjs';
 
 // Bounded recursive JSON parser: JSON.parse alone silently accepts duplicate keys.
@@ -50,7 +50,9 @@ export function strictJSON(source) {
 // so "Maya paid" becoming "Priya paid" or "The invoice was paid" is caught; the price is an occasional flag when a rewrite drops an
 // uncommon first word ("Quickly we left" → "Soon we left"). A new first word in the rewrite is not treated as an added name.
 // Spelled-out numbers and shifts of meaning that keep every tracked token are not detected.
-const NUMBERS = /[%\p{Sc}]?\p{N}+(?:[.,:/-]\p{N}+)*[%\p{Sc}]?/gu;
+// A currency symbol or % belongs to its number whichever side it is on and however far a space (even a no-break one) sets it from the digits.
+const GAP = '[^\\S\\r\\n]*', SYMBOL = '[%\\p{Sc}]';
+const NUMBERS = new RegExp(`(?:${SYMBOL}${GAP})?\\p{N}+(?:[.,:/-]\\p{N}+)*(?:${GAP}${SYMBOL}(?!\\p{N}))?`, 'gu');
 const HANDLES = /[@#][\p{L}\p{N}_]+|https?:\/\/[^\s)]+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.\p{L}{2,}/gu;
 const NEGATIONS = /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|cannot|without)\b|\b\p{L}*n['’]t\b/giu;
 const WORDS = /\p{Lu}[\p{L}\p{M}'’-]*/gu;
@@ -83,31 +85,47 @@ function capitalised(text, turkish) {
   }
   return {all, kept, inner};
 }
-const negations = text => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS), ([token]) => /n['’]t$|^cannot$/u.test(token) ? 'not' : token));
+// "no" and "not" are also Turkish words (a number sign, a note), so they count only where the text has English in it.
+const SHARED_NEGATIONS = new Set(['no', 'not']);
+const negations = (text, shared) => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS), ([token]) => token)
+  .filter(token => shared || !SHARED_NEGATIONS.has(token)).map(token => /n['’]t$|^cannot$/u.test(token) ? 'not' : token));
+// The amounts in a text, a symbol and its digits as one: "€ 5", "5 €" and "5€" are the same amount.
+const amounts = text => tally((text.match(NUMBERS) ?? []).map(match => {
+  const symbols = match.match(/[%\p{Sc}]/gu) ?? [];
+  return match.replace(/[%\p{Sc}\s]/gu, '') + symbols.sort().join('');
+}));
 function requireLanguage(settings) {
   if (!VARIANTS.includes(settings?.variant)) throw new LineleafError('INVALID_REQUEST');
 }
-// One language's guard: what must not change silently in a rewrite of text written in it.
-function guardFlags(source, rewrite, turkish) {
+// One language's guard for names and numbers: what must not change silently in a rewrite of text written in it.
+function nameFlags(source, rewrite, turkish) {
   const flags = [], a = capitalised(source, turkish), b = capitalised(rewrite, turkish);
-  if (!sameCounts(tally(source.match(NUMBERS) ?? []), tally(rewrite.match(NUMBERS) ?? []))) flags.push('number');
+  if (!sameCounts(amounts(source), amounts(rewrite))) flags.push('number');
   if ([...a.kept].some(([word, n]) => (b.all.get(word) ?? 0) < n) || [...b.inner].some(([word, n]) => n > (a.all.get(word) ?? 0))
       || !sameCounts(tally(source.match(HANDLES) ?? []), tally(rewrite.match(HANDLES) ?? []))) flags.push('name');
-  if (turkish) {
+  return flags;
+}
+// Negations are checked wherever they are found, whichever language the text is judged to be in: "Please gelmeyin" and "Ben never geldim" are
+// each mostly one language and negated in the other. The language only decides the doubtful cases, the shared words "no" and "not" for English
+// and every Turkish form the recognizer finds in text with Turkish in it. A form the recognizer reads as Turkish negation is guarded in any text.
+function negationFlags(source, rewrite, {english, turkish}) {
+  const flags = [];
+  if (!sameCounts(negations(source, english), negations(rewrite, english))) flags.push('negation');
+  if (turkish || hasTurkishNegation(source) || hasTurkishNegation(rewrite)) {
     const changes = turkishNegationChanges(source, rewrite);
     if (changes.certain) flags.push('negation');
     else if (changes.ambiguous) flags.push('possible-negation');
-  } else if (!sameCounts(negations(source), negations(rewrite))) flags.push('negation');
+  }
   return flags;
 }
 const FLAG_ORDER = ['number', 'name', 'negation', 'possible-negation'];
-// The guard follows the languages found in the source text (or the `settings.language` a caller has fixed). Text that has both, or says too
-// little to tell, gets both guards and keeps a warning from either, so doubt only adds warnings.
+// Names and numbers follow the languages found in the source text (or the `settings.language` a caller has fixed). Text that has both, or says
+// too little to tell, gets both guards and keeps a warning from either, so doubt only adds warnings.
 export function preservationFlags(source, rewrite, settings) {
   requireLanguage(settings);
-  const {english, turkish} = languagesIn(settings, source), flags = new Set();
-  if (english) for (const flag of guardFlags(source, rewrite, false)) flags.add(flag);
-  if (turkish) for (const flag of guardFlags(source, rewrite, true)) flags.add(flag);
+  const languages = languagesIn(settings, source), flags = new Set(negationFlags(source, rewrite, languages));
+  if (languages.english) for (const flag of nameFlags(source, rewrite, false)) flags.add(flag);
+  if (languages.turkish) for (const flag of nameFlags(source, rewrite, true)) flags.add(flag);
   if (flags.has('negation')) flags.delete('possible-negation');
   return FLAG_ORDER.filter(flag => flags.has(flag));
 }

@@ -136,7 +136,21 @@ test('currency symbols are part of the amount, on either side, in both direction
     for (const mode of REWRITE_MODES) assert.ok(candidates(JSON.stringify({rewrite}), source, mode, tr)[0].flags.includes('number'), mode);
     assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source, rewrite)]}), source, 'clarity', tr), []);
   }
+  // A space between the symbol and the digits, even a no-break one, does not take the symbol out of the amount.
+  for (const [source, rewrite] of [['Fiyat ₺ 100', 'Fiyat $ 100'], ['Fiyat 100 ₺', 'Fiyat 100 $'], ['Fiyat 100\u00a0₺', 'Fiyat 100\u00a0$'], ['Fiyat ₺\u202f100', 'Fiyat 100'],
+    ['İndirim % 50', 'İndirim 50'], ['İndirim 50 %', 'İndirim 50']]) {
+    assert.ok(preservationFlags(source, rewrite, tr).includes('number'), `${source} -> ${rewrite}`);
+    assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source, rewrite)]}), source, 'clarity', tr), [], source);
+  }
   // The symbol kept, or the amount moved with it, is no change.
+  assert.deepEqual(preservationFlags('Fiyat ₺ 100', 'Fiyat ₺100', tr), []);
+  assert.deepEqual(preservationFlags('Fiyat ₺100', 'Fiyat 100 ₺', tr), []);
+  assert.deepEqual(preservationFlags('İndirim %50', 'İndirim 50%', tr), []);
+  // A symbol that opens the next amount is not taken by the number before it.
+  assert.deepEqual(preservationFlags('Adet 3 ₺10', 'Adet 3 adet ₺10', tr), []);
+  assert.deepEqual(preservationFlags('Qty 3 €10 each', 'Qty 3 at €10 each', {variant: 'US'}), []);
+  // A symbol on the next line belongs to what follows it, not to the number above.
+  assert.deepEqual(preservationFlags('Qty 5\n€ per unit', 'Qty 5 pieces\n€ per unit', {variant: 'US'}), []);
   assert.deepEqual(preservationFlags('Fiyat ₺100 oldu', 'Fiyat ₺100 tutarında', tr), []);
   assert.deepEqual(preservationFlags('₺100 ödedim', 'Ödedim: ₺100', tr).filter(flag => flag === 'number'), []);
 });
@@ -144,18 +158,49 @@ test('a capitalised sentence opener that is only a verb form is not a name, and 
   // The opener is capitalised for its place. Only the negation changes, so only the negation is reported.
   assert.deepEqual(preservationFlags('Anlamiyorum', 'Anliyorum', tr), ['negation']);
   assert.deepEqual(preservationFlags('Anlamıyorum.', 'Anlıyorum.', tr), ['negation']);
-  for (const [source, rewrite] of [['Geldim.', 'Geliyorum.'], ['Okuyor.', 'Okudu.'], ['Gidecek.', 'Gitti.'], ['Bilmiş.', 'Biliyor.'], ['Çalışıyorlar.', 'Çalıştılar.'],
+  for (const [source, rewrite] of [['Geldim.', 'Geliyorum.'], ['Okuyor.', 'Okudu.'], ['Gidecek.', 'Gitti.'], ['Çalışıyorlar.', 'Çalıştılar.'],
     ['Bekliyorum.', 'Bekledim.'], ['Başlıyor.', 'Başladı.'], ['Oynuyor.', 'Oynadı.']]) { // the last three lose their final stem vowel before -ıyor
     assert.deepEqual(preservationFlags(source, rewrite, tr), [], `${source} -> ${rewrite}`);
   }
   assert.ok(turkishVerbForm('Anlıyorum') && turkishVerbForm('Anliyorum') && turkishVerbForm('Gelmedim') && turkishVerbForm('Geldim') && turkishVerbForm('Bekliyorum'));
   for (const noun of ['Bekçi', 'Başlık']) assert.equal(turkishVerbForm(noun), false, noun);
+  // A name that is also a verb form is still a name. Durmuş is the reported past of durmak, Aydın a second-person past, Yılmaz and Korkmaz are
+  // negative aorists; each is a common Turkish name, so none is exempt, and dropping or swapping one is reported.
+  for (const name of ['Durmuş', 'Satılmış', 'Aydın', 'Yılmaz', 'Korkmaz', 'Durmaz', 'Gülmez', 'Gelmiş']) assert.equal(turkishVerbForm(name), false, name);
+  for (const [source, rewrite] of [['Durmuş Bey yarın gelecek.', 'Bey yarın gelecek.'], ['Aydın Hanım yarın gelecek.', 'Hanım yarın gelecek.'],
+    ['Yılmaz Bey yarın gelecek.', 'Bey yarın gelecek.'], ['Durmuş Bey yarın gelecek.', 'Mehmet Bey yarın gelecek.']]) {
+    for (const settings of [tr, {variant: 'US'}]) assert.ok(preservationFlags(source, rewrite, settings).includes('name'), `${source} -> ${rewrite}`);
+    for (const mode of REWRITE_MODES) assert.ok(candidates(JSON.stringify({rewrite}), source, mode, {variant: 'US'})[0].flags.length > 0, `${mode}: ${source}`);
+    assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source.split(' ')[0] + ' ', '', '', source.slice(source.indexOf(' ') + 1))]}), source, 'clarity', {variant: 'US'}), []);
+  }
   // Names are not mistaken for verbs, at the start of a sentence or in the middle of one.
   for (const name of ['Ahmet', 'Ankara', 'Ayşe', 'Barış', 'Deniz', 'Kaan', 'Mert', 'Sevgi', 'Yağmur', 'Zeynep']) assert.equal(turkishVerbForm(name), false, name);
   assert.ok(preservationFlags('Ahmet geldi.', 'Ali geldi.', tr).includes('name'));
   assert.ok(preservationFlags('Kaan gelmedi.', 'Mert gelmedi.', tr).includes('name'));
   assert.ok(preservationFlags('Dün Ayşe geldi.', 'Dün Zeynep geldi.', tr).includes('name'));
   assert.ok(preservationFlags('Geldim. Ayşe de geldi.', 'Geldim. Zeynep de geldi.', tr).includes('name'));
+});
+test('a negation is guarded in whichever language it is written, whatever language the text is judged to be', () => {
+  // Mostly one language, negated in the other: the detector sees only the first, and the guard must not depend on it.
+  const us = {variant: 'US'};
+  for (const [source, rewrite, flag] of [['Please gelmeyin.', 'Please gelin.', 'negation'], ['Ben never geldim.', 'Ben geldim.', 'negation'],
+    ['Please gelmeyin.', 'Please gelsin.', 'negation'], ['Please yapma.', 'Please yap.', 'possible-negation'],
+    ['Please do nothing, bunu yapmayın.', 'Please do nothing, bunu yapın.', 'negation'], ['Ben nobody gelmedi.', 'Ben gelmedi.', 'negation'],
+    ['Ben never geldim.', 'Ben always geldim.', 'negation'], ['Please gelmeyin.', 'Please do not come.', 'negation'],
+    ['Please come.', 'Please gelmeyin.', 'negation']]) { // a negation the rewrite brings in is reported too
+    assert.ok(preservationFlags(source, rewrite, us).includes(flag), `${source} -> ${rewrite}`);
+    for (const mode of REWRITE_MODES) assert.ok(candidates(JSON.stringify({rewrite}), source, mode, us)[0].flags.includes(flag), `${mode}: ${source}`);
+    assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source, rewrite)]}), source, 'clarity', us), [], source);
+  }
+  // A language fixed by the caller does not hide a sure English negation either.
+  assert.deepEqual(preservationFlags('Ben never geldim.', 'Ben geldim.', tr), ['negation']);
+  // Nothing is added to text that has no negation, and "No" does not count in a text with no English in it (the forced-language test covers "Not").
+  assert.deepEqual(preservationFlags('Please gelin.', 'Please come.', us), []);
+  assert.deepEqual(preservationFlags('Ben geldim.', 'Ben came.', us), []);
+  assert.deepEqual(preservationFlags('No: 5 numaralı oda.', '5 numaralı oda.', us), []);
+  // A bare -siz ending is English too, so it does not bring the Turkish guard into English text.
+  assert.deepEqual(preservationFlags('I want to emphasize this point.', 'I want to stress this point.', us), []);
+  assert.deepEqual(preservationFlags('Please resize the window first.', 'Please make the window smaller first.', us), []);
 });
 test('automatic Turkish clarity drops polarity/scope changes and keeps an independent valid edit', () => {
   const source = 'Ben gelmedim. Yardım etmek amacıyla aradım.';
@@ -185,7 +230,8 @@ test('the language is required; English behavior and Turkish proofreading source
   }
   // Turkish text is recognised as Turkish whatever the English spelling, so the Turkish guard answers; the English guard alone would miss it.
   assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US'}), ['negation']);
-  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US', language: 'en'}), []);
+  // A fixed language narrows the name rules and the words English and Turkish share; it never switches a negation guard off.
+  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US', language: 'en'}), ['negation']);
   assert.deepEqual(preservationFlags('I do not agree.', 'I disagree.', {variant: 'US'}), ['negation']);
   assert.deepEqual(preservationFlags('John did not agree.', 'John agreed.', tr), []);
   assert.deepEqual(preservationFlags('Not defterimi getir.', 'Defterimi getir.', tr), []);

@@ -1052,6 +1052,13 @@ test('the worker reads the dictionary by the language of the request: a suffixed
 test('a currency symbol is part of the amount in English too: dropping or swapping it warns, keeping it does not', () => {
   const us = preferences({variant: 'US'});
   for (const [source, rewrite] of [['Pay $5 now', 'Pay 5 now'], ['Costs €5', 'Costs £5'], ['It was 12.50£', 'It was 12.50'], ['Pay $5 now', 'Pay 5 dollars now']]) assert.ok(preservationFlags(source, rewrite, us).includes('number'), `${source} -> ${rewrite}`);
+  // A space, even a no-break one, between the symbol and the digits does not take it out of the amount.
+  for (const [source, rewrite] of [['I paid € 5 in total.', 'I spent £ 5 altogether.'], ['I paid 5 € in total.', 'I spent 5 £ altogether.'],
+    ['I paid 5\u00a0€ in total.', 'I spent 5\u00a0£ altogether.'], ['I paid 5\u202f€ in total.', 'I spent 5 altogether.'], ['I paid $ 5 in total.', 'I paid 5 in total.']]) {
+    assert.ok(preservationFlags(source, rewrite, us).includes('number'), `${source} -> ${rewrite}`);
+  }
+  assert.deepEqual(preservationFlags('I paid € 5 in total.', 'I spent € 5 altogether.', us), []);
+  assert.deepEqual(preservationFlags('I paid €5 in total.', 'I spent 5 € altogether.', us), []);
   assert.deepEqual(preservationFlags('Pay $5 now', 'Pay $5 today', us), []);
   assert.deepEqual(preservationFlags('Maya paid $1,250 on Monday.', 'Maya paid $1,250 that Monday.', us), []);
   assert.deepEqual(validateCandidates(JSON.stringify({suggestions: [{before: '$5 now', after: '5 now', left: 'Pay ', right: '.', explanation: 'Shorter.'}]}), 'Pay $5 now.', 'clarity', us), []); // an automatic suggestion that drops it is dropped

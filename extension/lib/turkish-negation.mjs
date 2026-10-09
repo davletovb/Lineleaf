@@ -34,9 +34,9 @@ function verbStem(stem, patterns, depth = 0) {
   return false;
 }
 // 0: no signal, 1: nominal/imperative ambiguity, 2: recognized negative form.
-function classify(word, folded, skipVerb) {
+function classify(word, folded, skipVerb, privative = true) {
   const patterns = PATTERNS[folded ? 1 : 0];
-  if (patterns.privative.test(word)) return 2; // Ali'siz must be checked before excluding proper-name verb roots.
+  if (privative && patterns.privative.test(word)) return 2; // Ali'siz must be checked before excluding proper-name verb roots.
   if (word.includes("'")) return 0;
   if (patterns.lexical.test(word)) return 2;
   if (skipVerb) return 0;
@@ -53,22 +53,31 @@ function classify(word, folded, skipVerb) {
   }
   return 0;
 }
-// A finite verb form: a dictionary verb (with its voice and ability extensions) followed by a progressive, definite-past, reported-past or future
-// marker and an optional person ending, or any form the negation recognizer reads as negative. It exists so that a capitalised sentence opener
+// A finite verb form that no name shares: a dictionary verb (with its voice and ability extensions) followed by a progressive, definite-past or
+// future marker and an optional person ending, or a negative form the negation recognizer reads. It exists so that a capitalised sentence opener
 // that is only a verb ("Anlıyorum", "Geldim") is not counted as a name. Stems that lose their final vowel before -ıyor (anla → anlıyor) are tried
-// with it restored. Aorist and imperative forms are left out: too many nouns look like them.
-const FINITE_END = /^(?:[ıiuü]yor|yor|[dt][ıiuü]|m[ıiuü]ş|y?[ae]c[ae][kğ])(?:m|n|k|nız|niz|nuz|nüz|lar|ler|sın|sin|sun|sün|ız|iz|uz|üz|sınız|siniz|sunuz|sünüz|ım|im|um|üm)?$/u;
+// with it restored. Left out because names look like them: the aorist (Güler, Sever), the imperative (Dursun), the reported past (Durmuş,
+// Satılmış), the second person of the definite past (Aydın) and every negative aorist (Yılmaz, Korkmaz). A doubtful opener stays a name, which
+// at worst adds a warning.
+const FINITE_END = /^(?:[ıiuü]yor|yor|[dt][ıiuü]|y?[ae]c[ae][kğ])(?:m|k|nız|niz|nuz|nüz|lar|ler|sın|sin|sun|sün|ız|iz|uz|üz|sınız|siniz|sunuz|sünüz|ım|im|um|üm)?$/u;
 const FINITE = [FINITE_END, foldedPattern(FINITE_END)];
+const AORIST_NEGATIVE = /m[ae]z/u;
 export function turkishVerbForm(word) {
   const lower = String(word).normalize('NFC').toLocaleLowerCase('tr');
   return [false, true].some(folded => {
     const text = folded ? foldTurkish(lower) : lower, patterns = PATTERNS[folded ? 1 : 0];
-    if (!text.includes("'") && classify(text, folded, false) > 0) return true;
+    if (!text.includes("'") && !AORIST_NEGATIVE.test(text) && classify(text, folded, false) > 0) return true;
     for (let at = 2; at < text.length; at++) {
       if (FINITE[folded ? 1 : 0].test(text.slice(at)) && [text.slice(0, at), text.slice(0, at) + 'a', text.slice(0, at) + 'e'].some(stem => verbStem(stem, patterns))) return true;
     }
     return false;
   });
+}
+// Whether a text holds a Turkish negator or a negated dictionary verb, possibly or certainly. Bare -siz words do not count: English has them
+// ("emphasize", "resize"). The language detector cannot see these words when they stand alone in English text, so the guard asks for them directly.
+export function hasTurkishNegation(text) {
+  const words = Array.from(String(text).normalize('NFC').replace(REFERENCES, ' ').matchAll(WORDS), match => normalize(match[0]));
+  return words.some(word => classify(word, false, false, false) > 0 || classify(foldTurkish(word), true, false, false) > 0);
 }
 const NOT_NAME_PREFIX = new Set('ben sen o biz siz onlar bu şu bunlar şunlar bir ve ama fakat ancak çünkü eğer hem ya veya ne nasıl neden kim hangi lütfen bugün yarın dün şimdi sonra önce'.split(' ').map(foldTurkish));
 const titleCase = word => /^\p{Lu}\p{Ll}+$/u.test(word);

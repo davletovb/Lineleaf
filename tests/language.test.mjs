@@ -15,6 +15,8 @@ const CASES = [
   ['Bu uygun degil, hic sevmedim.', 'tr'], ['İSTANBUL İÇİN BİR ŞEY YOK', 'tr'], ['Merhaba, ben Ayşe.', 'tr'], ['Teşekkürler, çok güzel olmuş', 'tr'],
   ["Ankara'da yaşıyorum ve İstanbul'a gidiyorum", 'tr'],
   // Mixed: both languages carry real evidence, as when a writer switches inside one paragraph.
+  ['Ben never geldim.', 'mixed'], // "never" is English evidence, so the English negation guard is on for it
+  ['Nothing works without power', 'en'],
   ['Meeting’e geç kaldım because the train was late', 'mixed'], ['Merhaba, ben Ayşe. I think we should meet tomorrow, değil mi?', 'mixed'],
   // Too little to tell: a heading, a name, a number, a lone brand, a single Turkish-looking verb.
   ['Quarterly revenue grew significantly', 'unknown'], ['ok', 'unknown'], ['2pm', 'unknown'], ['Ahmet geldi', 'unknown'], ['Audi', 'unknown'], ['', 'unknown'], ['😀 😀', 'unknown'],
