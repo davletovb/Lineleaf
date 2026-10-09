@@ -1,6 +1,10 @@
 import {createHash} from 'node:crypto';
 import {candidates} from '../../extension/lib/candidates.mjs';
-import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS, SPEEDS, PROVIDERS, VARIANTS} from '../../extension/lib/policy.mjs';
+import {validText, exactKeys, MODES, REWRITE_MODES, EFFORTS, SPEEDS, PROVIDERS, VARIANTS, preferences} from '../../extension/lib/policy.mjs';
+// A corpus case names its language and its English spelling in one field: US and UK are English spellings, TR is Turkish text. The case's
+// language is declared, not detected, so a measurement never depends on what the detector makes of a short or odd case.
+export const CASE_VARIANTS = [...VARIANTS, 'TR'];
+export const caseSettings = (c, base = {}) => ({...preferences({...base, variant: c.variant === 'TR' ? 'US' : c.variant}), language: c.variant === 'TR' ? 'tr' : 'en'});
 
 export const sha256 = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest('hex');
 const fail = () => { throw new Error('INVALID_EVALUATION_DATA'); };
@@ -15,11 +19,11 @@ export function validateCorpus(corpus) {
   const seen = new Set(), texts = new Set();
   for (const c of corpus.cases) {
     if (!exactKeys(c, ['id', 'source', 'mode', 'variant', 'strata', 'protected', 'proposal']) || !id(c.id) || seen.has(c.id)
-        || !validText(c.source) || !MODES.includes(c.mode) || !VARIANTS.includes(c.variant)
+        || !validText(c.source) || !MODES.includes(c.mode) || !CASE_VARIANTS.includes(c.variant)
         || !Array.isArray(c.strata) || !c.strata.length || !c.strata.every(x => STRATA.includes(x))
         || !Array.isArray(c.protected) || c.protected.length > 32 || !c.protected.every(x => validText(x, 120) && c.source.includes(x))) fail();
     const key = `${c.mode}:${c.variant}:${c.source}`; if (texts.has(key)) fail(); texts.add(key); seen.add(c.id);
-    candidates(JSON.stringify(c.proposal), c.source, c.mode, {variant: c.variant});
+    candidates(JSON.stringify(c.proposal), c.source, c.mode, caseSettings(c));
     if (c.mode === 'shorter' && c.proposal.rewrite.length >= c.source.length) fail();
   }
   const rewrites = corpus.cases.filter(c => REWRITE_MODES.includes(c.mode));
@@ -43,8 +47,8 @@ export function validateLabels(corpus, labels) {
       if (row.reference !== null) fail();
       rejected.push(row.id); result.set(row.id, []); continue;
     }
-    const edits = candidates(JSON.stringify(row.reference), c.source, c.mode, {variant: c.variant});
-    const unchanged = sha256(edits) === sha256(candidates(JSON.stringify(c.proposal), c.source, c.mode, {variant: c.variant}));
+    const edits = candidates(JSON.stringify(row.reference), c.source, c.mode, caseSettings(c));
+    const unchanged = sha256(edits) === sha256(candidates(JSON.stringify(c.proposal), c.source, c.mode, caseSettings(c)));
     if ((row.decision === 'approved') !== unchanged) fail();
     result.set(row.id, edits);
   }
@@ -118,13 +122,13 @@ function changed(source, edits) { for (const e of [...edits].reverse()) source =
 export function score(corpus, run, {labels = null, judgments = null, acceptance = null} = {}) {
   validateCorpus(corpus); validateRun(corpus, run);
   const labelReview = labels ? validateLabels(corpus, labels) : null;
-  const references = labelReview?.references ?? new Map(corpus.cases.map(c => [c.id, candidates(JSON.stringify(c.proposal), c.source, c.mode, {variant: c.variant})]));
+  const references = labelReview?.references ?? new Map(corpus.cases.map(c => [c.id, candidates(JSON.stringify(c.proposal), c.source, c.mode, caseSettings(c))]));
   const minimumRecall = acceptance ? validateAcceptance(corpus, run, acceptance) : null;
   const decoded = new Map(), invalid = [];
   for (const row of run.rows) {
     if (row.status !== 'completed') { if (row.code === 'INVALID_OUTPUT') invalid.push(row.id); continue; }
     const c = corpus.cases.find(x => x.id === row.id);
-    try { decoded.set(c.id, candidates(row.response, c.source, c.mode, {variant: c.variant})); } catch { invalid.push(c.id); }
+    try { decoded.set(c.id, candidates(row.response, c.source, c.mode, caseSettings(c))); } catch { invalid.push(c.id); }
   }
   const reviewed = judgments ? validateJudgments(corpus, run, judgments, decoded) : null;
   const metrics = {proofread: {cases: 0, expected: 0, emitted: 0, referenceMatches: 0, humanCorrect: 0, falsePositives: 0},
@@ -230,7 +234,7 @@ export function reviewTemplates(corpus, run) {
     labels: {schema: 1, corpusHash: sha256(corpus), review: {...review}, cases: corpus.cases.map(c => ({id: c.id, decision: 'pending', reference: structuredClone(c.proposal)}))},
     judgments: {schema: 1, runId: run.id, runHash: sha256(run), review: {...review}, cases: corpus.cases.map(c => {
       const row = run.rows.find(x => x.id === c.id); let edits = [];
-      try { if (row?.status === 'completed') edits = candidates(row.response, c.source, c.mode, {variant: c.variant}); } catch { /* Never preapprove a failed response. */ }
+      try { if (row?.status === 'completed') edits = candidates(row.response, c.source, c.mode, caseSettings(c)); } catch { /* Never preapprove a failed response. */ }
       return {id: c.id, suggestions: edits.map(() => ({correct: null, explanationAccurate: null})), meaningPreserved: null};
     })}};
 }

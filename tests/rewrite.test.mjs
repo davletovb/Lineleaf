@@ -45,13 +45,12 @@ test('a Turkish inline rewrite warns about negation, stays advisory, and preserv
     ['Ali gelme.', 'Ali gel.', 'Ali gelme!']
   ]) {
     await load();
-    await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
     await rewriteAnswer(flipped); await useTextarea(source); await openCard();
     assert.equal(await inline.locator('[data-rewrite]').count(), 6);
     await press('Improve it'); await suggested();
     assert.match(await inline.locator('.warn').textContent(), /a (?:possible )?negation/);
     assert.equal(await page.locator('#textarea').inputValue(), source);
-    assert.match((await page.evaluate(() => fixture.worker.turns))[0].params.system, /Turkish verbal negation/);
+    assert.match((await page.evaluate(() => fixture.worker.turns))[0].params.system, /Preserve (?:Turkish verbal )?negation/);
     await press('Back');
     // Back closes the card when there are no proofreading suggestions to restore.
     await rewriteAnswer(preserved); await openCard(); await press('Improve it'); await suggested();

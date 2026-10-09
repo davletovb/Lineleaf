@@ -4,7 +4,8 @@ import {candidates, preservationFlags} from '../extension/lib/candidates.mjs';
 import {turkishNegationSignals, turkishNegationChanged} from '../extension/lib/turkish-negation.mjs';
 import {REWRITE_MODES} from '../extension/lib/policy.mjs';
 
-const tr = {variant: 'TR'};
+// The language is normally detected from the text; these tests fix it so each guard is tested on its own.
+const tr = {variant: 'US', language: 'tr'};
 const pairs = [
   ['gelmedi', 'geldi'], ['gelmedim', 'geldim'], ['gelmiyor', 'geliyor'], ['gitmiyorum', 'gidiyorum'],
   ['okumuyor', 'okuyor'], ['görmüyor', 'görüyor'], ['gelmeyecek', 'gelecek'], ['gelmeyeceğim', 'geleceğim'],
@@ -155,7 +156,9 @@ test('the language is required; English behavior and Turkish proofreading source
     assert.throws(() => candidates('{"rewrite":"ben geldim"}', 'ben gelmedim', 'improve', settings), /INVALID_REQUEST/);
     assert.throws(() => candidates('{"corrections":[]}', 'ben gelmedim', 'proofread', settings), /INVALID_REQUEST/);
   }
-  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US'}), []);
+  // Turkish text is recognised as Turkish whatever the English spelling, so the Turkish guard answers; the English guard alone would miss it.
+  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US'}), ['negation']);
+  assert.deepEqual(preservationFlags('ben gelmedim', 'ben geldim', {variant: 'US', language: 'en'}), []);
   assert.deepEqual(preservationFlags('I do not agree.', 'I disagree.', {variant: 'US'}), ['negation']);
   assert.deepEqual(preservationFlags('John did not agree.', 'John agreed.', tr), []);
   assert.deepEqual(preservationFlags('Not defterimi getir.', 'Defterimi getir.', tr), []);

@@ -191,7 +191,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
       if (signal.aborted) throw new LineleafError('CANCELLED');
       if (final.settings.provider !== provider || final.settings.variant !== writingVariant) throw new LineleafError('CANCELLED');
       timing.validating();
-      const edits = filterDictionary(candidates(answer, request.text, request.mode, final.settings), final.settings);
+      const edits = filterDictionary(candidates(answer, request.text, request.mode, final.settings), final.settings, request.text);
       void saveTiming('completed');
       send(peer.port, {type: 'result', id: request.id, edits});
       if (automaticHold[provider]) { automaticHold[provider] = 0; await api.storage.session.set({automaticHold: {...automaticHold}}).catch(() => {}); }
@@ -274,9 +274,8 @@ export function installController(api, {now = Date.now, clock = () => performanc
           if (!PROVIDERS.every(id => ['model', 'effort', 'speed', 'allowCloud'].every(field => p.expected[key][id][field] === settings.providerSettings[id][field]))) throw new LineleafError('SETTINGS_CHANGED');
         } else if (settings[key] !== p.expected[key]) throw new LineleafError('SETTINGS_CHANGED');
       }
-      const normalize = word => dictionaryWord(word, validated.variant); // Under the language the settings will have once saved.
-      const remove = new Set(p.dictionary.remove.map(normalize));
-      const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(normalize)])];
+      const remove = new Set(p.dictionary.remove.map(dictionaryWord));
+      const dictionary = [...new Set([...settings.dictionary.filter(word => !remove.has(word)), ...p.dictionary.add.map(dictionaryWord)])];
       if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
       const bank = {...settings.providerSettings, ...patches, [target]: providerSettings(validated, target)};
       const next = preferences({...validated, providerSettings: bank, dictionary});
@@ -347,7 +346,7 @@ export function installController(api, {now = Date.now, clock = () => performanc
     const operation = mutations.catch(() => {}).then(async () => {
       const {settings} = await eligible(sender, true), p = message.payload;
       if (message.type === 'add-word' && exactKeys(p, ['word']) && dictionaryWord(p.word)) {
-        const dictionary = [...new Set([...settings.dictionary, dictionaryWord(p.word, settings.variant)])];
+        const dictionary = [...new Set([...settings.dictionary, dictionaryWord(p.word)])];
         if (dictionary.length > 500) throw new LineleafError('INVALID_REQUEST');
         await api.storage.local.set({preferences: {...settings, dictionary}}); return true;
       }

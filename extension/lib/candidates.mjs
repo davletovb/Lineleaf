@@ -1,4 +1,5 @@
-import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError, isTurkish, VARIANTS} from './policy.mjs';
+import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError, VARIANTS} from './policy.mjs';
+import {languageOf, languagesIn} from './language.mjs';
 import {turkishNegationChanges, foldTurkish} from './turkish-negation.mjs';
 import {boundaries} from './boundaries.mjs';
 
@@ -65,9 +66,9 @@ const tally = (items) => { const counts = new Map(); for (const item of items) c
 const sameCounts = (a, b) => a.size === b.size && [...a].every(([key, count]) => b.get(key) === count);
 // Occurrence counts of capitalised words: `all` every one; `kept` those that count as names (sentence openers and "I" excluded);
 // `inner` the kept ones that do not begin a sentence. Counting occurrences means "Maya thanked Maya" → "Maya thanked" is a change.
-function capitalised(text, settings) {
+function capitalised(text, turkish) {
   const all = new Map(), kept = new Map(), inner = new Map(), add = (map, word) => map.set(word, (map.get(word) ?? 0) + 1);
-  const turkish = isTurkish(settings), openers = turkish ? TURKISH_OPENERS : OPENERS;
+  const openers = turkish ? TURKISH_OPENERS : OPENERS;
   if (turkish) text = text.normalize('NFC');
   for (const match of text.matchAll(WORDS)) {
     const word = match[0].replace(turkish ? /['’].*$/u : /['’]s?$/iu, ''), head = word.replace(/['’].*$/u, '');
@@ -85,18 +86,29 @@ const negations = text => tally(Array.from(text.toLowerCase().matchAll(NEGATIONS
 function requireLanguage(settings) {
   if (!VARIANTS.includes(settings?.variant)) throw new LineleafError('INVALID_REQUEST');
 }
-export function preservationFlags(source, rewrite, settings) {
-  requireLanguage(settings);
-  const flags = [], a = capitalised(source, settings), b = capitalised(rewrite, settings);
+// One language's guard: what must not change silently in a rewrite of text written in it.
+function guardFlags(source, rewrite, turkish) {
+  const flags = [], a = capitalised(source, turkish), b = capitalised(rewrite, turkish);
   if (!sameCounts(tally(source.match(NUMBERS) ?? []), tally(rewrite.match(NUMBERS) ?? []))) flags.push('number');
   if ([...a.kept].some(([word, n]) => (b.all.get(word) ?? 0) < n) || [...b.inner].some(([word, n]) => n > (a.all.get(word) ?? 0))
       || !sameCounts(tally(source.match(HANDLES) ?? []), tally(rewrite.match(HANDLES) ?? []))) flags.push('name');
-  if (isTurkish(settings)) {
+  if (turkish) {
     const changes = turkishNegationChanges(source, rewrite);
     if (changes.certain) flags.push('negation');
     else if (changes.ambiguous) flags.push('possible-negation');
   } else if (!sameCounts(negations(source), negations(rewrite))) flags.push('negation');
   return flags;
+}
+const FLAG_ORDER = ['number', 'name', 'negation', 'possible-negation'];
+// The guard follows the languages found in the source text (or the `settings.language` a caller has fixed). Text that has both, or says too
+// little to tell, gets both guards and keeps a warning from either, so doubt only adds warnings.
+export function preservationFlags(source, rewrite, settings) {
+  requireLanguage(settings);
+  const {english, turkish} = languagesIn(settings, source), flags = new Set();
+  if (english) for (const flag of guardFlags(source, rewrite, false)) flags.add(flag);
+  if (turkish) for (const flag of guardFlags(source, rewrite, true)) flags.add(flag);
+  if (flags.has('negation')) flags.delete('possible-negation');
+  return FLAG_ORDER.filter(flag => flags.has(flag));
 }
 const EXPLANATIONS = {
   improve: 'Optional improvement for clarity and flow. Review facts and meaning before accepting.',
