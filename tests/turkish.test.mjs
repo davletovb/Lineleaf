@@ -18,7 +18,11 @@ const pairs = [
   ['yok', 'var'], ['yoktu', 'vardı'], ['yokmuş', 'varmış'], ['yoksunuz', 'varsınız'],
   ['asla kabul etmem', 'kabul ederim'], ['hiç gelmedi', 'geldi'], ['hiçbir sorun yok', 'sorun var'],
   ['hayır', 'evet'], ['kimse gelmedi', 'herkes geldi'], ['izinsiz', 'izinli'], ['izinsizdi', 'izinliydi'], ['umutsuzluk', 'umut'],
-  ['ne ali ne ayşe geldi', 'ali ve ayşe geldi']
+  ['ne ali ne ayşe geldi', 'ali ve ayşe geldi'],
+  ['ne yağmur yağdı, ne kar', 'yağmur ve kar yağdı'],
+  ['ne yağmur yağdı; ne kar', 'yağmur ve kar yağdı'],
+  ['ne yağmur yağdı: ne kar', 'yağmur ve kar yağdı'],
+  ['ne yağmur, ne kar, ne dolu yağdı', 'yağmur, kar ve dolu yağdı']
 ];
 test('Turkish verbal, lexical, inability and privative negations flag removals and additions in every rewrite mode', () => {
   for (const [negative, positive] of pairs) {
@@ -29,6 +33,21 @@ test('Turkish verbal, lexical, inability and privative negations flag removals a
         assert.ok(edit.flags.includes('negation'), `${mode}: ${source} → ${rewrite}`);
       }
     }
+  }
+});
+test('paired ne spans coordinated clauses, preserves scope and stops at sentence boundaries', () => {
+  const source = 'Ne yağmur yağdı, ne kar.';
+  assert.deepEqual(turkishNegationSignals(source), ['ne yağmur yağdı ne kar']);
+  for (const rewrite of ['Ne yağmur yağdı; ne kar!', 'ne yağmur yağdı ne kar']) {
+    assert.equal(turkishNegationChanged(source, rewrite), false, rewrite);
+  }
+  for (const rewrite of ['Yağmur yağdı, ne kar.', 'Ne yağmur yağdı, kar yağdı.',
+    'Ne yağmur yağdı, ne dolu.', 'Yağmur yağdı, kar yağdı. Ne dolu yağdı, ne sis.']) {
+    assert.equal(turkishNegationChanged(source, rewrite), true, rewrite);
+  }
+  for (const text of ['Ne zaman geldi?', 'Ne zaman geldi? Ne getirdi?', 'Ne getirdi. Ne zaman geldi.',
+    'Ne getirdi\nNe zaman geldi', '@ne geldi, #ne getirdi']) {
+    assert.deepEqual(turkishNegationSignals(text), [], text);
   }
 });
 test('negation stays attached to its clause, even when the negative word and total count are unchanged', () => {
@@ -81,6 +100,13 @@ test('automatic Turkish clarity drops polarity/scope changes and keeps an indepe
   }
   const shifted = 'Ali geldi, Ayşe gelmedi.';
   assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion('geldi, Ayşe gelmedi', 'gelmedi, Ayşe geldi', 'Ali ', '.')]}), shifted, 'clarity', tr), []);
+  const paired = 'Ne yağmur yağdı, ne kar. Yardım etmek amacıyla aradım.';
+  const pairedEdits = candidates(JSON.stringify({suggestions: [
+    suggestion('Ne yağmur yağdı, ne kar', 'Yağmur ve kar yağdı', '', '.'),
+    suggestion('etmek amacıyla', 'etmek için', 'Yardım ', ' aradım.')]}), paired, 'clarity', tr);
+  assert.deepEqual(pairedEdits.map(edit => edit.after), ['etmek için']);
+  assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion('ne ', '', 'yağmur yağdı, ', 'kar.')]}),
+    'Ne yağmur yağdı, ne kar.', 'clarity', tr), []);
   // Check the entire source, including when the model changes only a suffix inside the negative verb.
   assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion('me', '', 'Ben gel', 'dim.')]}), 'Ben gelmedim.', 'clarity', tr), []);
 });

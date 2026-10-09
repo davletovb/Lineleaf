@@ -35,20 +35,26 @@ const text = host => page.locator(host).innerText().then(value => value.replace(
 const line = host => text(host).then(value => value.split('\n').find(row => row.startsWith('He ')));
 
 test('a Turkish inline rewrite warns about negation, stays advisory, and preserves Replace and Undo for an unchanged negative clause', async () => {
-  await load();
-  await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
-  await rewriteAnswer('Ben geldim.'); await useTextarea('Ben gelmedim.'); await openCard();
-  assert.equal(await inline.locator('[data-rewrite]').count(), 6);
-  await press('Improve it'); await suggested();
-  assert.match(await inline.locator('.warn').textContent(), /a negation/);
-  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim.');
-  assert.match((await page.evaluate(() => fixture.worker.turns))[0].params.system, /Turkish verbal negation/);
-  await press('Back');
-  await rewriteAnswer('Ben gelmedim!'); await press('Improve it'); await suggested();
-  assert.equal(await inline.locator('.warn').count(), 0);
-  await press('Replace'); await inline.button('Undo last edit').waitFor();
-  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim!');
-  await press('Undo last edit'); assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim.');
+  for (const [source, flipped, preserved] of [
+    ['Ben gelmedim.', 'Ben geldim.', 'Ben gelmedim!'],
+    ['Ne yağmur yağdı, ne kar.', 'Yağmur ve kar yağdı.', 'Ne yağmur yağdı, ne kar!']
+  ]) {
+    await load();
+    await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
+    await rewriteAnswer(flipped); await useTextarea(source); await openCard();
+    assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+    await press('Improve it'); await suggested();
+    assert.match(await inline.locator('.warn').textContent(), /a negation/);
+    assert.equal(await page.locator('#textarea').inputValue(), source);
+    assert.match((await page.evaluate(() => fixture.worker.turns))[0].params.system, /Turkish verbal negation/);
+    await press('Back');
+    // Back closes the card when there are no proofreading suggestions to restore.
+    await rewriteAnswer(preserved); await openCard(); await press('Improve it'); await suggested();
+    assert.equal(await inline.locator('.warn').count(), 0);
+    await press('Replace'); await inline.button('Undo last edit').waitFor();
+    assert.equal(await page.locator('#textarea').inputValue(), preserved);
+    await press('Undo last edit'); assert.equal(await page.locator('#textarea').inputValue(), source);
+  }
 });
 // Put the field in focus with its caret at the end (or a selection) the way a user would.
 async function useTextarea(value, selection = null) {

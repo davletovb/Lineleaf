@@ -47,20 +47,22 @@ async function press(name) { await inline.button(name).evaluate(el => el.focus()
 const openCard = async () => { await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor(); };
 const underlineCount = n => inline.locator('.layer').waitFor((el, count) => el.querySelectorAll('.underline').length === count, n);
 
-test('Turkish automatic clarity drops a polarity change and keeps an independent wording improvement', async () => {
+test('Turkish automatic clarity drops verbal and punctuated paired negation changes and keeps an independent wording improvement', async () => {
   await load();
   await page.evaluate(() => fixture.worker.rpc('save-settings', {changes: {variant: 'TR'}, expected: {variant: 'US'}, dictionary: {add: [], remove: []}}));
-  await answers(wording(['gelmedim', 'geldim', 'Ben ', '.'], ['etmek amacıyla', 'etmek için', 'Yardım ', ' aradım.']), []);
-  await typeInField('Ben gelmedim. Yardım etmek amacıyla aradım.');
+  await answers(wording(['gelmedim', 'geldim', 'Ben ', '.'],
+    ['Ne yağmur yağdı, ne kar', 'Yağmur ve kar yağdı', '', '.'],
+    ['etmek amacıyla', 'etmek için', 'Yardım ', ' aradım.']), []);
+  await typeInField('Ben gelmedim. Ne yağmur yağdı, ne kar. Yardım etmek amacıyla aradım.');
   await page.waitForFunction(() => fixture.worker.turns.length === 1 && fixture.checks[0]?.mode === 'proofread');
   await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').startsWith('No corrections suggested.'));
   await skipInterval(); await underlineCount(1);
   assert.deepEqual((await requests()).map(request => request.mode), ['proofread', 'clarity']);
   assert.equal(await underlines('clarity'), 1); await openCard();
   assert.match(await inline.locator('.change').textContent(), /etmek amacıyla → etmek için/);
-  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim. Yardım etmek amacıyla aradım. ');
+  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim. Ne yağmur yağdı, ne kar. Yardım etmek amacıyla aradım. ');
   await press('Accept');
-  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim. Yardım etmek için aradım. ');
+  assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim. Ne yağmur yağdı, ne kar. Yardım etmek için aradım. ');
 });
 
 test('off by default: with only automatic checking on, a paragraph gets corrections and never a wording request', async () => {

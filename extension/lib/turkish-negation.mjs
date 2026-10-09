@@ -42,9 +42,18 @@ function negative(word) {
 // Unlisted roots, stress-dependent readings and implicit pragmatics still require human review.
 export function turkishNegationSignals(text) {
   const signals = [];
-  for (const clause of normalize(text).replace(REFERENCES, ' ').split(/[.!?…;,:\n\r]+/u)) {
-    const words = Array.from(clause.matchAll(WORDS), match => match[0]);
-    if (words.some(negative) || words.filter(word => word === 'ne').length >= 2) signals.push(words.join(' '));
+  for (const sentence of normalize(text).replace(REFERENCES, ' ').split(/[.!?…\n\r]+/u)) {
+    const words = Array.from(sentence.matchAll(WORDS), match => match[0]);
+    // Paired ne coordinates clauses even across commas/semicolons. Bind the whole sentence before
+    // splitting those clauses; a lone interrogative ne must not pair with one in another sentence.
+    if (words.filter(word => word === 'ne').length >= 2) {
+      signals.push(words.join(' '));
+      continue;
+    }
+    for (const clause of sentence.split(/[;,:]+/u)) {
+      const clauseWords = Array.from(clause.matchAll(WORDS), match => match[0]);
+      if (clauseWords.some(negative)) signals.push(clauseWords.join(' '));
+    }
   }
   return signals;
 }
