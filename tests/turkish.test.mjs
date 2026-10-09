@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {candidates, preservationFlags} from '../extension/lib/candidates.mjs';
-import {turkishNegationSignals, turkishNegationChanged} from '../extension/lib/turkish-negation.mjs';
+import {turkishNegationSignals, turkishNegationChanged, turkishVerbForm} from '../extension/lib/turkish-negation.mjs';
 import {REWRITE_MODES} from '../extension/lib/policy.mjs';
 
 // The language is normally detected from the text; these tests fix it so each guard is tested on its own.
@@ -129,6 +129,33 @@ test('Turkish percentage signs are facts, in both directions and all style modes
     for (const mode of REWRITE_MODES) assert.ok(candidates(JSON.stringify({rewrite}), source, mode, tr)[0].flags.includes('number'));
     assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source, rewrite)]}), source, 'clarity', tr), []);
   }
+});
+test('currency symbols are part of the amount, on either side, in both directions and all style modes', () => {
+  for (const [source, rewrite] of [['Fiyat ₺100', 'Fiyat 100'], ['Fiyat 100₺', 'Fiyat 100'], ['Fiyat 100', 'Fiyat ₺100'], ['Fiyat ₺100', 'Fiyat $100'], ['Fiyat 12,50₺', 'Fiyat 12,50']]) {
+    assert.ok(preservationFlags(source, rewrite, tr).includes('number'), `${source} -> ${rewrite}`);
+    for (const mode of REWRITE_MODES) assert.ok(candidates(JSON.stringify({rewrite}), source, mode, tr)[0].flags.includes('number'), mode);
+    assert.deepEqual(candidates(JSON.stringify({suggestions: [suggestion(source, rewrite)]}), source, 'clarity', tr), []);
+  }
+  // The symbol kept, or the amount moved with it, is no change.
+  assert.deepEqual(preservationFlags('Fiyat ₺100 oldu', 'Fiyat ₺100 tutarında', tr), []);
+  assert.deepEqual(preservationFlags('₺100 ödedim', 'Ödedim: ₺100', tr).filter(flag => flag === 'number'), []);
+});
+test('a capitalised sentence opener that is only a verb form is not a name, and real names still are', () => {
+  // The opener is capitalised for its place. Only the negation changes, so only the negation is reported.
+  assert.deepEqual(preservationFlags('Anlamiyorum', 'Anliyorum', tr), ['negation']);
+  assert.deepEqual(preservationFlags('Anlamıyorum.', 'Anlıyorum.', tr), ['negation']);
+  for (const [source, rewrite] of [['Geldim.', 'Geliyorum.'], ['Okuyor.', 'Okudu.'], ['Gidecek.', 'Gitti.'], ['Bilmiş.', 'Biliyor.'], ['Çalışıyorlar.', 'Çalıştılar.'],
+    ['Bekliyorum.', 'Bekledim.'], ['Başlıyor.', 'Başladı.'], ['Oynuyor.', 'Oynadı.']]) { // the last three lose their final stem vowel before -ıyor
+    assert.deepEqual(preservationFlags(source, rewrite, tr), [], `${source} -> ${rewrite}`);
+  }
+  assert.ok(turkishVerbForm('Anlıyorum') && turkishVerbForm('Anliyorum') && turkishVerbForm('Gelmedim') && turkishVerbForm('Geldim') && turkishVerbForm('Bekliyorum'));
+  for (const noun of ['Bekçi', 'Başlık']) assert.equal(turkishVerbForm(noun), false, noun);
+  // Names are not mistaken for verbs, at the start of a sentence or in the middle of one.
+  for (const name of ['Ahmet', 'Ankara', 'Ayşe', 'Barış', 'Deniz', 'Kaan', 'Mert', 'Sevgi', 'Yağmur', 'Zeynep']) assert.equal(turkishVerbForm(name), false, name);
+  assert.ok(preservationFlags('Ahmet geldi.', 'Ali geldi.', tr).includes('name'));
+  assert.ok(preservationFlags('Kaan gelmedi.', 'Mert gelmedi.', tr).includes('name'));
+  assert.ok(preservationFlags('Dün Ayşe geldi.', 'Dün Zeynep geldi.', tr).includes('name'));
+  assert.ok(preservationFlags('Geldim. Ayşe de geldi.', 'Geldim. Zeynep de geldi.', tr).includes('name'));
 });
 test('automatic Turkish clarity drops polarity/scope changes and keeps an independent valid edit', () => {
   const source = 'Ben gelmedim. Yardım etmek amacıyla aradım.';

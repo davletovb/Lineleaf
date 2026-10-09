@@ -1,6 +1,6 @@
 import {exactKeys, validText, MAX_OUTPUT, MAY_STAY_SAME, CLARITY_MAX, LineleafError, VARIANTS} from './policy.mjs';
 import {languageOf, languagesIn} from './language.mjs';
-import {turkishNegationChanges, foldTurkish} from './turkish-negation.mjs';
+import {turkishNegationChanges, turkishVerbForm, foldTurkish} from './turkish-negation.mjs';
 import {boundaries} from './boundaries.mjs';
 
 // Bounded recursive JSON parser: JSON.parse alone silently accepts duplicate keys.
@@ -50,7 +50,7 @@ export function strictJSON(source) {
 // so "Maya paid" becoming "Priya paid" or "The invoice was paid" is caught; the price is an occasional flag when a rewrite drops an
 // uncommon first word ("Quickly we left" → "Soon we left"). A new first word in the rewrite is not treated as an added name.
 // Spelled-out numbers and shifts of meaning that keep every tracked token are not detected.
-const NUMBERS = /%?\p{N}+(?:[.,:/-]\p{N}+)*%?/gu;
+const NUMBERS = /[%\p{Sc}]?\p{N}+(?:[.,:/-]\p{N}+)*[%\p{Sc}]?/gu;
 const HANDLES = /[@#][\p{L}\p{N}_]+|https?:\/\/[^\s)]+|[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.\p{L}{2,}/gu;
 const NEGATIONS = /\b(?:not|no|never|none|nobody|nothing|nowhere|neither|nor|cannot|without)\b|\b\p{L}*n['’]t\b/giu;
 const WORDS = /\p{Lu}[\p{L}\p{M}'’-]*/gu;
@@ -77,6 +77,7 @@ function capitalised(text, turkish) {
     const before = text.slice(0, match.index);
     const opening = before.trim() === '' || /[.!?…:]["'”’)\]]*\s+$/u.test(before) || /\n\s*$/.test(before);
     if (opening && openers.has(turkish ? foldTurkish(head.toLocaleLowerCase('tr')) : head)) continue;
+    if (opening && turkish && turkishVerbForm(head)) continue; // "Anlamiyorum" opens the sentence; it is not a name.
     add(kept, word);
     if (!opening) add(inner, word);
   }

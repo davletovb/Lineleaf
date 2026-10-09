@@ -53,6 +53,23 @@ function classify(word, folded, skipVerb) {
   }
   return 0;
 }
+// A finite verb form: a dictionary verb (with its voice and ability extensions) followed by a progressive, definite-past, reported-past or future
+// marker and an optional person ending, or any form the negation recognizer reads as negative. It exists so that a capitalised sentence opener
+// that is only a verb ("Anlıyorum", "Geldim") is not counted as a name. Stems that lose their final vowel before -ıyor (anla → anlıyor) are tried
+// with it restored. Aorist and imperative forms are left out: too many nouns look like them.
+const FINITE_END = /^(?:[ıiuü]yor|yor|[dt][ıiuü]|m[ıiuü]ş|y?[ae]c[ae][kğ])(?:m|n|k|nız|niz|nuz|nüz|lar|ler|sın|sin|sun|sün|ız|iz|uz|üz|sınız|siniz|sunuz|sünüz|ım|im|um|üm)?$/u;
+const FINITE = [FINITE_END, foldedPattern(FINITE_END)];
+export function turkishVerbForm(word) {
+  const lower = String(word).normalize('NFC').toLocaleLowerCase('tr');
+  return [false, true].some(folded => {
+    const text = folded ? foldTurkish(lower) : lower, patterns = PATTERNS[folded ? 1 : 0];
+    if (!text.includes("'") && classify(text, folded, false) > 0) return true;
+    for (let at = 2; at < text.length; at++) {
+      if (FINITE[folded ? 1 : 0].test(text.slice(at)) && [text.slice(0, at), text.slice(0, at) + 'a', text.slice(0, at) + 'e'].some(stem => verbStem(stem, patterns))) return true;
+    }
+    return false;
+  });
+}
 const NOT_NAME_PREFIX = new Set('ben sen o biz siz onlar bu şu bunlar şunlar bir ve ama fakat ancak çünkü eğer hem ya veya ne nasıl neden kim hangi lütfen bugün yarın dün şimdi sonra önce'.split(' ').map(foldTurkish));
 const titleCase = word => /^\p{Lu}\p{Ll}+$/u.test(word);
 function surname(words, at) {

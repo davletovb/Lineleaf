@@ -1046,3 +1046,10 @@ test('the worker reads the dictionary by the language of the request: a suffixed
   assert.equal(await run('Ben Ankara\'da yaşıyorum ama çok pahalı.', 'Ankara\'da', 'Ankara\'ya'), 0); // Turkish: "Ankara" is the word, so the edit is hidden
   assert.equal(await run('We met in Ankara\'da with the rest of them, but it was far.', 'Ankara\'da', 'Ankara\'ya'), 1); // English: read as one word, so it is kept
 });
+test('a currency symbol is part of the amount in English too: dropping or swapping it warns, keeping it does not', () => {
+  const us = preferences({variant: 'US'});
+  for (const [source, rewrite] of [['Pay $5 now', 'Pay 5 now'], ['Costs €5', 'Costs £5'], ['It was 12.50£', 'It was 12.50'], ['Pay $5 now', 'Pay 5 dollars now']]) assert.ok(preservationFlags(source, rewrite, us).includes('number'), `${source} -> ${rewrite}`);
+  assert.deepEqual(preservationFlags('Pay $5 now', 'Pay $5 today', us), []);
+  assert.deepEqual(preservationFlags('Maya paid $1,250 on Monday.', 'Maya paid $1,250 that Monday.', us), []);
+  assert.deepEqual(validateCandidates(JSON.stringify({suggestions: [{before: '$5 now', after: '5 now', left: 'Pay ', right: '.', explanation: 'Shorter.'}]}), 'Pay $5 now.', 'clarity', us), []); // an automatic suggestion that drops it is dropped
+});
