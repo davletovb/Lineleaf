@@ -55,9 +55,14 @@ const CONTRAST = '(' + function (el) {
   const [a, b] = [lum(rgb(getComputedStyle(el).color)), lum(background)].sort((x, y) => y - x); return (a + 0.05) / (b + 0.05);
 }.toString() + ')';
 const TYPES = {'.html': 'text/html', '.css': 'text/css', '.mjs': 'text/javascript', '.js': 'text/javascript', '.png': 'image/png', '.svg': 'image/svg+xml'};
-const stub = ({sites = [], paused = false, automatic = false, clarity = false, url = 'https://mail.example.com/compose'} = {}) => `
+const stub = ({sites = [], paused = false, automatic = false, clarity = false, url = 'https://mail.example.com/compose', noticeSeen = true, prepared = false, nativeDown = false} = {}) => `
+  window.prepared = ${prepared}; window.nativeDown = ${nativeDown};
+  if (sessionStorage.getItem('lineleafLocal') === null) sessionStorage.setItem('lineleafLocal', JSON.stringify(${noticeSeen} ? {privacyNoticeSeen: true} : {}));
   const settings = JSON.parse(sessionStorage.getItem('lineleafSettings') ?? 'null') ?? {provider: 'codex', allowCloud: false, providerSettings: ${JSON.stringify(preferences(null).providerSettings)}, variant: 'US', model: '', effort: 'low', speed: '', paused: ${paused}, automatic: ${automatic}, clarity: ${clarity}, dictionary: ['lineleaf'], sites: ${JSON.stringify(sites)}};
-  window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() {}, async sendMessage({type, payload}) {
+  window.chrome = {runtime: {id: 'abcdefghijklmnopabcdefghijklmnop', openOptionsPage() { window.openedSettings = true; }, async sendMessage({type, payload}) {
+      if (type === 'set-site') settings.sites = payload.enabled ? [...new Set([...settings.sites, payload.origin])] : settings.sites.filter(site => site !== payload.origin);
+      if (type === 'set-pause') settings.paused = payload.paused;
+      if (type === 'prepare') return {ok: true, value: window.prepared ? 'prepared' : 'skipped'};
       if (type === 'save-settings') {
         Object.assign(settings.providerSettings, payload.profiles);
         const provider = payload.changes.provider ?? settings.provider;
@@ -66,10 +71,13 @@ const stub = ({sites = [], paused = false, automatic = false, clarity = false, u
         settings.providerSettings[provider] = {model: settings.model, effort: settings.effort, speed: settings.speed, allowCloud: settings.allowCloud};
       }
       if (type === 'get-check-timing') return {ok: true, value: window.lastTiming ?? null};
+      if (type === 'check-connection' && window.nativeDown) return {ok: false, code: 'NATIVE_UNAVAILABLE'};
       if (type === 'check-connection') return {ok: true, value: {availability: 'available', authentication: 'authenticated', sign_in: 'subscription', tool_isolation: true, update_required: window.outdated === true}};
       sessionStorage.setItem('lineleafSettings', JSON.stringify(settings));
       return {ok: true, value: settings};
-    }}, tabs: {async query() { return [{id: 1, url: ${JSON.stringify(url)}, incognito: false}]; }}, permissions: {async request() { return true; }}};`;
+    }}, tabs: {async query() { return [{id: 1, url: ${JSON.stringify(url)}, incognito: false}]; }}, permissions: {async request() { return true; }},
+    storage: {local: {async get(key) { const all = JSON.parse(sessionStorage.getItem('lineleafLocal') ?? '{}'); return key === undefined ? all : key in all ? {[key]: all[key]} : {}; },
+      async set(values) { sessionStorage.setItem('lineleafLocal', JSON.stringify({...JSON.parse(sessionStorage.getItem('lineleafLocal') ?? '{}'), ...values})); }}}};`;
 async function extensionPage(file, options = {}, {scheme = 'light', viewport = {width: 360, height: 640}, reducedMotion = 'no-preference'} = {}) {
   const context = await browser.newContext({colorScheme: scheme, viewport, reducedMotion}), page = await context.newPage();
   await page.route('https://ext.lineleaf.test/**', async route => {
@@ -79,27 +87,66 @@ async function extensionPage(file, options = {}, {scheme = 'light', viewport = {
   await page.addInitScript(stub(options)); await page.goto(`https://ext.lineleaf.test/${file}`);
   return {page, context};
 }
+const popupReady = page => page.waitForFunction(() => document.body.dataset.state !== 'loading');
 const settled = (page, selector) => page.waitForFunction(selector => document.querySelector(selector)?.textContent && document.querySelector(selector).textContent !== 'Loading', selector);
 
-test('popup: state, switches and the reason the panel is unavailable are visible and named', async () => {
-  for (const [options, label, disabled, hint] of [
-    [{}, 'Off here', true, /Turn on/], [{sites: ['https://mail.example.com']}, 'On here', false, null],
-    [{sites: ['https://mail.example.com'], paused: true}, 'Paused', true, /paused/i], [{url: 'chrome://extensions'}, 'Unavailable', true, /cannot run/]
+test('popup: the switch, the note and the panel button say where Lineleaf stands, in few words', async () => {
+  for (const [options, state, note, disabled, pause] of [
+    [{}, 'off', /^Off here\. Turn on/, true, 'Pause on all sites'], [{sites: ['https://mail.example.com']}, 'on', /^Lineleaf is on here/, false, 'Pause on all sites'],
+    [{sites: ['https://mail.example.com'], paused: true}, 'paused', /^Paused on all sites/, true, 'Resume'], [{url: 'chrome://extensions'}, 'unavailable', /can’t run on this page/, true, 'Pause on all sites']
   ]) {
-    const {page, context} = await extensionPage('popup.html', options);
-    await page.waitForFunction(label => document.querySelector('#state').textContent === label, label);
-    assert.equal(await page.locator('#open').isDisabled(), disabled, label);
-    if (hint) assert.match(await page.locator('#status').textContent(), hint, label); else assert.equal(await page.locator('#status').textContent(), '');
-    assert.ok(await page.getByRole('switch', {name: /Check my writing here/}).count() === 1 && await page.getByRole('switch', {name: /Pause on all sites/}).count() === 1);
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${label}: no sideways scroll at popup width`);
+    const {page, context} = await extensionPage('popup.html', options); await popupReady(page);
+    assert.equal(await page.evaluate(() => document.body.dataset.state), state);
+    assert.equal(await page.locator('#open').isDisabled(), disabled, state); assert.match(await page.locator('#note').textContent(), note, state);
+    assert.equal(await page.getByRole('switch', {name: /Check my writing on this site/}).count(), 1); assert.equal(await page.getByRole('button', {name: pause}).count(), 1, state);
+    assert.equal(await page.locator('#alert').isHidden(), true, `${state}: nothing to say, so nothing is shown`);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, `${state}: no sideways scroll at popup width`);
+    if (state === 'on') assert.ok(await page.evaluate(() => document.body.innerText.split(/\s+/).filter(Boolean).length) <= 30, 'the popup stays short');
     await context.close();
   }
 });
+test('popup: enabling a site and pausing work, and Pause turns into Resume', async () => {
+  const {page, context} = await extensionPage('popup.html', {}); await popupReady(page);
+  await page.getByRole('switch', {name: /Check my writing on this site/}).check(); await page.waitForFunction(() => document.body.dataset.state === 'on');
+  assert.equal(await page.locator('#open').isDisabled(), false);
+  await page.getByRole('button', {name: 'Pause on all sites'}).click(); await page.waitForFunction(() => document.body.dataset.state === 'paused');
+  assert.equal(await page.locator('#pause').getAttribute('aria-pressed'), 'true');
+  await page.getByRole('button', {name: 'Resume'}).click(); await page.waitForFunction(() => document.body.dataset.state === 'on');
+  await context.close();
+});
+test('popup: the privacy note appears once, for a site that is on, and stays gone after Got it', async () => {
+  const off = await extensionPage('popup.html', {noticeSeen: false}); await popupReady(off.page);
+  assert.equal(await off.page.locator('#notice').isHidden(), true, 'nothing is sent from a site that is off, so nothing needs saying');
+  await off.page.getByRole('switch', {name: /Check my writing on this site/}).check(); await off.page.waitForFunction(() => document.body.dataset.state === 'on');
+  assert.equal(await off.page.locator('#notice').isVisible(), true);
+  assert.match(await off.page.locator('#notice-text').textContent(), /^Text you check goes to Codex through Seatline\. Nothing is saved\.$/);
+  await off.page.getByRole('button', {name: 'Got it'}).click(); assert.equal(await off.page.locator('#notice').isHidden(), true);
+  assert.equal(await off.page.evaluate(() => JSON.parse(sessionStorage.getItem('lineleafLocal')).privacyNoticeSeen), true);
+  await off.page.reload(); await popupReady(off.page); assert.equal(await off.page.locator('#notice').isHidden(), true, 'seen once, not again');
+  await off.context.close();
+  const seen = await extensionPage('popup.html', {sites: ['https://mail.example.com']}); await popupReady(seen.page);
+  assert.equal(await seen.page.locator('#notice').isHidden(), true); await seen.context.close();
+});
+test('popup: the Seatline dot stays grey until Seatline is checked, then says ready, or what is wrong and where to fix it', async () => {
+  const idle = await extensionPage('popup.html', {sites: ['https://mail.example.com']}); await popupReady(idle.page);
+  assert.deepEqual(await idle.page.evaluate(() => [document.querySelector('#dot').dataset.state, document.querySelector('#connection').textContent]), ['unknown', 'Check Seatline']);
+  await idle.page.getByRole('button', {name: 'Check Seatline'}).click(); await idle.page.waitForFunction(() => document.querySelector('#dot').dataset.state === 'ready');
+  assert.equal(await idle.page.locator('#connection').textContent(), 'Seatline ready'); assert.equal(await idle.page.locator('#alert').isHidden(), true, 'ready needs no sentence');
+  await idle.context.close();
+  const warmed = await extensionPage('popup.html', {sites: ['https://mail.example.com'], prepared: true}); await popupReady(warmed.page);
+  await warmed.page.waitForFunction(() => document.querySelector('#dot').dataset.state === 'ready'); // the background preparation already proved it
+  await warmed.context.close();
+  const down = await extensionPage('popup.html', {sites: ['https://mail.example.com'], nativeDown: true}); await popupReady(down.page);
+  await down.page.getByRole('button', {name: 'Check Seatline'}).click(); await down.page.waitForFunction(() => document.querySelector('#dot').dataset.state === 'problem');
+  assert.match(await down.page.locator('#status').textContent(), /Seatline is unavailable/); assert.equal(await down.page.locator('#alert').getAttribute('class'), 'callout warn');
+  await down.page.getByRole('button', {name: 'Open Settings'}).click(); assert.equal(await down.page.evaluate(() => window.openedSettings), true);
+  await down.context.close();
+});
 test('popup and settings keep readable contrast, in light and dark, as rendered', async () => {
   for (const scheme of ['light', 'dark']) {
-    const popup = await extensionPage('popup.html', {sites: ['https://mail.example.com']}, {scheme});
-    await settled(popup.page, '#state');
-    for (const selector of ['h1', '.tagline', '#site', '.switch-text .muted', '.hint', '.fine', '#state', '#open', '#connection', '.label-line'])
+    const popup = await extensionPage('popup.html', {sites: ['https://mail.example.com'], noticeSeen: false, nativeDown: true}, {scheme});
+    await popupReady(popup.page); await popup.page.getByRole('button', {name: 'Check Seatline'}).click(); await popup.page.waitForFunction(() => document.querySelector('#dot').dataset.state === 'problem');
+    for (const selector of ['h1', '#site', '#note', '#open', '#connection', '#pause', '#notice-text', '#notice-ok', '#status', '#fix'])
       assert.ok(await popup.page.locator(selector).first().evaluate((el, src) => eval(src)(el), CONTRAST) >= 4.5, `${scheme} popup ${selector}`);
     await popup.context.close();
     const settings = await extensionPage('options.html', {sites: ['https://mail.example.com'], automatic: true, clarity: true}, {scheme, viewport: {width: 1100, height: 800}});
@@ -134,7 +181,7 @@ test('settings: every control is named, the side navigation follows the section,
 test('Check Seatline does not call a companion that cannot receive writing ready, in settings or in the toolbar menu', async () => {
   for (const [file, options] of [['options.html', {}], ['popup.html', {sites: ['https://mail.example.com']}]]) {
     const {page, context} = await extensionPage(file, options, {viewport: {width: 1100, height: 700}});
-    await settled(page, file === 'options.html' ? '#authorize' : '#state');
+    if (file === 'options.html') await settled(page, '#authorize'); else await popupReady(page);
     await page.evaluate(() => { window.outdated = true; });
     await page.getByRole('button', {name: 'Check Seatline'}).click();
     await page.waitForFunction(() => /seatline-companion install/.test(document.querySelector('#status').textContent));
@@ -190,7 +237,7 @@ test('settings: saved model, effort and speed stay together and timings label th
 });
 test('keyboard focus is visible on switches and buttons, and reduced motion removes the animations', async () => {
   const {page, context} = await extensionPage('popup.html', {sites: ['https://mail.example.com']}, {reducedMotion: 'reduce'});
-  await settled(page, '#state'); await page.keyboard.press('Tab');
+  await popupReady(page); await page.keyboard.press('Tab');
   assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).boxShadow), 'none');
   assert.ok(await page.evaluate(() => parseFloat(getComputedStyle(document.querySelector('#enabled'), '::after').transitionDuration) <= 0.001));
   await context.close();
