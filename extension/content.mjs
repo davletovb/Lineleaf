@@ -2,7 +2,8 @@ import {deepActive, eventElement, navigationToken, observeNavigation} from './li
 import {captureSelection, editorOf} from './lib/selection.mjs';
 import {validSpan} from '../prototypes/editor/editor-adapter.mjs';
 import {messageFor} from './lib/messages.mjs';
-import {errorCode, validText, FLAG_LABELS, WATCHDOG} from './lib/policy.mjs';
+import {errorCode, validText, FLAG_LABELS, PROVIDER_LABELS, REWRITE_LABELS, WATCHDOG} from './lib/policy.mjs';
+import {menuButton, rewriteItems} from './lib/menu.mjs';
 import tokens from './tokens.css';
 import base from './base.css';
 import styles from './panel.css';
@@ -16,22 +17,25 @@ const withIcon = (button, glyph, label, iconOnly = false) => { button.replaceChi
 export function mountContent(api) {
   mountInline(api);
   let focused = deepActive(), host, root, capture = null, port = null, requestId, edits = [], stale = false;
-  let expiry, watchdog, poll, starting = false;
+  let expiry, watchdog, poll, starting = false, provider = 'your provider';
   const composing = new Set();
   const focus = event => { const target = eventElement(event); if (target !== host && !target?.hasAttribute?.('data-lineleaf-inline')) focused = target; };
   document.addEventListener('focusin', focus, true);
   const query = selector => root.querySelector(selector);
   const status = text => { query('#status').textContent = text; };
+  // The three ways to start a check, and the choices in the Rewrite menu, are one family: all off when there is nothing to check or a request is running.
+  const modes = disabled => { for (const id of ['#check', '#improve', '#rewrite']) query(id).disabled = disabled; };
+  const setNote = () => { query('#note').textContent = `Sent to ${provider} via Seatline. Not saved.`; };
   function stop() {
     starting = false;
     clearTimeout(watchdog); if (port) { const old = port; port = null; try { old.postMessage({type: 'cancel'}); old.disconnect(); } catch { /* worker restarted */ } }
-    if (root) { query('#cancel').hidden = true; query('#check').disabled = !capture; }
+    if (root) { query('#cancel').hidden = true; modes(!capture); }
   }
   function clear() { stop(); capture?.guard?.dispose(); capture = null; edits = []; clearTimeout(expiry); clearInterval(poll); }
   function close() { clear(); host?.remove(); host = root = null; }
   function markStale() {
     if (stale || !capture) return; stale = true; stop();
-    query('#check').disabled = true; status(messageFor('STALE')); render();
+    modes(true); status(messageFor('STALE')); render();
   }
   function expire() { clear(); query('#pasted').value = ''; query('#selected').textContent = ''; query('#results').replaceChildren(); query('#undo').hidden = true; status('Selection expired. Select text and reopen Lineleaf.'); }
   function render() {
@@ -59,7 +63,7 @@ export function mountContent(api) {
         if (root !== openedRoot || capture !== selected) return;
         if (result?.status === 'applied') {
           stop(); edits = []; stale = true; query('#results').replaceChildren();
-          query('#selected').textContent = ''; query('#check').disabled = true;
+          query('#selected').textContent = ''; modes(true);
           query('#undo').hidden = false; status('Applied. You can undo this edit. Select text and reopen Lineleaf for another check.');
         } else {
           stale = true;
@@ -100,21 +104,24 @@ export function mountContent(api) {
     };
     const logo = node('span', '', {class: 'logo', 'aria-hidden': 'true'}); logo.append(icon('leaf', {size: 18}));
     const closeButton = node('button', '', {class: 'icon quiet', id: 'close', 'aria-label': 'Close Lineleaf'}); withIcon(closeButton, 'close', '✕', true);
+    const menus = node('div', '', {class: 'menus'});
     root.append(node('aside', '', {class: 'panel', 'aria-label': 'Lineleaf writing assistant'}, [
-      node('header', '', {}, [logo, node('div', '', {class: 'titles'}, [node('h2', 'Lineleaf'), node('p', 'Clearer writing. Still your words.', {class: 'tagline'})]), closeButton]),
+      node('header', '', {}, [logo, node('h2', 'Lineleaf'), closeButton]),
       node('div', '', {class: 'scroll'}, [
-        node('label', 'Your selection'), node('blockquote', '', {id: 'selected'}),
-        node('p', 'Only this selection goes through Seatline to your selected provider when you press Check. Drafts are not saved.', {class: 'muted'}),
-        node('section', '', {id: 'paste-section'}, [node('label', 'Or paste text for preview and copy', {for: 'pasted'}),
-          node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
-          node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'For editors that cannot expose a safe selection, copy text yourself and paste it here. Lineleaf will only offer a preview and Copy.', {class: 'muted'})]),
-        node('label', 'What would you like to do?', {for: 'mode'}),
-        node('select', '', {id: 'mode'}, [['proofread', 'Proofread · keep my voice'], ['improve', 'Rewrite · improve it'], ['paraphrase', 'Rewrite · paraphrase'], ['clearer', 'Rewrite · clearer'], ['shorter', 'Rewrite · shorter'],
-          ['formal', 'Rewrite · more formal'], ['friendly', 'Rewrite · friendlier']].map(([value, label]) => node('option', label, {value}))),
-        node('div', '', {class: 'row'}, [node('button', 'Check selection', {id: 'check', class: 'primary'}), node('button', 'Cancel', {id: 'cancel', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', hidden: ''}), node('button', 'Pause Lineleaf', {id: 'pause', class: 'quiet'})]),
-        node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('div', '', {id: 'results'})
-      ])
-    ]));
+        node('label', 'Selection'), node('blockquote', '', {id: 'selected'}),
+        node('details', '', {id: 'paste-section'}, [node('summary', 'Paste text instead'),
+          node('label', 'Text to preview and copy', {for: 'pasted'}), node('textarea', '', {id: 'pasted', maxlength: '2000', 'aria-label': 'Text to check without editing the page'}),
+          node('button', 'Use pasted text', {id: 'use-pasted'}), node('p', 'Preview and Copy only; Lineleaf does not edit the page from pasted text.', {class: 'muted'})]),
+        node('div', '', {class: 'modes'}, [node('button', 'Proofread', {id: 'check', class: 'primary'}), node('button', '', {id: 'improve', class: 'chip lead'}), node('button', '', {id: 'rewrite', class: 'chip'})]),
+        node('div', '', {class: 'statusline'}, [node('p', '', {id: 'status', role: 'status', 'aria-live': 'polite'}), node('button', 'Cancel', {id: 'cancel', class: 'quiet small', hidden: ''}), node('button', 'Undo last edit', {id: 'undo', class: 'quiet small', hidden: ''})]),
+        node('div', '', {id: 'results'})
+      ]),
+      node('footer', '', {}, [node('span', '', {id: 'note'}), node('button', 'Pause Lineleaf', {id: 'pause', class: 'quiet small'})])
+    ]), menus);
+    withIcon(query('#improve'), 'sparkle', REWRITE_LABELS.improve);
+    query('#rewrite').append(document.createTextNode('Rewrite'), icon('down', {size: 14}));
+    menuButton({layer: menus, trigger: query('#rewrite'), items: rewriteItems(REWRITE_LABELS), label: 'Rewrite', onPick: mode => void run(mode)});
+    setNote();
     document.documentElement.append(host);
     query('#close').addEventListener('click', event => { if (event.isTrusted) close(); });
     query('#cancel').addEventListener('click', event => { if (event.isTrusted) { stop(); status(messageFor('CANCELLED')); } });
@@ -126,7 +133,8 @@ export function mountContent(api) {
         ? 'Original text restored. This editor could not confirm native undo; further edits use copy only.'
         : 'Undo is unavailable after other edits. Use the editor’s own undo control.');
     });
-    query('#check').addEventListener('click', event => { if (event.isTrusted) void run(); });
+    query('#check').addEventListener('click', event => { if (event.isTrusted) void run('proofread'); });
+    query('#improve').addEventListener('click', event => { if (event.isTrusted) void run('improve'); });
     query('#pasted').addEventListener('input', markStale);
     query('#use-pasted').addEventListener('click', event => {
       if (!event.isTrusted) return;
@@ -137,7 +145,7 @@ export function mountContent(api) {
       capture = {text, adapter: null, snapshot: null, offset: 0, field: null,
         valid: () => host?.isConnected && paste.value === text && navigationToken() === route};
       query('#selected').textContent = text; query('#results').replaceChildren(); query('#undo').hidden = true;
-      query('#check').disabled = false; status('Ready to check pasted text. Suggestions offer preview and copy only.');
+      modes(false); status('Ready to check pasted text. Suggestions offer preview and copy only.');
       expiry = setTimeout(expire, 5 * 60 * 1000);
     });
     query('#pause').addEventListener('click', async event => {
@@ -160,8 +168,8 @@ export function mountContent(api) {
     } catch (error) { failure = errorCode(error) === 'UNAVAILABLE' ? 'INVALID_REQUEST' : errorCode(error); }
     clear(); if (!host?.isConnected) create(); stale = false; capture = next ?? null;
     query('#undo').hidden = true; query('#results').replaceChildren(); query('#selected').textContent = capture?.text ?? '';
-    query('#pasted').value = ''; query('#paste-section').hidden = Boolean(capture?.adapter);
-    query('#check').disabled = !capture; status(failure ? messageFor(failure) : capture?.adapter ? 'Ready to check your selection.' : 'This surface offers preview and copy only.');
+    query('#pasted').value = ''; query('#paste-section').hidden = Boolean(capture?.adapter); query('#paste-section').open = !capture?.adapter; // a surface that cannot expose a selection starts at the paste box
+    modes(!capture); status(failure ? messageFor(failure) : capture?.adapter ? 'Ready to check your selection.' : 'This surface offers preview and copy only.');
     expiry = setTimeout(expire, 5 * 60 * 1000);
     poll = setInterval(() => {
       navigated(); if (!host?.isConnected) { close(); return; }
@@ -169,21 +177,22 @@ export function mountContent(api) {
     }, 500);
     const openedRoot = root, selected = capture, state = await siteState();
     if (root !== openedRoot || capture !== selected) return;
-    if (!state?.ok) { stop(); status(messageFor(state?.code ?? 'SITE_DISABLED')); query('#check').disabled = true; }
+    if (!state?.ok) { stop(); status(messageFor(state?.code ?? 'SITE_DISABLED')); modes(true); }
     else {
+      provider = PROVIDER_LABELS[state.value?.provider] ?? 'your provider'; setNote();
       try { void Promise.resolve(api.runtime.sendMessage({type: 'prepare', payload: null})).catch(() => {}); } catch { /* worker restarted */ } // The user is about to check: get the provider ready. No text goes with it.
     }
-    query('#mode').focus();
+    query('#check').focus();
   }
-  async function run() {
+  async function run(mode) {
     if (!capture || port || starting) return;
     if (stale || !capture.valid()) { markStale(); return; }
-    starting = true; query('#check').disabled = true;
+    starting = true; modes(true);
     const selected = capture;
     const state = await siteState();
     if (!starting || capture !== selected || stale || !root) return;
     if (!state?.ok) { starting = false; status(messageFor(state?.code ?? 'SITE_DISABLED')); return; }
-    edits = []; render(); query('#check').disabled = true; query('#cancel').hidden = false;
+    edits = []; render(); modes(true); query('#cancel').hidden = false;
     const id = crypto.randomUUID(); requestId = id;
     try {
       const current = api.runtime.connect({name: 'lineleaf-writing-v1'}); port = current;
@@ -196,11 +205,11 @@ export function mountContent(api) {
           stop();
           if (capture && !capture.valid()) { markStale(); return; }
           if (!Array.isArray(message.edits)) { status(messageFor('INVALID_OUTPUT')); return; }
-          edits = message.edits; render(); status(edits.length ? 'Review each suggestion before accepting.' : query('#mode').value === 'proofread' ? 'No corrections suggested.' : 'No change suggested. This already reads well.');
+          edits = message.edits; render(); status(edits.length ? 'Review each suggestion before accepting.' : mode === 'proofread' ? 'No corrections suggested.' : 'No change suggested. This already reads well.');
         }
       });
       watchdog = setTimeout(() => { stop(); status(messageFor('PROVIDER_TIMEOUT')); }, WATCHDOG.manual); // The panel only makes explicit requests.
-      current.postMessage({type: 'start', id, text: capture.text, mode: query('#mode').value});
+      current.postMessage({type: 'start', id, text: capture.text, mode});
     } catch { stop(); status(messageFor('UNAVAILABLE')); }
   }
   const input = event => { const target = eventElement(event); if (capture?.field && (target === capture.field || capture.field.contains(target))) markStale(); };

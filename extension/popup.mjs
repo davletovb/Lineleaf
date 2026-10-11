@@ -1,6 +1,6 @@
 import {command} from './lib/ui-api.mjs';
 import {originOf, sitePattern, errorCode, PROVIDER_LABELS} from './lib/policy.mjs';
-import {messageFor, connectionSummary} from './lib/messages.mjs';
+import {messageFor, connectionSummary, connectionReady} from './lib/messages.mjs';
 const query = x => document.querySelector(x);
 // `tone` 'warn' makes the message a callout that needs attention; `fix` adds the way to Settings, where Seatline is set up.
 function show(text, {tone = 'info', fix = false} = {}) {
@@ -51,8 +51,7 @@ query('#connection').addEventListener('click', async () => {
   query('#connection').disabled = true; dot('unknown', 'Checking…'); show('');
   try {
     const state = await command('check-connection');
-    const ready = state.availability === 'available' && state.authentication === 'authenticated' && state.sign_in_allowed !== false && state.update_required !== true && state.tool_isolation !== false;
-    if (ready) dot('ready', 'Seatline ready'); else { dot('problem', 'Seatline needs attention'); show(connectionSummary(state), {tone: 'warn', fix: true}); }
+    if (connectionReady(state)) dot('ready', 'Seatline ready'); else { dot('problem', 'Seatline needs attention'); show(connectionSummary(state), {tone: 'warn', fix: true}); }
   } catch (error) { dot('problem', 'Seatline needs attention'); show(messageFor(errorCode(error)), {tone: 'warn', fix: errorCode(error) !== 'BUSY'}); }
   finally { query('#connection').disabled = false; }
 });

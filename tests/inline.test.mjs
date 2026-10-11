@@ -180,7 +180,7 @@ test('dictionary, UK variant, global pause and reset change the production check
   await page.waitForFunction(() => fixture.worker.turns.length === 2);
   await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').includes('No corrections'));
   assert.equal(await inline.locator('.underline').count(), 0); assert.match((await sends()).at(-1).params.system, /British/);
-  await open(); await inline.button('Pause Lineleaf').click(); await page.waitForFunction(() => fixture.worker.data.preferences.paused);
+  await open(); await inline.button('More options').click(); await inline.button('Pause Lineleaf').click(); await page.waitForFunction(() => fixture.worker.data.preferences.paused);
   assert.equal(await page.locator('[data-lineleaf-inline]').count(), 0);
   await page.evaluate(() => fixture.worker.rpc('reset')); await type(); await idle(); assert.equal((await sends()).length, 2);
   assert.deepEqual(await page.evaluate(() => fixture.worker.data), {});
@@ -191,7 +191,7 @@ test('Turkish and English in one session need no language setting: each text is 
   await type('textarea', 'Bugun okula gidiyorum.'); await result(); await open();
   assert.equal(await inline.locator('.category').textContent(), 'Spelling');
   assert.equal(await inline.locator('.explanation').textContent(), 'Türkçe karakter eksik.');
-  assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+  assert.equal(await inline.locator('[data-rewrite]').count(), 1); assert.equal(await inline.locator('[role="menu"][aria-label="Rewrite"] [data-item]').count(), 5);
   const turkish = (await sends()).at(-1).params;
   assert.match(turkish.system, /The text is Turkish/); assert.match(turkish.system, /Turkish Language Association/); assert.doesNotMatch(turkish.system, /American|British/);
   assert.deepEqual(JSON.parse(turkish.messages[0].text), {text: 'Bugun okula gidiyorum.'});
@@ -203,7 +203,7 @@ test('Turkish and English in one session need no language setting: each text is 
   await page.waitForFunction(() => fixture.worker.turns.length === 2);
   const english = (await sends()).at(-1).params.system;
   assert.match(english, /Use American English\./); assert.doesNotMatch(english, /Turkish/);
-  await inline.locator('.underline').waitFor(); await open(); assert.equal(await inline.locator('[data-rewrite]').count(), 6);
+  await inline.locator('.underline').waitFor(); await open(); assert.equal(await inline.locator('[data-rewrite]').count(), 1); assert.equal(await inline.locator('[role="menu"][aria-label="Rewrite"] [data-item]').count(), 5);
   assert.deepEqual(await page.evaluate(() => fixture.worker.data.preferences), before);
 });
 test('a paragraph that switches language gets the prompt for both, and a short selection gets the neutral one', async () => {
@@ -243,6 +243,8 @@ test('keyboard Tab/Escape controls and accessibility tree expose the suggestion 
   const cdp = await page.context().newCDPSession(page), tree = await cdp.send('Accessibility.getFullAXTree');
   assert.ok(tree.nodes.some(x => x.role?.value === 'button' && x.name?.value === 'Accept suggestion: goes'));
   assert.ok(tree.nodes.some(x => x.role?.value === 'region' && x.name?.value === 'Lineleaf suggestions'));
+  await page.keyboard.press('Tab'); // Check now.
+  await page.keyboard.press('Tab'); // More options.
   await page.keyboard.press('Tab'); // Close.
   await page.keyboard.press('Tab'); // Accept: the primary action follows the heading, the explanation disclosure comes after the buttons.
   assert.equal(await inline.button('Accept').evaluate(el => el.getRootNode().activeElement === el), true);
@@ -259,9 +261,9 @@ test('the manual panel keeps the selected field when an inline card holds focus'
   await page.locator('#textarea').evaluate(el => el.setSelectionRange(0, el.value.length));
   assert.equal(await page.locator('[data-lineleaf-inline]').evaluate(el => document.activeElement === el), true);
   await page.evaluate(() => fixture.runtimeMessages.emit({type: 'lineleaf-open'}, {id: chrome.runtime.id}));
-  const panel = panelFor(page); await panel.button('Check selection').waitFor();
+  const panel = panelFor(page); await panel.button('Proofread').waitFor();
   assert.equal(await panel.locator('#selected').textContent(), 'He go to work.');
-  await panel.button('Check selection').click(); await panel.button('Accept').waitFor();
+  await panel.button('Proofread').click(); await panel.button('Accept').waitFor();
   assert.equal((await sends()).length, 2);
 });
 test('typing announces a repeated idle message once and still announces state transitions', async () => {

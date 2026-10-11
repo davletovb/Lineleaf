@@ -68,6 +68,7 @@ const stub = ({sites = [], paused = false, automatic = false, clarity = false, u
         const provider = payload.changes.provider ?? settings.provider;
         if (provider !== settings.provider) Object.assign(settings, settings.providerSettings[provider]);
         Object.assign(settings, payload.changes);
+        settings.dictionary = [...settings.dictionary.filter(word => !payload.dictionary.remove.includes(word)), ...payload.dictionary.add];
         settings.providerSettings[provider] = {model: settings.model, effort: settings.effort, speed: settings.speed, allowCloud: settings.allowCloud};
       }
       if (type === 'get-check-timing') return {ok: true, value: window.lastTiming ?? null};
@@ -88,6 +89,7 @@ async function extensionPage(file, options = {}, {scheme = 'light', viewport = {
   return {page, context};
 }
 const popupReady = page => page.waitForFunction(() => document.body.dataset.state !== 'loading');
+const advanced = async page => { if (!await page.locator('#advanced').evaluate(el => el.open)) await page.locator('#advanced summary').click(); };
 const settled = (page, selector) => page.waitForFunction(selector => document.querySelector(selector)?.textContent && document.querySelector(selector).textContent !== 'Loading', selector);
 
 test('popup: the switch, the note and the panel button say where Lineleaf stands, in few words', async () => {
@@ -150,8 +152,9 @@ test('popup and settings keep readable contrast, in light and dark, as rendered'
       assert.ok(await popup.page.locator(selector).first().evaluate((el, src) => eval(src)(el), CONTRAST) >= 4.5, `${scheme} popup ${selector}`);
     await popup.context.close();
     const settings = await extensionPage('options.html', {sites: ['https://mail.example.com'], automatic: true, clarity: true}, {scheme, viewport: {width: 1100, height: 800}});
-    await settled(settings.page, '#authorize');
-    for (const selector of ['h1', '.card-section h2', '.lede', '.facts li', '.tag', '.nav a', '.nav a[aria-current="true"]', 'label[for="variant"]', '.muted', '#status', 'button.primary', 'button.danger', '.command code', '.sites li .origin'])
+    await settled(settings.page, '#authorize'); await advanced(settings.page); await settings.page.locator('#model').fill('x'); // an unsaved provider change shows the Save bar
+    await settings.page.locator('#connection').click(); await settings.page.waitForFunction(() => document.querySelector('#seatline-dot').dataset.state === 'ready');
+    for (const selector of ['h1', '.card-section h2', '.lines li', '.tag', '.nav a', '.nav a[aria-current="true"]', 'label[for="variant"]', '.muted', '#status', '#seatline-state', '.unsaved', 'button.primary', 'button.danger', '.command code', '.sites li .origin', 'summary'])
       assert.ok(await settings.page.locator(selector).first().evaluate((el, src) => eval(src)(el), CONTRAST) >= 4.5, `${scheme} settings ${selector}`);
     await settings.context.close();
   }
@@ -161,22 +164,30 @@ test('settings: every control is named, the side navigation follows the section,
   await settled(page, '#authorize');
   const unnamed = await page.evaluate(() => [...document.querySelectorAll('input, select, textarea, button')].filter(el => !(el.labels?.length || el.getAttribute('aria-label') || el.textContent.trim())).map(el => el.id || el.tagName));
   assert.deepEqual(unnamed, []);
+  assert.deepEqual(await page.locator('.nav a').allTextContents(), ['Writing', 'Provider', 'Data']);
   assert.equal(await page.locator('.nav a[aria-current="true"]').textContent(), 'Writing');
-  await page.locator('#privacy').scrollIntoViewIfNeeded(); await page.evaluate(() => scrollTo(0, document.body.scrollHeight));
-  await page.waitForFunction(() => document.querySelector('.nav a[aria-current="true"]')?.textContent === 'Privacy & data');
+  await page.evaluate(() => scrollTo(0, document.body.scrollHeight));
+  await page.waitForFunction(() => document.querySelector('.nav a[aria-current="true"]')?.textContent === 'Data');
   assert.equal(await page.getByRole('button', {name: 'Disable https://x.com'}).count(), 1);
-  const bar = await page.locator('.savebar').boundingBox(); assert.equal(Math.round(bar.y + bar.height), 700); // Save stays in reach.
-  // The Save bar never covers the end of the page: something added after it (the installed-extension tests add a button there) stays clickable.
-  await page.evaluate(() => { const probe = document.createElement('button'); probe.textContent = 'End of page probe'; probe.onclick = () => { window.probed = true; }; document.body.append(probe); });
-  await page.getByRole('button', {name: 'End of page probe'}).click(); assert.equal(await page.evaluate(() => window.probed), true);
+  assert.equal(await page.locator('#status').evaluate(el => getComputedStyle(el, '::before').content), '"All changes saved"'); // nothing to say, so it says that
+  assert.equal(await page.locator('#provider-bar').isHidden(), true, 'no Save bar until a provider setting changes');
   await page.evaluate(() => scrollTo(0, 0));
   assert.equal(await page.locator('#clarity').isDisabled(), true); await page.locator('#automatic').check(); assert.equal(await page.locator('#clarity').isDisabled(), false);
-  await page.getByRole('button', {name: 'Check Seatline'}).click(); await page.waitForFunction(() => /Codex: available/.test(document.querySelector('#status').textContent));
+  assert.deepEqual(await page.evaluate(() => [document.querySelector('#seatline-dot').dataset.state, document.querySelector('#seatline-state').textContent]), ['unknown', 'Seatline not checked']);
+  await page.getByRole('button', {name: 'Check Seatline'}).click(); await page.waitForFunction(() => document.querySelector('#seatline-dot').dataset.state === 'ready');
+  assert.equal(await page.locator('#seatline-state').textContent(), 'Seatline ready'); assert.equal(await page.locator('#seatline-note').textContent(), 'Codex is ready.');
   await page.setViewportSize({width: 420, height: 800});
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true, 'no sideways scroll on a narrow window');
   await context.close();
   const empty = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}}); await settled(empty.page, '#authorize');
-  assert.match(await empty.page.locator('#sites li.empty').textContent(), /No sites enabled yet/); await empty.context.close();
+  assert.match(await empty.page.locator('#sites li.empty').textContent(), /No sites yet/); await empty.context.close();
+});
+test('settings: the page stays short, with the long explanations behind disclosure rows', async () => {
+  const {page, context} = await extensionPage('options.html', {sites: ['https://mail.example.com']}, {viewport: {width: 1100, height: 700}}); await settled(page, '#authorize');
+  const words = await page.evaluate(() => document.body.innerText.split(/\s+/).filter(Boolean).length);
+  assert.ok(words <= 330, `${words} visible words; the page used to show about 960`);
+  assert.deepEqual(await page.locator('details').evaluateAll(all => all.map(el => [el.id || el.className, el.open])), [['how-automatic', false], ['setup', false], ['advanced', false], ['check-timing', false]]);
+  await context.close();
 });
 test('Check Seatline does not call a companion that cannot receive writing ready, in settings or in the toolbar menu', async () => {
   for (const [file, options] of [['options.html', {}], ['popup.html', {sites: ['https://mail.example.com']}]]) {
@@ -184,47 +195,49 @@ test('Check Seatline does not call a companion that cannot receive writing ready
     if (file === 'options.html') await settled(page, '#authorize'); else await popupReady(page);
     await page.evaluate(() => { window.outdated = true; });
     await page.getByRole('button', {name: 'Check Seatline'}).click();
-    await page.waitForFunction(() => /seatline-companion install/.test(document.querySelector('#status').textContent));
-    assert.match(await page.locator('#status').textContent(), /^Codex: available, authenticated, subscription\. .*nothing was sent/);
+    const where = file === 'options.html' ? '#seatline-note' : '#status';
+    await page.waitForFunction(where => /seatline-companion install/.test(document.querySelector(where).textContent), where);
+    assert.match(await page.locator(where).textContent(), /^Codex: available, authenticated, subscription\. .*nothing was sent/);
+    assert.equal(await page.evaluate(() => (document.querySelector('#seatline-dot') ?? document.querySelector('#dot')).dataset.state), 'problem');
     await context.close();
   }
 });
 test('settings: the authorization command can be copied', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], {origin: 'https://ext.lineleaf.test'}); await settled(page, '#authorize');
-  await page.getByRole('button', {name: 'Copy'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Command copied.');
+  await page.getByText('Setup command', {exact: true}).click(); await page.getByRole('button', {name: 'Copy', exact: true}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Command copied.');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'seatline-companion authorize lineleaf codex chrome-extension://abcdefghijklmnopabcdefghijklmnop/');
   await context.close();
 });
 test('settings: saved model, effort and speed stay together and timings label the requested speed', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 700}});
-  await settled(page, '#authorize');
+  await settled(page, '#authorize'); await advanced(page);
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'low');
   assert.equal(await page.getByLabel('Speed', {exact: true}).inputValue(), '');
   const model = await page.locator('#model').boundingBox(), effort = await page.locator('#effort').boundingBox();
   assert.equal(Math.round(model.y), Math.round(effort.y));
   await page.locator('#model').fill('gpt-6-luna'); await page.getByLabel('Reasoning effort').selectOption('xhigh');
   await page.getByLabel('Speed', {exact: true}).selectOption('fast');
-  await page.getByRole('button', {name: 'Save preferences'}).click();
-  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  await page.getByRole('button', {name: 'Save'}).click();
+  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'xhigh');
   assert.equal(await page.getByLabel('Speed', {exact: true}).inputValue(), 'fast');
-  assert.match(await page.locator('#speed-help').textContent(), /more subscription allowance/);
-  assert.equal(await page.getByRole('link', {name: 'current Codex speed and usage'}).getAttribute('href'), 'https://learn.chatgpt.com/docs/agent-configuration/speed');
+  assert.match(await page.locator('#speed-help').textContent(), /more of your Codex allowance/);
+  assert.equal(await page.getByRole('link', {name: 'Details'}).getAttribute('href'), 'https://learn.chatgpt.com/docs/agent-configuration/speed');
   await page.evaluate(() => { window.lastTiming = {kind: 'manual', mode: 'proofread', requested_model: 'gpt-6-luna', reasoning_effort: 'xhigh', requested_service_tier: 'fast', outcome: 'completed', total_ms: 3420, readiness_ms: 8, finish_ms: 17}; });
-  await page.getByText('Last manual check timing', {exact: true}).click(); await page.getByRole('button', {name: 'Refresh timing'}).click();
+  await page.getByText('Diagnostics', {exact: true}).click(); await page.getByRole('button', {name: 'Refresh timing'}).click();
   await page.waitForFunction(() => document.querySelector('#timing-summary').textContent.includes('gpt-6-luna'));
   assert.match(await page.locator('#timing-phases').textContent(), /Unavailable/);
   assert.match(await page.locator('#timing-phases').textContent(), /3\.42 s/);
   assert.match(await page.locator('#timing-summary').textContent(), /xhigh · requested fast speed/);
   await page.getByLabel('Speed', {exact: true}).selectOption('standard');
-  await page.getByRole('button', {name: 'Save preferences'}).click();
-  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#speed').value === 'standard');
+  await page.getByRole('button', {name: 'Save'}).click();
+  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.' && document.querySelector('#speed').value === 'standard');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'xhigh');
   assert.equal(await page.locator('#model').inputValue(), 'gpt-6-luna');
   await page.getByLabel('Speed', {exact: true}).selectOption('');
-  await page.getByRole('button', {name: 'Save preferences'}).click();
-  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#speed').value === '');
+  await page.getByRole('button', {name: 'Save'}).click();
+  await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.' && document.querySelector('#speed').value === '');
   assert.equal(await page.getByLabel('Reasoning effort').inputValue(), 'xhigh');
   assert.equal(await page.locator('#model').inputValue(), 'gpt-6-luna');
   await page.evaluate(() => { window.lastTiming = {version: 2, kind: 'manual', mode: 'proofread', requested_service_tier: null, attempts: 1, outcome: 'completed'}; });
@@ -275,7 +288,7 @@ test('badge shows the count and the kind of suggestion, and a working ring while
   assert.equal(await inline.locator('.ring').evaluate(el => getComputedStyle(el).animationName), 'll-spin');
   await context.close();
 });
-test('a word opens a compact popover beside it with the word marked; More reveals the rewrite tools; Escape closes it', async () => {
+test('a word opens a compact popover beside it with the word marked; Rewrite opens the choices; Escape closes the menu, then the card', async () => {
   const {page, context, inline} = await withSuggestions();
   const word = await inline.locator('.underline').evaluate(el => { const r = el.getBoundingClientRect(); return {left: r.left, right: r.right, bottom: r.bottom}; });
   await inline.locator('.underline').click(); await inline.locator('#card-title').waitFor();
@@ -283,21 +296,51 @@ test('a word opens a compact popover beside it with the word marked; More reveal
   const card = await inline.locator('.card').evaluate(el => { const r = el.getBoundingClientRect(); return {top: r.top, left: r.left}; });
   assert.ok(card.top >= word.bottom && card.top - word.bottom < 24, 'the card sits just under the word'); assert.ok(Math.abs(card.left - word.left) < 40, 'and starts at it');
   assert.equal(await inline.locator('.mark').count(), 1); // The word the card is about is tinted.
-  assert.equal(await visible(inline, '.rewrite'), false); assert.equal(await visible(inline, '.foot'), false);
-  assert.equal(await inline.button('More').evaluate(el => el.getAttribute('aria-expanded')), 'false');
+  assert.equal(await inline.locator('.rewrite').count(), 0, 'the rewrite line belongs to the full card');
+  assert.equal(await inline.button('Rewrite').evaluate(el => el.getAttribute('aria-expanded')), 'false');
   assert.equal(await visible(inline, '#status'), true); // Feedback stays visible in the compact card.
-  await inline.button('More').evaluate(el => el.focus()); await page.keyboard.press('Enter');
-  assert.equal(await visible(inline, '.rewrite'), true); assert.equal(await inline.button('Less').evaluate(el => el.getAttribute('aria-expanded')), 'true');
+  await inline.button('Rewrite').evaluate(el => el.focus()); await page.keyboard.press('Enter');
+  assert.equal(await inline.button('Rewrite').evaluate(el => el.getAttribute('aria-expanded')), 'true');
+  assert.deepEqual(await inline.locator('[role="menu"][aria-label="Rewrite"] [data-item]').evaluate((_, __, items) => items.map(item => item.dataset.item)), ['improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
+  await page.keyboard.press('Escape'); // closes the menu and goes back to its button; the card stays
+  assert.equal(await inline.button('Rewrite').evaluate(el => el.getAttribute('aria-expanded')), 'false'); assert.equal(await inline.locator('.card').evaluate(el => el.hidden), false);
   await page.keyboard.press('Escape');
   assert.equal(await inline.locator('.card').evaluate(el => el.hidden), true); assert.equal(await inline.locator('.mark').count(), 0);
   assert.equal(await page.locator('#textarea').evaluate(el => document.activeElement === el), true);
   await context.close();
 });
-test('the keyboard opens the full card: rewrite tools and everyday actions are visible, with no word marked', async () => {
+test('the keyboard opens the full card: one rewrite line, a short header of actions, and no footer', async () => {
   const {page, context, inline} = await withSuggestions(); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
   assert.equal(await inline.locator('.card').evaluate(el => el.dataset.compact), 'false');
-  for (const selector of ['.rewrite', '.foot', '.privacy']) assert.equal(await visible(inline, selector), true, selector);
-  assert.equal(await inline.button('More').count(), 0);
+  for (const selector of ['.rewrite', '.privacy']) assert.equal(await visible(inline, selector), true, selector);
+  assert.equal(await inline.locator('.foot').count(), 0); assert.equal(await inline.button('More').count(), 0);
+  for (const name of ['Check now', 'More options', 'Improve', 'Rewrite']) assert.equal(await inline.button(name).count(), 1, name);
+  assert.equal(await inline.button('Cancel check').count(), 0, 'Cancel check is only there while a check runs');
+  assert.equal(await inline.locator('.privacy').textContent(), 'Sent to Codex via Seatline. Nothing changes until you accept.');
+  assert.equal(await inline.locator('.rewrite .scope').textContent(), 'Paragraph');
+  await page.locator('#textarea').evaluate(el => { el.focus(); el.setSelectionRange(0, 5); }); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
+  assert.equal(await inline.locator('.rewrite .scope').textContent(), 'Selection', 'a rewrite works on the selection when there is one');
+  await context.close();
+});
+test('the Rewrite menu is a keyboard menu: arrows move, Escape returns to the button, Tab and a click elsewhere close it', async () => {
+  const {page, context, inline} = await withSuggestions(); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
+  const trigger = inline.locator('[data-rewrite-menu]'), items = () => inline.locator('[role="menu"][aria-label="Rewrite"] [data-item]');
+  const focused = () => inline.locator('[role="menu"][aria-label="Rewrite"]').evaluate(el => el.getRootNode().activeElement?.dataset.item ?? null);
+  const open = () => inline.locator('[role="menu"][aria-label="Rewrite"]').evaluate(el => !el.hidden);
+  assert.equal(await open(), false);
+  await trigger.evaluate(el => { el.click(); el.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowDown', bubbles: true})); }); // scripted events, like a page's, open nothing
+  assert.equal(await open(), false, 'only real input opens the menu');
+  await trigger.evaluate(el => el.focus()); await page.keyboard.press('ArrowDown'); assert.equal(await open(), true); assert.equal(await focused(), 'paraphrase');
+  await page.keyboard.press('ArrowDown'); assert.equal(await focused(), 'clearer'); await page.keyboard.press('End'); assert.equal(await focused(), 'friendly');
+  await page.keyboard.press('ArrowDown'); assert.equal(await focused(), 'paraphrase', 'the arrows wrap'); await page.keyboard.press('ArrowUp'); assert.equal(await focused(), 'friendly');
+  await page.keyboard.press('Home'); assert.equal(await focused(), 'paraphrase');
+  await page.keyboard.press('Escape'); assert.equal(await open(), false); assert.equal(await trigger.evaluate(el => el.getRootNode().activeElement === el), true);
+  await trigger.click(); assert.equal(await open(), true); // a mouse click opens it too, and focus is inside it
+  const box = await inline.locator('[role="menu"][aria-label="Rewrite"]').evaluate(el => { const r = el.getBoundingClientRect(); return {left: r.left, top: r.top, right: r.right, bottom: r.bottom}; });
+  assert.ok(box.left >= 0 && box.top >= 0 && box.right <= 900 && box.bottom <= 700, 'the menu is drawn in full, outside the card that scrolls');
+  await page.keyboard.press('Tab'); assert.equal(await open(), false);
+  await trigger.click(); assert.equal(await open(), true); await page.mouse.click(700, 500); assert.equal(await open(), false);
+  assert.equal(await items().count(), 5);
   await context.close();
 });
 test('an underline covers only the foot of the word, so clicking the word itself still places the caret', async () => {
@@ -314,7 +357,8 @@ test('the inline card is legible and calm in dark mode and with reduced motion',
     const {page, context, inline} = await withSuggestions({scheme, reducedMotion: 'reduce'}); await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor();
     const background = await inline.locator('.card').evaluate(el => getComputedStyle(el).backgroundColor.match(/\d+/g).map(Number));
     assert.equal(background[0] < 100, scheme === 'dark', `${scheme} card background`);
-    for (const selector of ['#card-title', '.category', '.change .after', '.change .before', '.explanation, summary', '.muted', '.privacy', '#status', 'button.primary', '.chip.lead', '.chip:not(.lead)', '.foot button'])
+    await inline.locator('[data-rewrite-menu]').click(); // the open menu is part of the card's look
+    for (const selector of ['#card-title', '.category', '.change .after', '.change .before', '.explanation, summary', '.muted', '.privacy', '#status', 'button.primary', '.chip.lead', '.chip:not(.lead)', '.rewrite .scope', '.menu button', '.menu .group > p'])
       assert.ok(await inline.locator(selector).evaluate((el, src) => eval(src)(el), CONTRAST) >= 4.5, `${scheme} ${selector}`);
     assert.ok(await inline.locator('.card').evaluate(el => parseFloat(getComputedStyle(el).animationDuration) <= 0.001), 'reduced motion removes the pop-in');
     await context.close();
@@ -322,19 +366,19 @@ test('the inline card is legible and calm in dark mode and with reduced motion',
 });
 test('settings saves provider-specific models and shows Codex-only budgets and explicit Gemini cloud opt-in', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 800}});
-  await settled(page, '#authorize');
-  const save = async () => { await page.getByRole('button', {name: 'Save preferences'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.'); };
+  await settled(page, '#authorize'); await advanced(page);
+  const save = async () => { await page.getByRole('button', {name: 'Save'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.'); };
   await page.locator('#model').fill('gpt-6-sol'); await page.locator('#effort').selectOption('xhigh'); await page.locator('#speed').selectOption('fast'); await save();
   for (const provider of ['claude', 'gemini', 'grok']) {
-    await page.getByLabel('Provider', {exact: true}).selectOption(provider);
+    await page.locator('#provider').selectOption(provider);
     assert.equal(await page.locator('#model').inputValue(), '');
-    for (const id of ['effort', 'speed']) { assert.equal(await page.locator(`#${id}`).isDisabled(), true); assert.equal(await page.locator(`#${id}`).inputValue(), ''); }
+    for (const id of ['effort', 'speed']) { assert.equal(await page.locator(`#${id}`).isDisabled(), true); assert.equal(await page.locator(`#${id}-field`).isHidden(), true, 'only Codex has it'); assert.equal(await page.locator(`#${id}`).inputValue(), ''); }
     assert.equal(await page.locator('#cloud-setting').isVisible(), provider === 'gemini');
-    if (provider === 'gemini') { assert.equal(await page.locator('#allow-cloud').isChecked(), false); assert.match(await page.locator('#cloud-setting').textContent(), /each check sends the active paragraph through this cloud route/); await page.locator('#allow-cloud').check(); }
+    if (provider === 'gemini') { assert.equal(await page.locator('#allow-cloud').isChecked(), false); assert.match(await page.locator('#cloud-setting').textContent(), /each check sends the active paragraph through it/); await page.locator('#allow-cloud').check(); }
     await page.locator('#model').fill(`${provider}-model`); await save();
     assert.equal(await page.locator('#authorize').textContent(), `seatline-companion authorize lineleaf ${provider} chrome-extension://abcdefghijklmnopabcdefghijklmnop/`);
   }
-  await page.reload(); await settled(page, '#authorize');
+  await page.reload(); await settled(page, '#authorize'); await advanced(page);
   assert.equal(await page.locator('#provider').inputValue(), 'grok'); assert.equal(await page.locator('#model').inputValue(), 'grok-model');
   await page.locator('#provider').selectOption('codex');
   assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol'); assert.equal(await page.locator('#effort').inputValue(), 'xhigh'); assert.equal(await page.locator('#speed').inputValue(), 'fast');
@@ -345,16 +389,37 @@ test('settings saves provider-specific models and shows Codex-only budgets and e
 
 test('one Save retains edits across provider switches, including revoking Gemini cloud access', async () => {
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 800}});
-  await settled(page, '#authorize');
-  const save = async () => { await page.getByRole('button', {name: 'Save preferences'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.'); };
+  await settled(page, '#authorize'); await advanced(page);
+  const save = async () => { await page.getByRole('button', {name: 'Save'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.'); };
   await page.locator('#model').fill('gpt-6-sol');
   await page.locator('#provider').selectOption('gemini'); await page.locator('#model').fill('gemini-model'); await page.locator('#allow-cloud').check();
   await save();
   await page.locator('#provider').selectOption('codex'); assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol');
   await page.locator('#provider').selectOption('gemini'); await page.locator('#allow-cloud').uncheck();
   await page.locator('#provider').selectOption('claude'); await page.locator('#model').fill('sonnet'); await save();
-  await page.reload(); await settled(page, '#authorize');
+  await page.reload(); await settled(page, '#authorize'); await advanced(page);
   await page.locator('#provider').selectOption('gemini'); assert.equal(await page.locator('#allow-cloud').isChecked(), false); assert.equal(await page.locator('#model').inputValue(), 'gemini-model');
   await page.locator('#provider').selectOption('codex'); assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol');
+  await context.close();
+});
+
+test('settings: writing choices save as you make them, and only provider settings wait for Save', async () => {
+  const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 800}}); await settled(page, '#authorize');
+  const saved = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('lineleafSettings')));
+  await page.locator('#automatic').check(); await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('lineleafSettings') ?? '{}').automatic === true);
+  await page.locator('#variant').selectOption('UK'); await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('lineleafSettings') ?? '{}').variant === 'UK');
+  assert.equal(await page.locator('#provider-bar').isHidden(), true, 'saving a writing choice shows no Save bar');
+  await page.locator('#dictionary').fill('lineleaf\nseatline'); await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('lineleafSettings') ?? '{}').dictionary?.includes('seatline')); // after a short pause, no blur needed
+  // A provider change waits: it shows the bar, and a writing choice saved meanwhile does not wipe it.
+  await advanced(page); await page.locator('#model').fill('half-typed'); assert.equal(await page.locator('#provider-bar').isVisible(), true);
+  await page.locator('#clarity').check(); await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('lineleafSettings') ?? '{}').clarity === true);
+  assert.equal(await page.locator('#model').inputValue(), 'half-typed'); assert.equal(await page.locator('#provider-bar').isVisible(), true);
+  assert.equal((await saved()).model, '', 'the provider setting is not saved yet');
+  await page.getByRole('button', {name: 'Discard'}).click(); assert.equal(await page.locator('#model').inputValue(), ''); assert.equal(await page.locator('#provider-bar').isHidden(), true);
+  assert.equal((await saved()).clarity, true, 'Discard leaves the saved writing choices alone');
+  await page.locator('#model').fill('kept'); await page.getByRole('button', {name: 'Save'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.');
+  assert.equal((await saved()).model, 'kept'); assert.equal(await page.locator('#provider-bar').isHidden(), true);
+  await page.locator('#dictionary').fill('not a single word'); await page.locator('#variant').focus(); // blur: an invalid dictionary is refused, loudly
+  await page.waitForFunction(() => /^Not saved/.test(document.querySelector('#status').textContent)); assert.equal(await page.locator('#status').getAttribute('data-tone'), 'warn');
   await context.close();
 });

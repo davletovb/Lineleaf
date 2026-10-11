@@ -7,7 +7,7 @@ export const REWRITE_MODES = ['improve', 'paraphrase', 'clearer', 'shorter', 'fo
 export const MODES = ['proofread', 'clarity', ...REWRITE_MODES];
 export const AUTOMATIC_MODES = ['proofread', 'clarity'];
 export const CLARITY_MAX = 8;
-export const REWRITE_LABELS = {improve: 'Improve it', paraphrase: 'Paraphrase', clearer: 'Clearer', shorter: 'Shorter', formal: 'More formal', friendly: 'Friendlier'};
+export const REWRITE_LABELS = {improve: 'Improve', paraphrase: 'Paraphrase', clearer: 'Clearer', shorter: 'Shorter', formal: 'More formal', friendly: 'Friendlier'};
 // Modes where "nothing to change" is a valid answer; the others must return different text.
 export const MAY_STAY_SAME = ['improve', 'paraphrase'];
 export const FLAG_LABELS = {number: 'a number or date', name: 'a name or capitalised word, mention or link', negation: 'a negation', 'possible-negation': 'a possible negation (ambiguous Turkish form)'};

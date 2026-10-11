@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {chromium} from 'playwright';
 import {isPackagedLibraryModule} from '../tools/evaluation/browser-fixtures.mjs';
 import {panelFor} from './fixtures/panel-driver.mjs';
-// Explicit "Improve it" / "Paraphrase" and the tone rewrites in the inline card: scope (selection or paragraph), the request, the
+// Explicit "Improve" / "Paraphrase" and the tone rewrites in the inline card: scope (selection or paragraph), the request, the
 // before/after preview, preservation flags, and replacing through the existing apply paths (adapter or verified rich editor).
 let browser, page, inline;
 before(async () => {
@@ -27,7 +27,14 @@ async function load(url = URL_AUTOMATIC) { await page.goto(url); await page.wait
 const rewriteAnswer = text => page.evaluate(text => { fixture.worker.answer = JSON.stringify({rewrite: text}); }, text);
 const proofreadAnswer = () => page.evaluate(() => { fixture.worker.answer = '{"corrections":[{"before":"go","after":"goes","left":"He ","right":" to","category":"grammar","explanation":"Subject agreement"}]}'; });
 const requests = () => page.evaluate(() => fixture.checks.map(x => ({mode: x.mode, kind: x.kind, text: x.text})));
-async function press(name) { await inline.button(name).evaluate(el => el.focus()); await page.keyboard.press('Enter'); }
+// Improve and the card's own buttons are pressed directly; the other rewrites, and Pause Lineleaf, live in menus that the keyboard opens first.
+const IN_REWRITE_MENU = new Set(['Paraphrase', 'Clearer', 'Shorter', 'More formal', 'Friendlier']);
+async function press(name) {
+  const opener = IN_REWRITE_MENU.has(name) ? inline.locator('[data-rewrite-menu]') : name === 'Pause Lineleaf' ? inline.button('More options') : null;
+  if (opener) { await opener.evaluate(el => el.focus()); await page.keyboard.press('Enter'); }
+  await inline.button(name).evaluate(el => el.focus()); await page.keyboard.press('Enter');
+}
+const rewriteChoices = () => inline.locator('[role="menu"][aria-label="Rewrite"] [data-item]').count();
 const openCard = async () => { await page.keyboard.press('Alt+Shift+l'); await inline.locator('#card-title').waitFor(); };
 const suggested = () => inline.locator('.suggested').waitFor();
 const label = () => inline.locator('.badge').evaluate(el => el.getAttribute('aria-label'));
@@ -46,14 +53,14 @@ test('a Turkish inline rewrite warns about negation, stays advisory, and preserv
   ]) {
     await load();
     await rewriteAnswer(flipped); await useTextarea(source); await openCard();
-    assert.equal(await inline.locator('[data-rewrite]').count(), 6);
-    await press('Improve it'); await suggested();
+    assert.equal(await inline.locator('[data-rewrite]').count(), 1); assert.equal(await rewriteChoices(), 5); // Improve, and the five rewrites in the menu
+    await press('Improve'); await suggested();
     assert.match(await inline.locator('.warn').textContent(), /a (?:possible )?negation/);
     assert.equal(await page.locator('#textarea').inputValue(), source);
     assert.match((await page.evaluate(() => fixture.worker.turns))[0].params.system, /Preserve (?:Turkish verbal )?negation/);
     await press('Back');
     // Back closes the card when there are no proofreading suggestions to restore.
-    await rewriteAnswer(preserved); await openCard(); await press('Improve it'); await suggested();
+    await rewriteAnswer(preserved); await openCard(); await press('Improve'); await suggested();
     assert.equal(await inline.locator('.warn').count(), 0);
     await press('Replace'); await inline.button('Undo last edit').waitFor();
     assert.equal(await page.locator('#textarea').inputValue(), preserved);
@@ -95,10 +102,10 @@ async function placeCaret(host, needle) {
 }
 async function caretAfter(host, needle) { await placeCaret(host, needle); await inline.locator('.badge').waitFor(); }
 
-test('Improve it rewrites the caret paragraph of a text field: explicit request, before/after preview, Replace and native undo', async () => {
+test('Improve rewrites the caret paragraph of a text field: explicit request, before/after preview, Replace and native undo', async () => {
   await load(); await rewriteAnswer('He goes to work.');
   await useTextarea('Intro paragraph.\nHe go to work.');
-  await openCard(); await press('Improve it'); await suggested();
+  await openCard(); await press('Improve'); await suggested();
   assert.deepEqual(await requests(), [{mode: 'improve', kind: 'manual', text: 'He go to work.'}]); // only the caret paragraph, as an explicit request
   assert.equal(await inline.locator('.text').count(), 2);
   assert.equal(await inline.locator('.suggested').textContent(), 'He goes to work.');
@@ -146,10 +153,10 @@ test('"already reads well" shows no preview and keeps the proofreading suggestio
   await useTextarea('He go to work.'); await typeAtEnd(' ');
   await page.waitForFunction(() => fixture.worker.turns.length > 0, null, {timeout: 8000}); await inline.locator('.underline').waitFor();
   await rewriteAnswer('He go to work. '.trimEnd() + ' ');
-  await openCard(); await press('Improve it');
+  await openCard(); await press('Improve');
   await inline.locator('#status').waitFor(el => /no change suggested/.test(el.textContent));
   assert.equal(await inline.locator('.suggested').count(), 0); assert.equal(await inline.locator('.underline').count(), 1); // the suggestion is back
-  await rewriteAnswer('He goes to work.'); await press('Improve it'); await suggested();
+  await rewriteAnswer('He goes to work.'); await press('Improve'); await suggested();
   assert.equal(await inline.locator('.underline').count(), 0); await press('Back');
   assert.equal(await inline.locator('.underline').count(), 1); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work. ');
 });
@@ -157,7 +164,7 @@ test('"already reads well" shows no preview and keeps the proofreading suggestio
 test('typing while a rewrite is shown discards it; the field is never changed by Back or by typing', async () => {
   await load(); await rewriteAnswer('He goes to work.');
   await useTextarea('He go to work.');
-  await openCard(); await press('Improve it'); await suggested();
+  await openCard(); await press('Improve'); await suggested();
   await page.locator('#textarea').focus(); await page.keyboard.type('!');
   await inline.locator('.badge').waitFor(el => /Text changed/.test(el.getAttribute('aria-label')));
   await openCard(); assert.equal(await inline.locator('.suggested').count(), 0);
@@ -166,7 +173,7 @@ test('typing while a rewrite is shown discards it; the field is never changed by
 
 test('a verified rich editor replaces the rewritten paragraph or selection through its own input path', async () => {
   await load(); await rewriteAnswer('He goes to work.');
-  await caretAfter('#prose', 'work.'); await openCard(); await press('Improve it'); await suggested();
+  await caretAfter('#prose', 'work.'); await openCard(); await press('Improve'); await suggested();
   assert.deepEqual((await requests()).at(-1), {mode: 'improve', kind: 'manual', text: 'He go to work.'});
   assert.equal(await inline.button('Replace').isDisabled(), false);
   await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
@@ -220,7 +227,7 @@ test('when the second step of a whole-text rewrite is refused, the first is take
 test('a rewrite the field refuses is rolled back and its preview stays available to copy after the next poll', async () => {
   await load(); await rewriteAnswer('He goes to work and they were late.');
   await useTextarea('He go to work.'); await page.locator('#textarea').evaluate(el => { el.maxLength = 15; el.setSelectionRange(14, 14); });
-  await openCard(); await press('Improve it'); await suggested(); await press('Replace');
+  await openCard(); await press('Improve'); await suggested(); await press('Replace');
   await inline.locator('#status').waitFor(el => /Original text restored/.test(el.textContent));
   assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
   await page.waitForTimeout(700); // The poll used to clear the card about 250 ms after a refused edit.
@@ -231,7 +238,7 @@ test('a rewrite the field refuses is rolled back and its preview stays available
 
 test('a Slate-like editor that only trusts beforeinput takes a whole-paragraph rewrite itself', async () => {
   await load(); await rewriteAnswer('He goes to work.');
-  await caretAfter('#model-slate', 'work.'); await openCard(); await press('Improve it'); await suggested();
+  await caretAfter('#model-slate', 'work.'); await openCard(); await press('Improve'); await suggested();
   await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
   assert.deepEqual(await page.evaluate(() => modelSlate.lines), ['Intro paragraph.', 'He goes to work.']);
   assert.equal(await text('#model-slate'), 'Intro paragraph.\nHe goes to work.');
@@ -239,11 +246,11 @@ test('a Slate-like editor that only trusts beforeinput takes a whole-paragraph r
 
 test('rewrites across formatting and in copy-only editors can be previewed and copied, never replaced', async () => {
   await load(); await rewriteAnswer('He goes to work.');
-  await caretAfter('#spans', 'work.'); await openCard(); await press('Improve it'); await suggested();
+  await caretAfter('#spans', 'work.'); await openCard(); await press('Improve'); await suggested();
   assert.equal(await inline.button('Replace').isDisabled(), true); assert.match(await inline.locator('.note').textContent(), /spans formatting or a mention/);
   assert.equal(await page.locator('#spans').innerHTML(), '<p>Intro paragraph.</p><p>He <b>go</b> to work.</p>');
   await load('https://mail.google.com/mail/u/0/?automatic'); await rewriteAnswer('He goes to work.');
-  await caretAfter('#prose', 'work.'); await openCard(); await press('Improve it'); await suggested();
+  await caretAfter('#prose', 'work.'); await openCard(); await press('Improve'); await suggested();
   assert.equal(await inline.button('Replace').count(), 0); assert.equal(await inline.button('Copy').count(), 1);
   assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
   assert.equal(await line('#prose'), 'He go to work.');
@@ -252,7 +259,7 @@ test('rewrites across formatting and in copy-only editors can be previewed and c
 test('rewrites are refused where nothing eligible is selected', async () => {
   await load(); await rewriteAnswer('x');
   await useTextarea('1234 5678');
-  await openCard(); await press('Improve it');
+  await openCard(); await press('Improve');
   await inline.locator('#status').waitFor(el => /Rewrites need 1–2,000 characters of text with letters/.test(el.textContent));
   assert.deepEqual(await requests(), []);
 });
@@ -269,7 +276,7 @@ for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not co
       else if (fault === 'no connection can be made') fixture.faults.connect = true;
       else { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); } // shorten only the watchdog
     }, fault);
-    await openCard(); await press('Improve it');
+    await openCard(); await press('Improve');
     await inline.locator('#status').waitFor((el, text) => el.textContent.startsWith(text), expected);
     assert.equal(await inline.locator('.underline').count(), 1); // the set-aside correction is back
     assert.equal(await inline.locator('.suggested').count(), 0);
@@ -282,7 +289,7 @@ for (const [fault, expected] of [['the worker goes away', 'Lineleaf could not co
 test('Lineleaf’s Undo survives the follow-up proofreading check until the text is edited', async () => {
   await load(); await rewriteAnswer('He goes to work.');
   await useTextarea('He go to work.');
-  await openCard(); await press('Improve it'); await suggested(); await press('Replace'); await inline.button('Undo last edit').waitFor();
+  await openCard(); await press('Improve'); await suggested(); await press('Replace'); await inline.button('Undo last edit').waitFor();
   await page.evaluate(() => { fixture.worker.answer = '{"corrections":[]}'; });
   await page.keyboard.press('Escape'); // back to the field, as a user would
   await page.waitForFunction(() => fixture.checks.some(x => x.kind === 'automatic'), null, {timeout: 8000});
@@ -291,7 +298,7 @@ test('Lineleaf’s Undo survives the follow-up proofreading check until the text
   assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
   await load(); await rewriteAnswer('He goes to work.');
   await useTextarea('He go to work.');
-  await openCard(); await press('Improve it'); await suggested(); await press('Replace'); await inline.button('Undo last edit').waitFor();
+  await openCard(); await press('Improve'); await suggested(); await press('Replace'); await inline.button('Undo last edit').waitFor();
   await page.locator('#textarea').focus(); await page.keyboard.type('!'); // real typing does end it
   await inline.locator('.badge').waitFor(el => /Text changed/.test(el.getAttribute('aria-label')));
   await openCard(); assert.equal(await inline.button('Undo last edit').count(), 0);
@@ -300,7 +307,7 @@ test('Lineleaf’s Undo survives the follow-up proofreading check until the text
 test('a selection Lineleaf cannot use is refused, never widened to the paragraph', async () => {
   await load(); await rewriteAnswer('x');
   await selectIn('#prose', '.'); // punctuation only: no letters to rewrite
-  await openCard(); await press('Improve it');
+  await openCard(); await press('Improve');
   await inline.locator('#status').waitFor(el => /Rewrites need 1–2,000 characters of text with letters inside one paragraph/.test(el.textContent));
   await page.evaluate(() => { // from the first paragraph into the second
     const [first, second] = document.querySelectorAll('#prose p'); (first.closest('[contenteditable]')).focus();
@@ -310,7 +317,7 @@ test('a selection Lineleaf cannot use is refused, never widened to the paragraph
   await openCard(); await press('Paraphrase');
   await inline.locator('#status').waitFor(el => /Rewrites need 1–2,000 characters of text with letters inside one paragraph/.test(el.textContent));
   assert.deepEqual(await requests(), []);
-  await caretAfter('#prose', 'work.'); await openCard(); await press('Improve it'); await suggested(); // an empty selection still means the paragraph
+  await caretAfter('#prose', 'work.'); await openCard(); await press('Improve'); await suggested(); // an empty selection still means the paragraph
   assert.deepEqual(await requests(), [{mode: 'improve', kind: 'manual', text: 'He go to work.'}]);
 });
 
@@ -322,7 +329,7 @@ for (const [host, model] of [['#model-slate', 'modelSlate'], ['#model-draft', 'm
     assert.deepEqual(await page.evaluate(model => window[model].lines, model), ['Intro paragraph.', 'He goes to work.']);
     assert.equal(await text(host), 'Intro paragraph.\nHe goes to work.');
     await rewriteAnswer('He works.'); // the editor was not marked unsafe: the next rewrite can still be replaced
-    await caretAfter(host, 'work.'); await openCard(); await press('Improve it'); await suggested();
+    await caretAfter(host, 'work.'); await openCard(); await press('Improve'); await suggested();
     assert.equal(await inline.button('Replace').count(), 1); assert.equal(await inline.button('Replace').isDisabled(), false);
   });
 }
@@ -337,7 +344,7 @@ test('a selection replacement whose surroundings the editor changes is detected,
   await page.waitForFunction(() => document.querySelector('#mangling').textContent.includes('work!'));
   await inline.locator('.badge').waitFor(el => /The editor changed/.test(el.getAttribute('aria-label')));
   assert.ok((await text('#mangling')).includes('He goes to work!'));
-  await rewriteAnswer('He works!'); await caretAfter('#mangling', 'work!'); await openCard(); await press('Improve it'); await suggested();
+  await rewriteAnswer('He works!'); await caretAfter('#mangling', 'work!'); await openCard(); await press('Improve'); await suggested();
   assert.equal(await inline.button('Replace').count(), 0); assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
 });
 
@@ -367,7 +374,7 @@ test('with automatic checking off nothing is built, read or sent until Alt Shift
   await openCard();
   assert.deepEqual(await requests(), []); // opening the card reads and sends nothing
   assert.match(await inline.locator('#status').textContent(), /Automatic checking is off, so nothing is sent until you choose/);
-  await press('Improve it'); await suggested();
+  await press('Improve'); await suggested();
   assert.deepEqual(await requests(), [{mode: 'improve', kind: 'manual', text: 'He go to work.'}]);
   assert.match(await inline.locator('.category').textContent(), /Selected text/);
   await press('Replace'); await inline.button('Undo last edit').waitFor();
@@ -395,12 +402,12 @@ test('Check now with automatic checking off is one explicit proofreading request
 test('on demand in rich editors: a verified editor replaces through its own path, a copy-only host only copies', async () => {
   await load(MANUAL); await rewriteAnswer('He goes to work.');
   await placeCaret('#prose', 'work.'); assert.equal(await inlineHosts(), 0);
-  await openCard(); await press('Improve it'); await suggested();
+  await openCard(); await press('Improve'); await suggested();
   assert.equal(await inline.button('Replace').isDisabled(), false);
   await press('Replace'); await inline.locator('.badge').waitFor(el => /^Applied\./.test(el.getAttribute('aria-label')));
   assert.equal(await line('#prose'), 'He goes to work.');
   await load('https://mail.google.com/mail/u/0/'); await rewriteAnswer('He goes to work.');
-  await placeCaret('#prose', 'work.'); await openCard(); await press('Improve it'); await suggested();
+  await placeCaret('#prose', 'work.'); await openCard(); await press('Improve'); await suggested();
   assert.equal(await inline.button('Replace').count(), 0); assert.match(await inline.locator('.note').textContent(), /Copy-only editor/);
   assert.equal(await line('#prose'), 'He go to work.');
 });
@@ -458,15 +465,15 @@ test('with automatic checking off, typing in a rich editor reads nothing more an
 test('while a request runs the card stays open with progress, the actions are disabled and Cancel check stops it', async () => {
   await load(); await proofreadAnswer(); await useTextarea('He go to work.');
   await page.evaluate(() => { fixture.worker.hold = true; });
-  await openCard(); await press('Improve it');
-  await inline.locator('#status').waitFor(el => /^Working on “Improve it” with your provider/.test(el.textContent));
+  await openCard(); await press('Improve');
+  await inline.locator('#status').waitFor(el => /^Working on “Improve” with your provider/.test(el.textContent));
   await inline.locator('[data-elapsed]').waitFor(el => /^Waiting for the provider… \d+ s\. Choose Cancel check to stop\.$/.test(el.textContent));
-  assert.equal(await inline.button('Improve it').isDisabled(), true); assert.equal(await inline.button('Check now').isDisabled(), true);
+  assert.equal(await inline.button('Improve').isDisabled(), true); assert.equal(await inline.button('Check now').isDisabled(), true);
   assert.equal(await inline.button('Cancel check').isDisabled(), false);
   await press('Cancel check'); await inline.locator('#status').waitFor(el => /^Cancelled/.test(el.textContent));
-  assert.equal(await inline.button('Improve it').isDisabled(), false); assert.equal(await inline.locator('[data-elapsed]').count(), 0);
+  assert.equal(await inline.button('Improve').isDisabled(), false); assert.equal(await inline.locator('[data-elapsed]').count(), 0);
   await page.evaluate(() => { fixture.worker.hold = false; fixture.worker.answer = '{"rewrite":"He goes to work."}'; });
-  await press('Improve it'); await suggested();
+  await press('Improve'); await suggested();
 });
 
 test('an action Lineleaf refuses says why instead of doing nothing, and works once the reason is gone', async () => {
@@ -484,7 +491,7 @@ test('a Check now that times out reopens the card with the reason, and the next 
   await page.evaluate(() => { fixture.worker.hold = true; const real = window.setTimeout; window.setTimeout = (fn, ms, ...args) => real(fn, ms === 125000 ? 50 : ms, ...args); }); // shorten only the explicit watchdog
   await openCard(); await press('Check now');
   await inline.locator('#status').waitFor(el => el.textContent.startsWith('The provider did not answer in time'));
-  assert.equal(await inline.button('Check now').isDisabled(), false); assert.equal(await inline.button('Improve it').isDisabled(), false);
+  assert.equal(await inline.button('Check now').isDisabled(), false); assert.equal(await inline.button('Improve').isDisabled(), false);
   await page.evaluate(() => { fixture.worker.hold = false; });
   await press('Check now'); await inline.locator('.underline').waitFor();
 });
@@ -492,16 +499,17 @@ test('a Check now that times out reopens the card with the reason, and the next 
 // The hold that follows a provider timeout is temporary: an editor refused during it must try again by itself afterwards.
 test('an automatic check refused during the provider hold is retried after it, instead of leaving the editor blocked', async () => {
   await load(); await proofreadAnswer(); await useTextarea('He go to work.');
-  await page.evaluate(() => { // the worker's 90-second turn limit becomes 50 ms; retries that would wait minutes wait three seconds
-    fixture.worker.hold = true; const real = window.setTimeout;
-    window.setTimeout = (fn, ms, ...args) => real(fn, ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args);
+  await page.evaluate(() => { // the worker's 90-second turn limit becomes 50 ms while `fast` is set; retries that would wait minutes wait three seconds
+    fixture.worker.hold = true; window.fast = true; const real = window.setTimeout;
+    window.setTimeout = (fn, ms, ...args) => real(fn, window.fast && ms === 90000 ? 50 : ms >= 250000 && ms < 300000 ? 3000 : ms, ...args);
   });
   await openCard(); await press('Check now');
   await inline.locator('#status').waitFor(el => el.textContent.startsWith('The provider did not answer in time')); // sets the hold
-  await page.evaluate(() => { fixture.worker.hold = false; });
-  await press('Cancel check'); await typeAtEnd(' '); // unblocked; the next automatic check is refused by the hold
+  // A failed check blocks automatic checking until the user acts. Cancelling a check that is running is such an action, and it does not clear the hold.
+  await page.evaluate(() => { window.fast = false; }); await press('Check now'); await inline.locator('#status').waitFor(el => el.dataset.busy === 'true');
+  await press('Cancel check'); await page.evaluate(() => { fixture.worker.hold = false; }); await typeAtEnd(' '); // unblocked; the next automatic check is refused by the hold
   await inline.locator('.badge').waitFor(el => /Automatic checking is paused/.test(el.getAttribute('aria-label')));
   await page.evaluate(() => { const real = Date.now; Date.now = () => real.call(Date) + 301000; }); // the five minutes pass
   await inline.locator('.underline').waitFor(); // retried by itself and answered
-  assert.deepEqual((await requests()).map(x => x.kind), ['manual', 'automatic', 'automatic']);
+  assert.deepEqual((await requests()).map(x => x.kind), ['manual', 'manual', 'automatic', 'automatic']);
 });
