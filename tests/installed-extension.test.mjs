@@ -15,15 +15,18 @@ before(async () => {
   await options.waitForFunction(() => document.querySelector('#authorize').textContent.includes('seatline-companion'));
 });
 after(async () => { await context?.close(); });
+const stored = () => worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+async function settles(check) { for (let tries = 0; tries < 100; tries++) { const preferences = await stored(); if (check(preferences)) return preferences; await new Promise(resolve => setTimeout(resolve, 100)); } throw new Error('preferences did not settle'); }
+const advanced = page => page.evaluate(() => { document.querySelector('#advanced').open = true; }); // the model lives under Advanced
 test('built MV3 extension loads with the stable ID and settings persist across pages', async () => {
   assert.equal(new URL(worker.url()).host, id);
   assert.equal((await worker.evaluate(() => chrome.runtime.getManifest())).version, '0.1.0');
   assert.equal(await options.locator('#automatic').isChecked(), false);
   assert.equal(await options.locator('#dictionary').inputValue(), '');
-  await options.locator('#variant').selectOption('UK'); await options.locator('#model').fill('test-model');
-  await options.locator('#automatic').check(); await options.locator('#dictionary').fill('Seatline\nLineleaf');
-  await options.getByRole('button', {name: 'Save preferences'}).click();
-  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  await options.locator('#variant').selectOption('UK'); await options.locator('#automatic').check(); await options.locator('#dictionary').fill('Seatline\nLineleaf'); // these save as they are changed
+  await advanced(options); await options.locator('#model').fill('test-model'); await options.getByRole('button', {name: 'Save'}).click(); // the provider has its own Save
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.');
+  await settles(saved => saved.variant === 'UK' && saved.automatic === true && saved.dictionary.includes('lineleaf') && saved.model === 'test-model');
   await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'UK');
   assert.equal(await options.locator('#model').inputValue(), 'test-model');
   assert.equal(await options.locator('#automatic').isChecked(), true);
@@ -32,8 +35,8 @@ test('built MV3 extension loads with the stable ID and settings persist across p
 });
 test('missing native host produces a fixed diagnostic in the actual extension', async () => {
   await options.getByRole('button', {name: 'Check Seatline'}).click();
-  await options.waitForFunction(() => document.querySelector('#status').textContent.includes('Seatline is unavailable.'));
-  assert.equal(await options.locator('#connection').isEnabled(), true);
+  await options.waitForFunction(() => document.querySelector('#seatline-note').textContent.includes('Seatline is unavailable.'));
+  assert.equal(await options.locator('#connection').isEnabled(), true); assert.equal(await options.locator('#seatline-dot').getAttribute('data-state'), 'problem');
 });
 test('explicit optional permission enables only the chosen site, panel opens, disabling unregisters access', async () => {
   // Preapprove only the synthetic host through Chromium's extension-management API.
@@ -59,7 +62,7 @@ test('explicit optional permission enables only the chosen site, panel opens, di
   });
   assert.equal(opened.ok, true);
   const panel = panelFor(writing);
-  await panel.button('Check selection').waitFor();
+  await panel.button('Proofread').waitFor();
   assert.equal(await panel.locator('#selected').textContent(), 'He go to work.');
   assert.equal(await writing.locator('[data-lineleaf-root]').evaluate(el => el.shadowRoot), null);
   await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: false}}));
@@ -73,8 +76,7 @@ test('installed automatic flow stays idle on focus, reports missing host after t
   await management.evaluate(async id => chrome.developerPrivate.addHostPermission(id, 'https://writing.test/*'), id); await management.close();
   await options.evaluate(() => { window.granted = null; }); await options.getByRole('button', {name: 'Grant fixture site'}).click();
   await options.waitForFunction(() => window.granted === true);
-  await options.locator('#automatic').check(); await options.getByRole('button', {name: 'Save preferences'}).click();
-  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  await options.locator('#automatic').check(); await settles(saved => saved.automatic === true); // saved as it is changed
   assert.equal((await options.evaluate(() => chrome.runtime.sendMessage({type: 'set-site', payload: {origin: 'https://writing.test', enabled: true}}))).ok, true);
   await options.waitForFunction(async () => (await chrome.scripting.getRegisteredContentScripts()).some(x => x.id === 'lineleaf-sites'));
   const writing = await context.newPage(); await writing.goto('https://writing.test/automatic'); await writing.locator('#draft').focus();
@@ -85,7 +87,7 @@ test('installed automatic flow stays idle on focus, reports missing host after t
   await writing.keyboard.press('End'); await writing.keyboard.type(' Again.');
   await inline.locator('.badge').waitFor(el => el.getAttribute('aria-label').includes('Seatline is unavailable.'));
   assert.equal(await writing.locator('#draft').inputValue(), 'He go to work. Again.');
-  await writing.keyboard.press('Alt+Shift+l'); await inline.button('Pause Lineleaf').click();
+  await writing.keyboard.press('Alt+Shift+l'); await inline.button('More options').click(); await inline.button('Pause Lineleaf').click();
   await writing.waitForSelector('[data-lineleaf-inline]', {state: 'detached'});
   assert.equal(await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences.paused), true);
   await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
@@ -134,27 +136,25 @@ test('two options pages preserve newer pause/consent/dictionary and reject same-
   await other.waitForFunction(() => document.querySelector('#authorize').textContent.includes('seatline-companion'));
   await other.locator('#paused').check();
   await other.waitForFunction(() => document.querySelector('#status').textContent.includes('Lineleaf is paused'));
-  await other.locator('#automatic').check(); await other.locator('#dictionary').fill('Seatline');
-  await other.getByRole('button', {name: 'Save preferences'}).click();
-  await other.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+  await other.locator('#automatic').check(); await other.locator('#dictionary').fill('Seatline'); // saved as they are changed
+  await settles(saved => saved.automatic === true && saved.dictionary.join() === 'seatline');
   // The original tab still shows the old defaults; changing just the model must preserve other edits.
   assert.equal(await options.locator('#paused').isChecked(), false);
-  await options.locator('#model').fill('new-model'); await options.getByRole('button', {name: 'Save preferences'}).click();
-  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
-  let preferences = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
-  assert.equal(preferences.paused, true); assert.equal(preferences.automatic, true); assert.deepEqual(preferences.dictionary, ['seatline']);
+  await advanced(options); await options.locator('#model').fill('new-model'); await options.getByRole('button', {name: 'Save'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.');
+  let preferences = await stored();
+  assert.equal(preferences.paused, true); assert.equal(preferences.automatic, true); assert.deepEqual(preferences.dictionary, ['seatline']); assert.equal(preferences.model, 'new-model');
   assert.equal(await options.locator('#paused').isChecked(), true);
-  await other.locator('#dictionary').fill('Seatline\nCompanion'); await other.getByRole('button', {name: 'Save preferences'}).click();
-  await other.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#dictionary').value.includes('companion'));
-  await options.locator('#dictionary').fill('Lineleaf'); await options.getByRole('button', {name: 'Save preferences'}).click();
-  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#dictionary').value.includes('companion'));
-  preferences = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+  // A tab that removes a word it knew while another tab adds one keeps both changes.
+  await options.reload(); await options.waitForFunction(() => document.querySelector('#dictionary').value === 'seatline');
+  await other.locator('#dictionary').fill('Seatline\nCompanion'); await settles(saved => saved.dictionary.includes('companion'));
+  await options.locator('#dictionary').fill('Lineleaf'); preferences = await settles(saved => saved.dictionary.includes('lineleaf'));
   assert.deepEqual(preferences.dictionary, ['companion', 'lineleaf']);
-  await options.locator('#model').fill('latest-model'); await options.getByRole('button', {name: 'Save preferences'}).click();
-  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.' && document.querySelector('#model').value === 'latest-model');
-  await other.locator('#model').fill('stale-model'); await other.getByRole('button', {name: 'Save preferences'}).click();
+  await options.reload(); await advanced(options); await options.locator('#model').fill('latest-model'); await options.getByRole('button', {name: 'Save'}).click();
+  await options.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.' && document.querySelector('#model').value === 'latest-model');
+  await advanced(other); await other.locator('#model').fill('stale-model'); await other.getByRole('button', {name: 'Save'}).click();
   await other.waitForFunction(() => document.querySelector('#status').textContent.includes('Preferences changed elsewhere'));
-  preferences = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+  preferences = await stored();
   assert.equal(preferences.model, 'latest-model'); assert.equal(preferences.paused, true); assert.equal(preferences.automatic, true);
   assert.deepEqual(preferences.dictionary, ['companion', 'lineleaf']);
   await other.close(); await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
@@ -164,25 +164,20 @@ test('the settings choose only the English spelling: no language to pick, a stor
   await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'US' && document.querySelector('#status').textContent === '');
   assert.equal(await options.locator('label[for="variant"]').textContent(), 'English spelling');
   assert.deepEqual(await options.locator('#variant option').evaluateAll(list => list.map(option => [option.value, option.textContent])), [['US', 'English · US'], ['UK', 'English · UK']]);
-  assert.match(await options.locator('#writing').textContent(), /works out the language of what you write, so you never switch it/);
-  const save = async () => {
-    await options.getByRole('button', {name: 'Save preferences'}).click();
-    await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
-  };
-  const stored = () => worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
-  // A direct click: the fixed save bar can cover a switch near the bottom of the window, which would swallow a pointer click.
+  assert.match(await options.locator('#writing').textContent(), /detects English or Turkish itself, so there is nothing to switch/);
+  // A direct click: it reaches a switch wherever the page is scrolled to. Each choice is saved as it is made.
   const toggle = id => options.locator(id).evaluate(el => el.click());
-  await toggle('#automatic'); await toggle('#clarity'); await save();
-  assert.equal((await stored()).clarity, true);
+  await toggle('#automatic'); await toggle('#clarity'); await settles(saved => saved.clarity === true);
   const disclosure = await options.locator('label[for="clarity"] .muted').textContent();
   assert.match(disclosure, /English and Turkish/); assert.doesNotMatch(disclosure, /English setting/);
-  // A "TR" saved while Turkish was a setting reads as US: the page shows US, and a save from it works.
+  // A "TR" saved while Turkish was a setting reads as US: the page shows US, and a change from it works.
   await worker.evaluate(async () => { const { preferences } = await chrome.storage.local.get('preferences'); await chrome.storage.local.set({preferences: {...preferences, variant: 'TR'}}); });
   await options.reload(); await options.waitForFunction(() => document.querySelector('#variant').value === 'US' && document.querySelector('#status').textContent === '');
-  await options.locator('#variant').selectOption('UK'); await save(); assert.equal((await stored()).variant, 'UK');
+  await options.locator('#variant').selectOption('UK'); assert.equal((await settles(saved => saved.variant === 'UK')).variant, 'UK');
   // Dictionary words with Turkish letters are cased the Turkish way (capital I is dotless), which is also what the provider receives.
-  await options.locator('#dictionary').fill('Işık\nAnkara'); await save();
-  assert.deepEqual((await stored()).dictionary, ['ışık', 'ankara']); assert.equal(await options.locator('#dictionary').inputValue(), 'ışık\nankara');
+  await options.locator('#dictionary').fill('Işık\nAnkara'); await options.locator('#variant').focus(); // leaving the box saves it and tidies what it shows
+  await settles(saved => saved.dictionary.includes('ankara'));
+  assert.deepEqual((await stored()).dictionary, ['ışık', 'ankara']); await options.waitForFunction(() => document.querySelector('#dictionary').value === 'ışık\nankara');
   assert.equal(await options.locator('#clarity').isChecked(), true); // the clearer-wording choice is not tied to a language
   await options.getByRole('button', {name: 'Reset preferences and site access'}).click();
   await options.waitForFunction(() => document.querySelector('#status').textContent.includes('reset'));

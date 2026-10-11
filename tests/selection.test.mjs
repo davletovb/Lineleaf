@@ -39,10 +39,14 @@ async function waitForPanel() {
   await panel.locator('#status').waitFor(el => el.textContent.length > 0);
 }
 const status = () => panel.locator('#status').textContent();
-async function check() {
-  await panel.button('Check selection').click();
-  await panel.button('Accept').waitFor();
+// The panel starts a check with Proofread or Improve; the other rewrites are in its Rewrite menu.
+async function run(mode) {
+  if (mode === 'proofread') await panel.button('Proofread').click();
+  else if (mode === 'improve') await panel.button('Improve').click();
+  else { await panel.locator('#rewrite').click(); await panel.locator(`[data-item="${mode}"]`).click(); }
 }
+async function check(mode = 'proofread') { await run(mode); await panel.button('Accept').waitFor(); }
+const panelModes = () => panel.locator('[role="menu"][aria-label="Rewrite"] [data-item]').evaluate((_, __, items) => ['proofread', 'improve', ...items.map(item => item.dataset.item)]);
 for (const id of ['textarea', 'input', 'controlled', 'editable']) {
   test(`selection panel: ${id} previews, accepts and undoes with site state intact`, async () => {
     await open(id); await check();
@@ -85,7 +89,7 @@ test('selections spanning ignored, hidden, or code descendants never enter previ
       el.innerHTML = `He ${markup} to work.`; document.body.append(el);
     }, markup);
     await open('spanning');
-    assert.equal(await panel.button('Check selection').isDisabled(), true);
+    assert.equal(await panel.button('Proofread').isDisabled(), true);
     assert.equal(await panel.locator('#selected').textContent(), '');
   }
   assert.equal(await page.evaluate(() => fixture.checks.length), 0);
@@ -99,9 +103,9 @@ test('selections spanning ignored, hidden, or code descendants never enter previ
 test('pause and unavailable diagnostics are preserved both on opening and before checking', async () => {
   await page.evaluate(() => { fixture.code = 'PAUSED'; }); await open();
   assert.equal(await status(), 'Lineleaf is paused. Resume it in settings.');
-  assert.equal(await panel.button('Check selection').isDisabled(), true);
+  assert.equal(await panel.button('Proofread').isDisabled(), true);
   await page.evaluate(() => { fixture.code = null; }); await open();
-  await page.evaluate(() => { fixture.code = 'PAUSED'; }); await panel.button('Check selection').click();
+  await page.evaluate(() => { fixture.code = 'PAUSED'; }); await panel.button('Proofread').click();
   assert.equal(await status(), 'Lineleaf is paused. Resume it in settings.');
   assert.equal(await page.evaluate(() => fixture.checks.length), 0);
   await page.evaluate(() => { fixture.code = 'UNAVAILABLE'; }); await open();
@@ -124,19 +128,19 @@ test('bundled panel exchanges a complete check/result with the production worker
   await panel.button('Undo last edit').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
   assert.equal(await page.evaluate(() => JSON.stringify(fixture.worker.data).includes('He go')), false);
 });
-test('the panel offers Improve it and Paraphrase through the production worker, flags silent changes and reports "no change"', async () => {
+test('the panel offers Improve and Paraphrase through the production worker, flags silent changes and reports "no change"', async () => {
   await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
   await page.locator('#textarea').fill('Maya paid $1,250 on Monday.');
-  const modes = await open('textarea', 0, 27).then(() => panel.locator('#mode').evaluate(el => [...el.options].map(option => option.value)));
-  assert.deepEqual(modes, ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
+  await open('textarea', 0, 27);
+  assert.deepEqual(await panelModes(), ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Maya settled $2,500 on Monday.'}); });
-  await panel.locator('#mode').selectOption('paraphrase'); await check();
+  await check('paraphrase');
   assert.equal(await panel.locator('.category').textContent(), 'Optional style');
   assert.match(await panel.locator('.explanation').evaluate((_, __, all) => all.map(el => el.textContent).join('|')), /Check this version: it changes a number or date\./);
   const sends = await page.evaluate(() => fixture.worker.turns);
   assert.match(sends.at(-1).params.system, /different words/); assert.equal(await page.locator('#textarea').inputValue(), 'Maya paid $1,250 on Monday.');
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Maya paid $1,250 on Monday.'}); });
-  await panel.locator('#mode').selectOption('improve'); await panel.button('Check selection').click();
+  await run('improve');
   await panel.locator('#status').waitFor(el => /No change suggested/.test(el.textContent));
   assert.equal(await panel.button('Accept').count(), 0);
 });
@@ -144,19 +148,19 @@ test('the panel offers proofreading and six rewrites for Turkish, with guarded p
   await page.goto('https://selection.lineleaf.test/?controller'); await page.waitForFunction(() => window.__lineleafMounted);
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({corrections: [{before: 'Bugun', after: 'Bugün', left: '', right: ' okula gidiyorum.', category: 'spelling', explanation: 'Türkçe karakter eksik.'}]}); });
   await page.locator('#textarea').fill('Bugun okula gidiyorum.'); await open('textarea', 0, 22);
-  assert.deepEqual(await panel.locator('#mode').evaluate(el => [...el.options].filter(option => !option.disabled).map(option => option.value)), ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
+  assert.deepEqual(await panelModes(), ['proofread', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']);
   await check(); assert.equal(await panel.locator('details .explanation').textContent(), 'Türkçe karakter eksik.');
   assert.match((await page.evaluate(() => fixture.worker.turns)).at(-1).params.system, /Turkish Language Association/);
   await panel.button('Accept').click(); assert.equal(await page.locator('#textarea').inputValue(), 'Bugün okula gidiyorum.');
   await page.locator('#textarea').fill('Ben gelmedim.'); await open('textarea', 0, 13);
   await page.evaluate(() => { fixture.worker.answer = JSON.stringify({rewrite: 'Ben geldim.'}); });
-  await panel.locator('#mode').selectOption('improve'); await check();
+  await check('improve');
   assert.match(await panel.locator('.warn').textContent(), /a negation/);
   assert.equal(await page.locator('#textarea').inputValue(), 'Ben gelmedim.'); // A warning never applies the advisory result.
 });
 test('typing and ABA changes cancel work and discard a late response', async () => {
   await page.evaluate(() => { fixture.hold = true; }); await open();
-  await panel.button('Check selection').click();
+  await panel.button('Proofread').click();
   await page.waitForFunction(() => fixture.checks.length === 1);
   await page.evaluate(() => { textarea.value = 'Changed'; textarea.dispatchEvent(new InputEvent('input')); textarea.value = 'He go to work.'; textarea.dispatchEvent(new InputEvent('input')); fixture.ports[0].result(); });
   assert.match(await status(), /selection changed/i); assert.equal(await panel.button('Accept').count(), 0);
@@ -166,25 +170,25 @@ test('dismiss and explicit cancel never change the field', async () => {
   await open(); await check(); await panel.button('Dismiss').click();
   assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
   await page.evaluate(() => { fixture.hold = true; }); await open();
-  await panel.button('Check selection').click();
+  await panel.button('Proofread').click();
   await panel.button('Cancel').click();
   assert.match(await status(), /Cancelled/); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
 });
 test('complex editor offers copy fallback and optional rewrite is visibly labeled', async () => {
-  await open('complex'); await panel.locator('#mode').selectOption('formal'); await check();
+  await open('complex'); await check('formal');
   assert.equal(await panel.button('Accept').isDisabled(), true);
   assert.equal(await panel.locator('.category').textContent(), 'Optional style');
   assert.equal(await page.locator('#complex').innerHTML(), '<p>He go to work.</p>');
 });
 test('cross-format rewrites refuse replacement without changing markup', async () => {
-  await open('editable'); await panel.locator('#mode').selectOption('clearer'); await check();
+  await open('editable'); await check('clearer');
   await panel.button('Accept').click();
   assert.match(await status(), /Copy the suggestion/); assert.equal(await page.locator('#editable').innerHTML(), 'He <strong>go</strong> to work.');
 });
 test('sensitive fields, active composition and disabled sites issue no writing request', async () => {
-  for (const id of ['password', 'card']) { await open(id, 0, 5); assert.equal(await panel.button('Check selection').isDisabled(), true); }
+  for (const id of ['password', 'card']) { await open(id, 0, 5); assert.equal(await panel.button('Proofread').isDisabled(), true); }
   await page.evaluate(() => { textarea.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true})); });
-  await open(); assert.equal(await panel.button('Check selection').isDisabled(), true);
+  await open(); assert.equal(await panel.button('Proofread').isDisabled(), true);
   await page.evaluate(() => { textarea.dispatchEvent(new CompositionEvent('compositionend', {bubbles: true})); fixture.enabled = false; });
   await open(); await panel.locator('#check').waitFor(el => el.disabled);
   assert.equal(await page.evaluate(() => fixture.checks.length), 0);

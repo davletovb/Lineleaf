@@ -28,9 +28,9 @@ async function open(id = 'textarea') {
     else { const range = document.createRange(); range.selectNodeContents(el); const selection = document.getSelection(); selection.removeAllRanges(); selection.addRange(range); }
     fixture.runtimeMessages.emit({type: 'lineleaf-open'}, {id: chrome.runtime.id});
   });
-  await panel.button('Check selection').waitFor();
+  await panel.button('Proofread').waitFor();
 }
-async function check() { await panel.button('Check selection').click(); await panel.button('Accept').waitFor(); }
+async function check() { await panel.button('Proofread').click(); await panel.button('Accept').waitFor(); }
 async function automatic(id = 'textarea') {
   await page.locator(`#${id}`).fill('He go to work.'); await inline.locator('.underline').waitFor();
 }
@@ -51,7 +51,7 @@ test('slotted fields inherit slot and shadow-wrapper exclusions before any text 
     await load(); await slotted(); await page.locator(selector).evaluate((el, [attribute, value]) => el.setAttribute(attribute, value), [attribute, value]);
     await page.locator('#slotted-field').fill('He go to work.'); await page.waitForTimeout(1700); assert.equal((await sends()).length, 0);
     await open('slotted-field'); assert.equal(await panel.locator('#selected').textContent(), '');
-    assert.equal(await panel.button('Check selection').isDisabled(), true);
+    assert.equal(await panel.button('Proofread').isDisabled(), true);
   }
   await load(); await slotted(); await page.locator('#other-slot-wrap').evaluate(el => el.setAttribute('data-lineleaf-ignore', ''));
   await page.locator('#slotted-field').fill('He go to work.'); await page.locator('#slotted-field').evaluate(el => { el.slot = 'other'; });
@@ -110,7 +110,7 @@ test('Google Docs input proxy is copy-only; canvas-only documents use explicit p
   await check(); assert.equal(await panel.button('Accept').isDisabled(), true);
   assert.deepEqual(JSON.parse((await sends()).at(-1).params.messages[0].text), {text: 'He go to work.'});
   await panel.locator('#pasted').evaluate(el => el.focus()); await page.keyboard.type(' Changed.');
-  assert.equal(await panel.button('Check selection').isDisabled(), true); assert.equal((await sends()).length, 2);
+  assert.equal(await panel.button('Proofread').isDisabled(), true); assert.equal((await sends()).length, 2);
 });
 for (const marker of ['class="ProseMirror"', 'class="ql-editor"', 'class="public-DraftEditor-content"', 'data-slate-editor="true"', 'data-lexical-editor="true"']) {
   test(`complex editor ${marker} remains copy-only even with a flat DOM`, async () => {
@@ -123,7 +123,7 @@ for (const marker of ['class="ProseMirror"', 'class="ql-editor"', 'class="public
 }
 test('SPA push/replace/ABA/hash navigation cancels old drafts and removes previews', async () => {
   for (const kind of ['push', 'replace', 'ABA', 'hash']) {
-    await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
+    await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Proofread').click();
     await page.waitForFunction(() => fixture.worker.turns.length > 0);
     await page.evaluate(kind => {
       const old = location.href;
@@ -151,7 +151,7 @@ test('inline SPA navigation cancels the old request, ignores late output and sta
   assert.equal((await sends()).length, 2); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.');
 });
 test('replaced field with identical text cannot receive a late response or the old edit', async () => {
-  await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
+  await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Proofread').click();
   await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.locator('#textarea').evaluate(el => { const next = el.cloneNode(true); next.value = el.value; el.replaceWith(next); });
   await panel.locator('#status').waitFor(el => /changed/.test(el.textContent));
@@ -242,7 +242,7 @@ test('closed shadow fields never trigger an automatic request or expose their te
   await page.keyboard.type('He go to work.'); await page.waitForTimeout(1700); assert.equal((await sends()).length, 0);
   await page.evaluate(() => fixture.runtimeMessages.emit({type: 'lineleaf-open'}, {id: chrome.runtime.id}));
   await panel.button('Use pasted text').waitFor(); assert.equal(await panel.locator('#selected').textContent(), '');
-  assert.equal(await panel.button('Check selection').isDisabled(), true);
+  assert.equal(await panel.button('Proofread').isDisabled(), true);
 });
 test('clipboard denial exposes a selected manual-copy value without editing the source', async () => {
   await load('https://app.slack.com/client/synthetic?automatic'); await open('editable'); await check();
@@ -320,7 +320,7 @@ test('harmless body, wrapper and field class changes retain inline suggestions a
   await inline.button('Undo last edit').click(); assert.equal(await page.locator('#textarea').inputValue(), 'He go to work.'); assert.equal((await sends()).length, 1);
 });
 test('harmless ancestor classes retain a pending response and completed manual suggestion', async () => {
-  await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Check selection').click();
+  await load(); await page.evaluate(() => { fixture.worker.hold = true; }); await open(); await panel.button('Proofread').click();
   await page.waitForFunction(() => fixture.worker.turns.length > 0);
   await page.evaluate(() => {
     document.body.classList.add('is-scrolled'); document.querySelector('#textarea').classList.add('focused');

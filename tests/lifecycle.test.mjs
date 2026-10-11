@@ -24,8 +24,11 @@ test('installed profile restart/update preserves identity, preferences, grants a
     context = await launch(); let worker = await workerFor(context);
     const options = await context.newPage(); await options.goto(`chrome-extension://${id}/options.html`);
     await options.waitForFunction(() => document.querySelector('#authorize').textContent.includes('seatline-companion'));
-    await options.locator('#variant').selectOption('UK'); await options.locator('#dictionary').fill('Lineleaf');
-    await options.getByRole('button', {name: 'Save preferences'}).click(); await options.waitForFunction(() => document.querySelector('#status').textContent === 'Preferences saved.');
+    await options.locator('#variant').selectOption('UK'); await options.locator('#dictionary').fill('Lineleaf'); // both save as they are changed
+    for (let tries = 0; tries < 100; tries++) { // wait until the worker has stored them
+      const saved = await worker.evaluate(async () => (await chrome.storage.local.get('preferences')).preferences);
+      if (saved?.variant === 'UK' && saved.dictionary?.includes('lineleaf')) break; await new Promise(resolve => setTimeout(resolve, 100));
+    }
     const management = await context.newPage(); await management.goto('chrome://extensions/');
     await management.evaluate(async id => chrome.developerPrivate.addHostPermission(id, 'https://lifecycle.test/*'), id); await management.close();
     await options.evaluate(() => {

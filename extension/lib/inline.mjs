@@ -4,7 +4,8 @@ import {captureRichParagraph} from './rich-text.mjs';
 import {applyRichEdit, canApplyRich} from './rich-edit.mjs';
 import {captureParagraph, captureRewriteScope, editorOf, excluded} from './selection.mjs';
 import {badgeSpot, suggestionRects, visibleEditorRect} from './geometry.mjs';
-import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, PREPARE_INTERVAL, WATCHDOG, FLAG_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
+import {AUTO_IDLE, AUTO_INTERVAL, AUTOMATIC_HOLD, PREPARE_INTERVAL, WATCHDOG, FLAG_LABELS, PROVIDER_LABELS, REWRITE_LABELS, categoryLabel, dictionaryWord} from './policy.mjs';
+import {menuButton, rewriteItems} from './menu.mjs';
 import {messageFor} from './messages.mjs';
 import {icon, iconLabel} from './icons.mjs';
 import tokens from '../tokens.css';
@@ -18,10 +19,11 @@ const node = (tag, text = '', attributes = {}) => {
 };
 const trusted = fn => event => { if (event.isTrusted) void fn(event); };
 // Anatomy, top to bottom: the assistant badge by the field; underlines in the text; one card that opens from either. The card is
-// a header, the suggestion (or rewrite preview), the rewrite tools, a status strip and a quiet footer of everyday actions.
+// a header (check again, more, close), the suggestion (or rewrite preview), one line of rewrite tools, a status strip and one line about where text goes.
 class InlineView {
   constructor(field, actions) {
     this.field = field; this.actions = actions; this.edits = []; this.index = 0; this.anchored = false; this.spot = {}; // the badge's remembered place
+    this.menus = []; // open-able menus of the current card; they are drawn in the layer, so they are cleared with the card
     this.host = node('div', '', {'data-lineleaf-inline': ''}); this.root = this.host.attachShadow({mode: 'closed'});
     const sheet = new CSSStyleSheet(); sheet.replaceSync(tokens + base + styles); this.root.adoptedStyleSheets = [sheet];
     this.layer = node('div', '', {class: 'layer'}); this.lines = node('div');
@@ -50,8 +52,11 @@ class InlineView {
     this.badge.replaceChildren(node('span', '', {class: 'ring', 'aria-hidden': 'true'}), icon(rewrite ? 'sparkle' : 'leaf', {size: 18}),
       ...(edits.length && !rewrite ? [node('span', String(edits.length), {class: 'count', 'aria-hidden': 'true'})] : []));
     this.badge.setAttribute('aria-label', `${message} Alt Shift L opens Lineleaf.`);
-    this.card.hidden = true; this.card.replaceChildren(); this.draw();
+    this.closeMenus(); this.card.hidden = true; this.card.replaceChildren(); this.draw();
   }
+  // A menu button in this card's layer; `closeMenus` drops them all (they are rebuilt with the card).
+  menu(trigger, items, label, onPick) { const menu = menuButton({layer: this.layer, trigger, items, label, onPick}); this.menus.push(menu); return menu; }
+  closeMenus() { for (const menu of this.menus) menu.dispose(); this.menus = []; }
   // A button with an optional icon. `iconOnly` keeps the label for assistive technology and for the button's name.
   button(label, fn, attrs = {}, glyph = null, iconOnly = false) {
     const button = node('button', glyph ? '' : label, attrs); if (glyph) button.append(...iconLabel(glyph, label, {iconOnly}));
@@ -70,11 +75,14 @@ class InlineView {
   }
   // `anchored`: opened from an underline, so the card sits by that word instead of by the field.
   open(index = 0, anchored = false) {
-    this.remember();
+    this.remember(); this.closeMenus();
     this.index = Math.min(index, Math.max(0, this.edits.length - 1)); this.anchored = anchored; this.card.dataset.compact = anchored ? 'true' : 'false'; this.card.replaceChildren(); this.card.hidden = false;
     const title = node('h2', 'Lineleaf', {id: 'card-title', tabindex: '-1'}), head = node('header', '', {class: 'head'}), logo = node('span', '', {class: 'logo', 'aria-hidden': 'true'});
     logo.append(icon('leaf', {size: 20}));
-    head.append(logo, title, this.button('✕', () => this.hide(), {'aria-label': 'Close suggestions', class: 'icon quiet'}, 'close', true)); this.card.append(head);
+    const check = this.button('Check now', () => this.actions.check(), {class: 'icon quiet'}, 'refresh', true); check.disabled = Boolean(this.busy);
+    const more = this.button('More options', () => {}, {class: 'icon quiet'}, 'dots', true);
+    this.menu(more, [{id: 'pause', label: 'Pause Lineleaf', glyph: 'pause'}, {id: 'settings', label: 'Settings', glyph: 'sliders'}], 'More options', id => this.actions[id]());
+    head.append(logo, title, check, more, this.button('✕', () => this.hide(), {'aria-label': 'Close suggestions', class: 'icon quiet'}, 'close', true)); this.card.append(head);
     const body = node('div', '', {class: 'body'}); this.card.append(body);
     const edit = this.edits[this.index];
     if (edit?.rewrite) this.rewritePreview(body, edit, title);
@@ -83,17 +91,13 @@ class InlineView {
     if (preview) body.append(node('p', 'Copy-only editor: Lineleaf never edits this field. Copy a suggestion and paste it yourself.', {class: 'note'}));
     else if (this.capture?.editable && this.copyOnly) body.append(node('p', 'This editor did not take the change cleanly, so Lineleaf is copy-only here until the page reloads. Check your draft; the editor’s own undo (Ctrl/⌘ Z) reverses its changes.', {class: 'note'}));
     else if (this.capture?.editable && edit && !canApplyRich(this.capture, edit)) body.append(node('p', 'This change spans formatting or a mention, so Lineleaf can only copy it.', {class: 'note'}));
-    this.card.append(this.rewriteRow());
+    if (!this.anchored) this.card.append(this.rewriteRow()); // opened from a word, the Rewrite button beside the pager does this job
     const strip = node('div', '', {class: 'strip'}), status = node('p', this.message, {id: 'status', role: 'status', 'aria-live': 'polite'});
     if (this.busy) status.dataset.busy = 'true';
-    strip.append(status, ...this.elapsed()); this.card.append(strip);
-    const foot = node('footer', '', {class: 'foot'});
-    if (this.undo) foot.append(this.button('Undo last edit', () => this.actions.undo(), {class: 'quiet small'}, 'undo'));
-    const check = this.button('Check now', () => this.actions.check(), {class: 'quiet small'}, 'refresh'); check.disabled = Boolean(this.busy);
-    foot.append(check, this.button('Cancel check', () => this.actions.cancel(), {class: 'quiet small'}, 'stop'), this.button('Pause Lineleaf', () => this.actions.pause(), {class: 'quiet small'}, 'pause'),
-      this.button('Settings', () => this.actions.settings(), {class: 'quiet small'}, 'sliders'));
-    this.card.append(foot, node('p', preview ? 'Your selected provider via Seatline · model processing may be remote. Lineleaf does not change this editor.'
-      : 'Your selected provider via Seatline · model processing may be remote. Changes need your acceptance.', {class: 'privacy'}));
+    strip.append(status, ...this.elapsed());
+    if (this.busy) strip.append(this.button('Cancel check', () => this.actions.cancel(), {class: 'quiet small'}, 'stop'));
+    if (this.undo) strip.append(this.button('Undo last edit', () => this.actions.undo(), {class: 'quiet small'}, 'undo'));
+    this.card.append(strip, node('p', `Sent to ${this.actions.provider()} via Seatline. ${preview ? 'Lineleaf does not change this editor.' : 'Nothing changes until you accept.'}`, {class: 'privacy'}));
     this.draw(); title.focus({preventScroll: true});
   }
   // One correction or wording suggestion: its kind, the change, the way to accept it, and where it sits among the others.
@@ -114,12 +118,10 @@ class InlineView {
         node('span', `${this.index + 1} of ${this.edits.length}`), this.button('Next', () => this.open((this.index + 1) % this.edits.length, this.anchored), {class: 'icon quiet'}, 'right', true));
       meta.append(pager);
     }
-    if (this.anchored) { // Opened from a word: just the suggestion. More brings in the rewrite tools and everyday actions.
-      const more = this.button('More', () => {
-        const compact = this.card.dataset.compact !== 'true'; this.card.dataset.compact = String(compact);
-        more.replaceChildren(...iconLabel(compact ? 'down' : 'up', compact ? 'More' : 'Less')); more.setAttribute('aria-expanded', String(!compact)); this.draw();
-      }, {class: 'quiet small', 'aria-expanded': 'false'}, 'down');
-      meta.append(more);
+    if (this.anchored) { // Opened from a word: just the suggestion, with the rewrite choices a button away.
+      const rewrite = node('button', '', {class: 'quiet small', type: 'button'}); rewrite.append(document.createTextNode('Rewrite'), icon('down', {size: 14})); rewrite.disabled = Boolean(this.busy);
+      this.menu(rewrite, rewriteItems(REWRITE_LABELS, {lead: true}), 'Rewrite', mode => this.actions.rewrite(mode));
+      meta.append(rewrite);
     }
     if (meta.children.length) body.append(meta);
   }
@@ -147,15 +149,21 @@ class InlineView {
     controls.append(this.button('Try again', () => this.actions.rewrite(edit.rewrite), {}, 'refresh'), this.copyButton(edit), this.button('Back', () => this.actions.dismiss(edit), {class: 'quiet'}, 'undo'));
     body.append(controls);
   }
-  // Explicit, optional rewrites of the selection, or of the caret paragraph when nothing is selected.
+  // Explicit, optional rewrites of the selection, or of the caret paragraph when nothing is selected: the main one, and the rest in a menu.
   rewriteRow() {
-    const group = node('div', '', {class: 'rewrite', role: 'group', 'aria-label': 'Rewrite'});
-    group.append(node('p', 'Rewrite', {class: 'label', 'aria-hidden': 'true'}), node('p', 'Rewrite your selection, or this paragraph if nothing is selected.', {class: 'muted'}));
-    const chips = node('div', '', {class: 'chips'});
-    for (const mode of ['improve', 'paraphrase']) chips.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode, class: 'chip lead'}, 'sparkle'));
-    for (const mode of ['clearer', 'shorter', 'formal', 'friendly']) chips.append(this.button(REWRITE_LABELS[mode], () => this.actions.rewrite(mode), {'data-rewrite': mode, class: 'chip'}));
-    for (const button of chips.children) button.disabled = Boolean(this.busy); // One request at a time; Cancel check stays available.
-    group.append(chips); return group;
+    const row = node('div', '', {class: 'rewrite'});
+    const improve = this.button(REWRITE_LABELS.improve, () => this.actions.rewrite('improve'), {'data-rewrite': 'improve', class: 'chip lead'}, 'sparkle');
+    const more = node('button', '', {class: 'chip', type: 'button', 'data-rewrite-menu': ''}); more.append(document.createTextNode('Rewrite'), icon('down', {size: 14}));
+    improve.disabled = more.disabled = Boolean(this.busy); // One request at a time; Cancel check stays available.
+    this.menu(more, rewriteItems(REWRITE_LABELS), 'Rewrite', mode => this.actions.rewrite(mode));
+    row.append(improve, more, node('span', this.selected() ? 'Selection' : 'Paragraph', {class: 'scope muted', title: 'What a rewrite changes'}));
+    return row;
+  }
+  // Is there selected text in the field? A rewrite works on it, or on the caret's paragraph when there is none.
+  selected() {
+    const field = this.field;
+    if (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) return field.selectionStart !== field.selectionEnd;
+    return Boolean(this.range && !this.range.collapsed);
   }
   // While a request runs the card stays open and counts the seconds (visual only, so the live region is not read out every second).
   elapsed() {
@@ -164,9 +172,9 @@ class InlineView {
     tick(); this.ticker = setInterval(tick, 1000); return [line];
   }
   status(message) { this.message = message; this.announce(message); const status = this.card.querySelector('#status'); if (status && status.textContent !== message) status.textContent = message; }
-  hide() { this.card.hidden = true; this.draw(); this.field.focus({preventScroll: true}); this.restore(); }
+  hide() { this.closeMenus(); this.card.hidden = true; this.draw(); this.field.focus({preventScroll: true}); this.restore(); }
   // Focus went elsewhere on the page: close the card, keep the underlines, and leave the focus where the user put it.
-  fold() { if (this.card.hidden) return; this.card.hidden = true; this.draw(); }
+  fold() { if (this.card.hidden) return; this.closeMenus(); this.card.hidden = true; this.draw(); }
   rects(edit) { return this.capture.rects ? this.capture.rects(edit) : suggestionRects(this.field, this.capture.snapshot.source, this.capture.offset + edit.start, this.capture.offset + edit.end, this.mirror); }
   draw() {
     const field = this.field, r = visibleEditorRect(field); this.lines.replaceChildren();
@@ -189,6 +197,7 @@ class InlineView {
       }
       this.card.style.left = `${left - origin.left}px`; this.card.style.top = `${top - origin.top}px`;
     }
+    for (const menu of this.menus) menu.place();
     for (const [i, rectangles] of found) {
       const edit = this.edits[i];
       for (const rectangle of rectangles) {
@@ -202,7 +211,7 @@ class InlineView {
     }
     if (!valid) this.mirror.textContent = '';
   }
-  close() { clearInterval(this.ticker); document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
+  close() { this.closeMenus(); clearInterval(this.ticker); document.removeEventListener('selectionchange', this.track); this.host.remove(); this.capture = null; this.edits = []; this.mirror.textContent = ''; }
 }
 
 export function mountInline(api) {
@@ -316,6 +325,7 @@ export function mountInline(api) {
         if (!eligibleDOM()) { drop(); return; }
       } else { drop(); return; }
       view = new InlineView(field, {accept, undo: undoEdit, dismiss: edit => { if (edit.rewrite && restoreHeld('Rewrite dismissed. Your text is unchanged.')) { view.open(); return; } edits = edits.filter(x => x !== edit); update(edits.length ? (replaceable() ? 'Review each suggestion before accepting.' : 'Review each suggestion. Copy one to use it.') : 'Suggestions dismissed. Your text is unchanged.'); if (edits.length) view.open(); else view.hide(); },
+        provider: () => PROVIDER_LABELS[policy?.provider] ?? 'your provider',
         check: () => { stop(); void run(false); }, rewrite: rewriteMode => { stop(); void run(false, rewriteMode); }, cancel: () => { stop(); blocked = false; update(messageFor('CANCELLED')); view?.open(); },
         addWord: async word => { const result = await rpc('add-word', {word}); if (!result.ok) view?.status(messageFor(result.code)); },
         pause: async () => { const result = await rpc('pause'); if (!result.ok) view?.status(messageFor(result.code)); },

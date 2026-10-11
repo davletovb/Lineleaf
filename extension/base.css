@@ -20,6 +20,12 @@ button.quiet:hover:not(:disabled) { background: var(--ll-surface); border-color:
 button.small { min-height: 28px; padding: 3px 10px; font-size: 12px; }
 button.icon { width: 32px; min-height: 32px; padding: 0; border-radius: var(--ll-pill); }
 button:disabled { opacity: .5; cursor: default; }
+/* Chips: pill buttons for optional actions; the lead one is the main of its group. */
+.chip { min-height: 30px; padding: 3px 12px; font-weight: 500; border-radius: var(--ll-pill); font-size: 12px; }
+.chip.lead { border-color: var(--ll-style); background: var(--ll-style-soft); color: var(--ll-style-ink); }
+.chip.lead:hover:not(:disabled) { border-color: var(--ll-style-ink); background: var(--ll-style-soft); }
+.chip[aria-expanded="true"] { background: var(--ll-surface-2); }
+
 :focus-visible { outline: none; box-shadow: var(--ll-ring); }
 @media (forced-colors: active) { :focus-visible { outline: 2px solid Highlight; } button { border-color: ButtonText; } }
 
@@ -57,3 +63,12 @@ textarea:focus-visible, input[type=text]:focus-visible, select:focus-visible { b
 select { appearance: none; padding-right: 32px; background-image: linear-gradient(45deg, transparent 50%, var(--ll-ink-2) 50%), linear-gradient(135deg, var(--ll-ink-2) 50%, transparent 50%);
   background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; } }
+
+/* Menu: a short list of choices opened from a button (lib/menu.mjs). Drawn in a layer outside the card or panel, which scroll and would clip it. */
+.menus { position: fixed; inset: 0; pointer-events: none; z-index: 2147483647; }
+.menu { position: fixed; display: flex; flex-direction: column; min-width: 184px; padding: 6px; border: 1px solid var(--ll-line); border-radius: 12px; background: var(--ll-bg); color: var(--ll-ink); box-shadow: var(--ll-shadow-pop); pointer-events: auto; animation: ll-pop var(--ll-fast) var(--ll-ease); }
+.menu button { justify-content: flex-start; width: 100%; min-height: 34px; border-color: transparent; background: transparent; border-radius: 8px; font-weight: 500; }
+.menu button:hover:not(:disabled), .menu button:focus-visible { background: var(--ll-surface); border-color: transparent; }
+.menu .group { display: flex; flex-direction: column; margin-top: 6px; padding-top: 4px; border-top: 1px solid var(--ll-line-soft); }
+.menu .group > p { margin: 2px 10px 2px; color: var(--ll-ink-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+@keyframes ll-pop { from { opacity: 0; transform: translateY(4px) scale(.985); } }

@@ -8,43 +8,35 @@
   <link rel="stylesheet" href="base.css">
   <link rel="stylesheet" href="ui.css">
 </head>
-<body class="popup">
+<body class="popup" data-state="loading">
   <main>
     <header class="brand">
-      <span class="tile" aria-hidden="true"><svg class="ll-icon" viewBox="0 0 24 24" width="22" height="22"><path class="solid" d="M5 19C5 10.5 10.2 5 19 5c0 8.8-5.5 14-14 14z"/><path class="vein" d="M6.5 17.5 14 10"/></svg></span>
-      <div class="titles">
-        <h1>Lineleaf</h1>
-        <p class="tagline">Clearer writing. Still your words.</p>
-      </div>
+      <span class="tile" aria-hidden="true"><svg class="ll-icon" viewBox="0 0 24 24" width="20" height="20"><path class="solid" d="M5 19C5 10.5 10.2 5 19 5c0 8.8-5.5 14-14 14z"/><path class="vein" d="M6.5 17.5 14 10"/></svg></span>
+      <h1>Lineleaf</h1>
+      <button id="settings" class="icon quiet" aria-label="Settings"><svg class="ll-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg></button>
     </header>
 
-    <section class="site-card" aria-labelledby="site">
+    <label class="site" for="enabled">
       <span id="avatar" class="avatar" aria-hidden="true">?</span>
-      <div class="site-text">
-        <div class="site-top"><p class="muted label-line">This site</p><span id="state" class="pill" data-state="loading">Loading</span></div>
-        <p id="site" class="site">Loading current site…</p>
-      </div>
-    </section>
-    <label class="switch-row" for="enabled">
-      <span class="switch-text"><strong>Check my writing here</strong><span class="muted">Lineleaf stays off until you turn it on for this site.</span></span>
-      <input type="checkbox" id="enabled" role="switch" disabled>
+      <span class="site-text"><strong id="site">Loading…</strong><span id="note" class="muted"></span></span>
+      <input type="checkbox" id="enabled" role="switch" aria-label="Check my writing on this site" disabled>
     </label>
+
+    <div id="notice" class="callout" role="status" hidden>
+      <p id="notice-text"></p>
+      <div class="bar"><button id="notice-ok" type="button" class="small">Got it</button></div>
+    </div>
+    <div id="alert" class="callout" role="status" aria-live="polite" hidden>
+      <p id="status"></p>
+      <div class="bar"><button id="fix" type="button" class="small primary" hidden>Open Settings</button></div>
+    </div>
 
     <button id="open" class="primary wide" disabled>Open writing panel</button>
-    <p class="hint">Select text, then open the panel to proofread or rewrite it. Press Alt+Shift+L in a text box for the inline card.</p>
-
-    <label class="switch-row quiet-row" for="paused">
-      <span class="switch-text"><strong>Pause on all sites</strong><span class="muted">Stops checks and hides suggestions everywhere.</span></span>
-      <input type="checkbox" id="paused" role="switch">
-    </label>
-
-    <p id="status" role="status" aria-live="polite"></p>
 
     <footer class="foot-row">
-      <button id="connection" class="quiet small">Check Seatline</button>
-      <button id="settings" class="quiet small">Settings</button>
+      <button id="connection" class="quiet small"><span id="dot" class="dot" data-state="unknown" aria-hidden="true"></span><span id="connection-label">Check Seatline</span></button>
+      <button id="pause" class="quiet small" aria-pressed="false"><svg class="ll-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8.5 5.5v13M15.5 5.5v13"/></svg><span id="pause-label">Pause on all sites</span></button>
     </footer>
-    <p class="fine">Manual checks send only your selection through Seatline to your selected provider; model processing may be remote. Automatic paragraph checks are a separate opt-in in Settings. Drafts are not saved.</p>
   </main>
   <script type="module" src="popup.mjs"></script>
 </body>

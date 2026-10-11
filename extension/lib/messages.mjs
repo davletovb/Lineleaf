@@ -43,3 +43,5 @@ export function connectionSummary(state) {
   if (state.sign_in_allowed === false) return `${line} ${messageFor(state.provider === 'gemini' ? (state.sign_in === 'cloud' ? 'CLOUD_SIGN_IN_REQUIRED' : 'CLOUD_ROUTE_UNAVAILABLE') : 'SUBSCRIPTION_REQUIRED')}`;
   return state.update_required === true ? `${line} ${MESSAGES.COMPANION_UPDATE_REQUIRED}` : line;
 }
+// A healthy Seatline: the provider is available and signed in the way Lineleaf allows, the companion can receive writing, and requests with no tools work.
+export const connectionReady = state => state.availability === 'available' && state.authentication === 'authenticated' && state.sign_in_allowed !== false && state.update_required !== true && state.tool_isolation !== false;

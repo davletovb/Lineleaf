@@ -20,7 +20,8 @@ const ICONS = {
   plus: [['path', 'M12 5v14M5 12h14']],
   alert: [['path', 'M12 4.5l9 15.5H3zM12 10.5v4M12 17.3v.2']],
   info: [['circle', '12 12 9'], ['path', 'M12 11v5M12 8v.2']],
-  lock: [['path', 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3']]
+  lock: [['path', 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3']],
+  dots: [['circle', '5 12 1.7', true], ['circle', '12 12 1.7', true], ['circle', '19 12 1.7', true]]
 };
 export function icon(name, {size = 16, label = ''} = {}) {
   const svg = document.createElementNS(SVG, 'svg');

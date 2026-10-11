@@ -12,43 +12,85 @@
   <div class="shell">
     <aside class="side">
       <div class="brand">
-        <span class="tile" aria-hidden="true"><svg class="ll-icon" viewBox="0 0 24 24" width="22" height="22"><path class="solid" d="M5 19C5 10.5 10.2 5 19 5c0 8.8-5.5 14-14 14z"/><path class="vein" d="M6.5 17.5 14 10"/></svg></span>
-        <div class="titles"><h1>Lineleaf</h1><p class="tagline">Clearer writing. Still your words.</p></div>
+        <span class="tile" aria-hidden="true"><svg class="ll-icon" viewBox="0 0 24 24" width="20" height="20"><path class="solid" d="M5 19C5 10.5 10.2 5 19 5c0 8.8-5.5 14-14 14z"/><path class="vein" d="M6.5 17.5 14 10"/></svg></span>
+        <h1>Lineleaf</h1>
       </div>
       <nav class="nav" aria-label="Settings sections">
         <a href="#writing">Writing</a>
-        <a href="#automatic-checks">Automatic checks</a>
-        <a href="#dictionary-section">Dictionary</a>
-        <a href="#sites-section">Sites</a>
-        <a href="#seatline">Seatline</a>
-        <a href="#privacy">Privacy &amp; data</a>
+        <a href="#provider-section">Provider</a>
+        <a href="#data">Data</a>
       </nav>
     </aside>
 
     <main class="content">
-      <form id="preferences">
-        <div class="content">
-          <section class="card-section" id="writing" aria-labelledby="writing-title">
-            <h2 id="writing-title">Writing</h2>
-            <p class="lede">How Lineleaf spells English, and how your selected provider answers your checks.</p>
-            <label class="switch-row setting" for="paused">
-              <span class="switch-text"><strong>Pause Lineleaf on all sites</strong><span class="muted">Stops checks and hides suggestions until you turn it back on. Applies immediately.</span></span>
-              <input id="paused" type="checkbox" role="switch">
-            </label>
-            <div class="field">
-              <label for="provider">Provider</label>
-              <select id="provider"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini · Antigravity</option><option value="grok">Grok</option></select>
-            </div>
-            <label id="cloud-setting" class="switch-row setting" for="allow-cloud" hidden>
-              <span class="switch-text"><strong>Allow the Antigravity cloud route</strong><span class="muted">Seatline cannot verify this route as subscription sign-in. Processing and billing follow your Antigravity account. Enable only if you accept this route. If automatic checking is enabled, each check sends the active paragraph through this cloud route.</span></span>
-              <input id="allow-cloud" type="checkbox">
-            </label>
+      <p id="status" class="saved" role="status" aria-live="polite"></p>
+
+      <section class="card-section" id="writing" aria-labelledby="writing-title">
+        <h2 id="writing-title">Writing</h2>
+        <label class="switch-row setting first" for="paused">
+          <span class="switch-text"><strong>Pause Lineleaf</strong><span class="muted">Stops checks on all sites.</span></span>
+          <input id="paused" type="checkbox" role="switch">
+        </label>
+        <label class="switch-row setting" for="automatic">
+          <span class="switch-text"><strong>Check as I type <span class="tag">Experimental</span></strong><span class="muted">Underlines mistakes when you pause. Sends the active paragraph to <span data-provider>your provider</span>.</span></span>
+          <input id="automatic" type="checkbox" role="switch">
+        </label>
+        <label class="switch-row setting nested" for="clarity">
+          <span class="switch-text"><strong>Suggest clearer wording <span class="tag">Experimental</span></strong><span class="muted">An extra, slower pass for English and Turkish. Shown as optional.</span></span>
+          <input id="clarity" type="checkbox" role="switch" disabled>
+        </label>
+        <details id="how-automatic">
+          <summary>How automatic checks work</summary>
+          <ul class="lines">
+            <li>They start 1.5 seconds after you stop typing, at most six a minute, and only on sites you turned on.</li>
+            <li>Only the active paragraph (up to 2,000 characters) goes through Seatline to <span data-provider>your provider</span>. Model processing may be remote.</li>
+            <li>A check with no answer in 30 seconds is cancelled, and background checks then pause for five minutes.</li>
+            <li>In rich editors such as X, Accept changes the text through the editor, and its own undo reverses it. Gmail, LinkedIn, Slack, Notion and other editors Lineleaf has not verified show suggestions to copy.</li>
+            <li>Clearer wording adds one more request per paragraph and shows as dashed blue underlines. It never offers changes to names, numbers, dates or negations.</li>
+            <li>Live speed and quality are still being evaluated.</li>
+          </ul>
+        </details>
+        <div class="field narrow">
+          <label for="variant">English spelling</label>
+          <select id="variant"><option value="US">English · US</option><option value="UK">English · UK</option></select>
+          <span class="muted">Lineleaf detects English or Turkish itself, so there is nothing to switch.</span>
+        </div>
+        <div class="field">
+          <label for="dictionary">Personal dictionary</label>
+          <textarea id="dictionary" rows="4" maxlength="32500" spellcheck="false"></textarea>
+          <span class="muted">One word per line, up to 500. Saved as you type.</span>
+        </div>
+      </section>
+
+      <section class="card-section" id="provider-section" aria-labelledby="provider-title">
+        <h2 id="provider-title">Provider</h2>
+        <form id="preferences">
+          <div class="field narrow">
+            <label for="provider">Provider</label>
+            <select id="provider"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="gemini">Gemini · Antigravity</option><option value="grok">Grok</option></select>
+          </div>
+          <label id="cloud-setting" class="switch-row setting" for="allow-cloud" hidden>
+            <span class="switch-text"><strong>Allow the Antigravity cloud route</strong><span class="muted">Seatline cannot verify this as a subscription sign-in. Processing and billing follow your Antigravity account, and with automatic checks on, each check sends the active paragraph through it.</span></span>
+            <input id="allow-cloud" type="checkbox" role="switch">
+          </label>
+          <div class="status-row">
+            <span id="seatline-dot" class="dot" data-state="unknown" aria-hidden="true"></span>
+            <div class="grow"><strong id="seatline-state">Seatline not checked</strong><span id="seatline-note" class="muted"></span></div>
+            <button id="connection" type="button" class="small">Check Seatline</button>
+          </div>
+          <details id="setup">
+            <summary>Setup command</summary>
+            <p class="muted">Run this once, in a terminal, so Seatline lets Lineleaf use <span data-provider>your provider</span>. Run it again after you switch provider.</p>
+            <div class="command"><code id="authorize"></code><button id="copy-command" type="button" class="small">Copy</button></div>
+          </details>
+          <details id="advanced">
+            <summary>Advanced</summary>
             <div class="grid2">
               <div class="field">
                 <label for="model">Model <span class="muted">(optional)</span></label>
-                <input id="model" type="text" maxlength="128" autocomplete="off" spellcheck="false" placeholder="Leave empty for the provider default">
+                <input id="model" type="text" maxlength="128" autocomplete="off" spellcheck="false" placeholder="Provider default">
               </div>
-              <div class="field">
+              <div class="field" id="effort-field">
                 <label for="effort">Reasoning effort</label>
                 <select id="effort">
                   <option value="">Provider default</option>
@@ -60,109 +102,49 @@
                   <option value="max">Maximum</option>
                 </select>
               </div>
-              <div class="field">
+              <div class="field" id="speed-field">
                 <label for="speed">Speed</label>
                 <select id="speed" aria-describedby="speed-help">
                   <option value="" selected>Provider default</option>
                   <option value="standard">Standard</option>
                   <option value="fast">Fast</option>
                 </select>
-              </div>
-              <div class="field">
-                <label for="variant">English spelling</label>
-                <select id="variant"><option value="US">English · US</option><option value="UK">English · UK</option></select>
+                <span id="speed-help" class="muted">Fast may use more of your Codex allowance. It depends on your Codex version, model and plan. <a href="https://learn.chatgpt.com/docs/agent-configuration/speed" target="_blank" rel="noopener noreferrer">Details</a></span>
               </div>
             </div>
-            <p class="muted" style="margin-top:8px">Provider and model apply to every check and rewrite after you save. Each provider remembers its saved preferences. Effort and speed are available for Codex only. Lower effort can answer faster; higher effort can help with difficult text. Use a native model ID supported by your installed provider runtime, or leave Model empty for its default. Claude Code and Grok require subscription sign-in. Gemini uses Antigravity with the explicit cloud opt-in above; Lineleaf stores no provider credentials.</p>
-            <p id="speed-help" class="muted">Provider default uses your Codex speed setting. Standard requests normal processing. Fast requests faster processing and may use more subscription allowance, keeping your model and reasoning effort. Availability depends on your Codex version, model and plan. See <a href="https://learn.chatgpt.com/docs/agent-configuration/speed" target="_blank" rel="noopener noreferrer">current Codex speed and usage</a>.</p>
-            <p class="muted" style="margin-top:8px">Lineleaf works out the language of what you write, so you never switch it. English and Turkish are supported, including text that mixes the two; Turkish gets Turkish corrections and Turkish explanations. The choice above only sets how English is spelled. Review rewrite warnings about negation, names and numbers.</p>
-          </section>
-
-          <section class="card-section" id="automatic-checks" aria-labelledby="automatic-title">
-            <h2 id="automatic-title">Automatic checks <span class="tag">Experimental</span></h2>
-            <p class="lede">Underline mistakes as you type, the way a proofreader would. Off until you turn it on.</p>
-            <label class="switch-row setting" for="automatic">
-              <span class="switch-text"><strong>Check automatically after typing pauses</strong><span class="muted">Only on sites you enable.</span></span>
-              <input id="automatic" type="checkbox" role="switch">
-            </label>
-            <ul class="facts">
-              <li>The active paragraph (up to 2,000 characters) goes through Seatline to your selected provider. Model processing may be remote.</li>
-              <li>Checks wait 1.5 seconds after typing, with a shared ten-second interval and a cap of six attempts per minute.</li>
-              <li>A background check that gets no answer in 30 seconds (90 for something you ask for) is cancelled, and background checks then pause for five minutes.</li>
-              <li>In rich editors such as X, only the paragraph you are typing in is sent and suggestions are underlined. Accept changes the text only after you press it, through the editor’s own editing, and the editor’s undo reverses it.</li>
-              <li>Gmail, LinkedIn, Slack, Notion and editors Lineleaf has not verified show suggestions for you to copy; Lineleaf never edits those.</li>
-              <li>Live speed and quality are still being evaluated.</li>
-            </ul>
-            <label class="switch-row setting nested" for="clarity">
-              <span class="switch-text"><strong>Also suggest clearer wording <span class="tag">Experimental</span></strong><span class="muted">Needs automatic checking. Available in English and Turkish; off by default.</span></span>
-              <input id="clarity" type="checkbox" role="switch" disabled>
-            </label>
-            <ul class="facts" style="margin-left:20px">
-              <li>After each automatic correction check, Lineleaf sends the same paragraph once more and asks for wording that could be clearer or shorter.</li>
-              <li>These show as separate, dashed blue underlines labelled “Clearer wording · Optional style”, are never corrections, change nothing until you press Accept, and are never offered when they would change a name, number, date or negation.</li>
-              <li>It adds one more provider request per checked paragraph and shares the same ten-second interval and six-attempts-per-minute cap, so checks come more slowly.</li>
-              <li>Its precision is measured separately and has not been verified on a live provider.</li>
-            </ul>
-          </section>
-
-          <section class="card-section" id="dictionary-section" aria-labelledby="dictionary-title">
-            <h2 id="dictionary-title">Personal dictionary</h2>
-            <p class="lede">Words Lineleaf should accept as correctly spelled.</p>
-            <div class="field">
-              <label for="dictionary">One word per line</label>
-              <textarea id="dictionary" rows="6" maxlength="32500" spellcheck="false"></textarea>
-            </div>
-            <p class="muted" style="margin-top:8px">Up to 500 words. Dictionary words are stored intentionally and sent with checks; spelling suggestions for these words are filtered.</p>
-          </section>
-        </div>
-      </form>
-
-      <section class="card-section" id="sites-section" aria-labelledby="sites-title">
-        <h2 id="sites-title">Enabled sites</h2>
-        <p class="lede">Lineleaf only works where you have turned it on.</p>
-        <ul id="sites" class="sites"></ul>
-        <p class="muted" style="margin-top:12px">Enable a site from the extension popup. Disabling it cancels its requests and removes its access when no other enabled origin needs that permission.</p>
+            <p class="muted">Leave Model empty to use the provider’s default.</p>
+          </details>
+          <div id="provider-bar" class="unsaved" role="status" hidden>
+            <span>Unsaved changes. Provider settings apply after you save.</span>
+            <button id="discard" type="button" class="small quiet">Discard</button>
+            <button id="save" type="submit" class="small primary">Save</button>
+          </div>
+        </form>
       </section>
 
-      <section class="card-section" id="seatline" aria-labelledby="seatline-title">
-        <h2 id="seatline-title">Seatline connection</h2>
-        <p class="lede">Lineleaf uses your existing shared Seatline companion. Save your provider selection, then authorize this extension ID for that provider:</p>
-        <p class="muted">This command replaces Lineleaf’s grant with the saved provider only. After switching and saving a provider, authorize again. Include all retained origins or providers manually only if you intend to grant them.</p>
-        <div class="command"><code id="authorize"></code><button id="copy-command" type="button" class="small">Copy</button></div>
-        <div class="actions-row"><button id="connection" type="button">Check Seatline</button></div>
+      <section class="card-section" id="data" aria-labelledby="data-title">
+        <h2 id="data-title">Data</h2>
+        <div class="field">
+          <span class="label" id="sites-label">Enabled sites</span>
+          <ul id="sites" class="sites" aria-labelledby="sites-label"></ul>
+        </div>
+        <ul class="lines">
+          <li><strong>Sent:</strong> only your selection, or the active paragraph from the inline card and automatic checks, through Seatline to <span data-provider>your provider</span>. Model processing may be remote.</li>
+          <li><strong>Saved here:</strong> settings, dictionary, enabled sites and whether you have seen the privacy note.</li>
+          <li><strong>Never saved:</strong> drafts, answers, credentials or telemetry.</li>
+          <li>Suggestions stay in the page until the text changes, the page closes, or you pause Lineleaf. The writing panel forgets its selection after five minutes.</li>
+        </ul>
         <details class="check-timing">
-          <summary>Last manual check timing</summary>
-          <p id="timing-summary" class="muted">No check recorded in this browser session.</p>
+          <summary>Diagnostics</summary>
+          <p id="timing-summary" class="muted">No manual check recorded in this browser session.</p>
           <table aria-label="Last check durations"><tbody id="timing-phases"></tbody></table>
-          <p class="muted">Measured from the extension worker receiving the check through answer validation. Startup includes waiting for the provider to report that its turn started. Answer time ends at the first complete message; completion includes remaining output and process cleanup. These phases may not add up to the total.</p>
+          <p class="muted">Timings of your last manual check, kept for this browser session only, with no text or site addresses.</p>
           <div class="actions-row"><button id="refresh-timing" type="button" class="small">Refresh timing</button><button id="copy-timing" type="button" class="small" disabled>Copy timing</button></div>
         </details>
-        <ul class="facts">
-          <li>Manual checks send only your selection. Rewrites (Improve it, Paraphrase and tone options) run only when you press them.</li>
-          <li>The writing panel sends your selection. The inline card, which you can open with Alt+Shift+L even when automatic checking is off, sends your selection or the active paragraph if nothing is selected.</li>
-          <li>Opt-in automatic checks send only the active bounded paragraph. The companion connects to your selected provider; model processing may be remote. Automatic checking stays off until you enable it above.</li>
-        </ul>
-      </section>
-
-      <section class="card-section" id="privacy" aria-labelledby="privacy-title">
-        <h2 id="privacy-title">Privacy &amp; stored data</h2>
-        <p class="lede">What Lineleaf keeps on this browser.</p>
-        <ul class="facts">
-          <li>Lineleaf saves preferences, dictionary words, and enabled site origins.</li>
-          <li>Session storage keeps request-limit timestamps and the last manual check’s durations, requested provider and model, effort and speed, and outcome. Automatic and cancelled checks do not replace it. Drafts, answers and site addresses are excluded from timing details.</li>
-          <li>Suggestions from a check stay in that page's memory only, for as long as the text they describe is unchanged. They are dropped when you edit that text, leave or close the page, pause Lineleaf, or turn the site off, and are never saved.</li>
-          <li>The writing panel clears its selection and results after five minutes.</li>
-          <li>No draft history, provider credentials, or telemetry is stored.</li>
-        </ul>
         <div class="actions-row"><button id="reset" type="button" class="danger">Reset preferences and site access</button></div>
       </section>
     </main>
   </div>
-
-  <div class="savebar"><div>
-    <p id="status" role="status" aria-live="polite"></p>
-    <button type="submit" form="preferences" class="primary">Save preferences</button>
-  </div></div>
   <script type="module" src="options.mjs"></script>
 </body>
 </html>
