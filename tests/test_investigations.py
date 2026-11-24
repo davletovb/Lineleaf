@@ -43,7 +43,7 @@ class FramingTests(unittest.TestCase):
                 run_benchmark(FIXTURE, fixture=True, **options)
 
     def test_benchmark_speed_preserves_effort_and_records_the_requested_tier(self):
-        for speed in ("", "standard", "fast"):
+        for speed in ("", "standard", "fast", "ultrafast"):
             turn = writing_turn("He go.", model="gpt-6-luna", effort="xhigh", speed=speed)
             if speed:
                 self.assertEqual(turn["service_tier"], speed)

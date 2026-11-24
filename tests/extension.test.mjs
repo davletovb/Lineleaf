@@ -116,7 +116,7 @@ test('saved effort is bounded and applies to every writing mode; provider defaul
 });
 test('speed choices apply to every writing mode without changing the model, effort or prompt', () => {
   assert.equal(preferences(null).speed, '');
-  for (const speed of ['', 'standard', 'fast']) {
+  for (const speed of ['', 'standard', 'fast', 'ultrafast']) {
     const settings = preferences({model: 'gpt-6-luna', effort: 'xhigh', speed});
     for (const mode of ['proofread', 'clarity', 'improve', 'paraphrase', 'clearer', 'shorter', 'formal', 'friendly']) {
       const turn = writingTurn('He go.', mode, settings);

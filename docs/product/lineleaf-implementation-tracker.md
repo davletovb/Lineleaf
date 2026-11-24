@@ -193,6 +193,12 @@ Owner: Lineleaf/Seatline maintainers. Status: **IMPLEMENTED — VERIFY**. [Linel
 
 Review-fix local validation: all 124 Node units and 40 Python checks pass. Build/package and blocked review-candidate packaging pass with the corrected Seatline pin. Provider default, Standard and Fast synthetic evaluator runs each complete all 380 cases at fixed `xhigh`; the fixture benchmark preserves `gpt-6-luna`/`xhigh` and records null for omitted speed. Linux/macOS browser, installed-extension and current/legacy companion checks are recorded on the PR, since this workspace denies their required sockets. Real Codex CLI 0.156.0 parses the explicit overrides, but is not authenticated; Standard generation without Fast eligibility and the fixed-model/effort latency/quality comparison remain live/device gates.
 
+## G-04 follow-up — Codex Ultrafast (2026-11-24)
+
+**IMPLEMENTED — VERIFY.** Lineleaf maintainers own this follow-up. The current companion pin includes the Ultrafast tier from [Seatline #26](https://github.com/davletovb/seatline/pull/26). Codex users can save Ultrafast beside Model and Reasoning effort. The choice applies to checks and rewrites. A companion that supports only Standard and Fast rejects the unknown tier before launching Codex. Lineleaf reports the companion update and keeps the saved setting.
+
+Local evidence includes 194 Node tests, 41 Python tests, and a successful extension build. The controller regression covers the old companion's refusal with zero provider launches and a successful Ultrafast turn after reconnecting to a compatible companion. Live Codex eligibility and latency remain open.
+
 ## H-01 — Saved provider selection — 2026-10-06
 
 Owner: Lineleaf maintainers. Status: **IMPLEMENTED — VERIFY**. Evidence: [Lineleaf #21](https://github.com/davletovb/Lineleaf/pull/21). The owner explicitly selected Claude Code, Gemini through Antigravity, and Grok alongside Codex. Inspected merged Lineleaf `96ab32e98988522e796f79a6d3b39485e8f0ccb8` and Seatline `af245676209803013d5df5ff8431270efc1af9df`, with no conflicting open PRs. The existing companion pin already supplies every adapter; Seatline's app-server slice E remains deferred.

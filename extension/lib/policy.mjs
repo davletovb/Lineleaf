@@ -31,7 +31,7 @@ export const AUTOMATIC_HOLD = 300000; // After a provider timeout, no background
 export const AUTO_IDLE = 1500;
 export const AUTO_INTERVAL = 10000;
 export const EFFORTS = ['', 'none', 'low', 'medium', 'high', 'xhigh', 'max'];
-export const SPEEDS = ['', 'standard', 'fast'];
+export const SPEEDS = ['', 'standard', 'fast', 'ultrafast'];
 export const PROVIDERS = ['codex', 'claude', 'gemini', 'grok'];
 export const PROVIDER_LABELS = {codex: 'Codex', claude: 'Claude Code', gemini: 'Gemini · Antigravity', grok: 'Grok'};
 export const providerDefaults = provider => ({model: '', effort: provider === 'codex' ? 'low' : '', speed: '', allowCloud: false});

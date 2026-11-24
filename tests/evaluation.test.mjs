@@ -339,7 +339,7 @@ test('evaluation evidence hashes explicit effort and keeps historical configurat
   assert.throws(() => validateRun(corpus, run));
 });
 test('evaluation fixes speed for the whole run and binds it to the evidence hash', async () => {
-  for (const speed of ['', 'standard', 'fast']) {
+  for (const speed of ['', 'standard', 'fast', 'ultrafast']) {
     const settings = {...config, model: 'gpt-6-luna', effort: 'xhigh', speed}, turns = [];
     const {run} = await evaluate(corpus, settings, {fixture: true, connectionFactory: () => {
       const c = corpus.cases[turns.length];

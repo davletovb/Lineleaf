@@ -33,7 +33,7 @@ SYSTEM = (
 # Seatline's readiness API (additive, protocol 1): a verified sign-in result may be reused for this long (its own ceiling is 30 s).
 READINESS_CACHED = {"mode": "cached", "max_age_ms": 30000}
 EFFORTS = ("none", "low", "medium", "high", "xhigh", "max")
-SPEEDS = ("", "standard", "fast")
+SPEEDS = ("", "standard", "fast", "ultrafast")
 
 
 def writing_turn(text, model=None, check_sign_in=True, effort=None, speed=""):

@@ -1,7 +1,7 @@
 import {PROVIDER_LABELS} from './policy.mjs';
 export const MESSAGES = {
   NATIVE_UNAVAILABLE: 'Seatline is unavailable. Install the shared companion and authorize the Lineleaf extension ID.',
-  COMPANION_UPDATE_REQUIRED: 'The Seatline that is running does not support the required check settings, so the check was refused and nothing was sent to the provider. Run “seatline-companion install” from the updated Seatline, quit the Seatline that is still running (it stays up while any app uses it), then try again.',
+  COMPANION_UPDATE_REQUIRED: 'The Seatline that is running does not support the required check settings, so the check was refused and nothing was sent to the provider. Run “seatline-companion install” from the updated build to replace the running broker, then try again.',
   PROTOCOL_ERROR: 'Seatline returned an unsupported response. Check the companion version.',
   EXECUTABLE_NOT_FOUND: 'The selected provider was not found by Seatline. Install its supported CLI.',
   LOGIN_REQUIRED: 'Sign in to the selected provider, then try again.', AUTH_REJECTED: 'Provider sign-in was rejected. Sign in again.',
