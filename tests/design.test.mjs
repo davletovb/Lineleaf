@@ -368,7 +368,7 @@ test('settings saves provider-specific models and shows Codex-only budgets and e
   const {page, context} = await extensionPage('options.html', {}, {viewport: {width: 1100, height: 800}});
   await settled(page, '#authorize'); await advanced(page);
   const save = async () => { await page.getByRole('button', {name: 'Save'}).click(); await page.waitForFunction(() => document.querySelector('#status').textContent === 'Provider saved.'); };
-  await page.locator('#model').fill('gpt-6-sol'); await page.locator('#effort').selectOption('xhigh'); await page.locator('#speed').selectOption('fast'); await save();
+  await page.locator('#model').fill('gpt-6-sol'); await page.locator('#effort').selectOption('xhigh'); await page.locator('#speed').selectOption('ultrafast'); await save();
   for (const provider of ['claude', 'gemini', 'grok']) {
     await page.locator('#provider').selectOption(provider);
     assert.equal(await page.locator('#model').inputValue(), '');
@@ -381,7 +381,7 @@ test('settings saves provider-specific models and shows Codex-only budgets and e
   await page.reload(); await settled(page, '#authorize'); await advanced(page);
   assert.equal(await page.locator('#provider').inputValue(), 'grok'); assert.equal(await page.locator('#model').inputValue(), 'grok-model');
   await page.locator('#provider').selectOption('codex');
-  assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol'); assert.equal(await page.locator('#effort').inputValue(), 'xhigh'); assert.equal(await page.locator('#speed').inputValue(), 'fast');
+  assert.equal(await page.locator('#model').inputValue(), 'gpt-6-sol'); assert.equal(await page.locator('#effort').inputValue(), 'xhigh'); assert.equal(await page.locator('#speed').inputValue(), 'ultrafast');
   assert.equal(await page.locator('#effort').isEnabled(), true);
   await page.locator('#provider').selectOption('gemini'); assert.equal(await page.locator('#allow-cloud').isChecked(), true); assert.equal(await page.locator('#model').inputValue(), 'gemini-model');
   await context.close();

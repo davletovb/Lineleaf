@@ -26,6 +26,44 @@ test('both speed choices require an explicit companion capability before writing
     }
   }
 });
+test('Ultrafast runs on a current companion and a fast-only companion refuses it before launch', async () => {
+  const f = fakeChrome();
+  let supportsUltrafast = false;
+  let launches = 0;
+  f.api.runtime.connectNative = () => {
+    const port = fakeNative((message, peer) => {
+      f.calls.push(message);
+      if (sent(message)) {
+        if (!supportsUltrafast && turnOf(message).service_tier === 'ultrafast') {
+          peer.reply(message.id, {type: 'failed', reason: 'INVALID_REQUEST'});
+          return;
+        }
+        launches++;
+      }
+      broker(message, peer);
+    });
+    f.ports.push(port);
+    return port;
+  };
+  installController(f.api);
+  const saved = await f.rpc('save-settings', {changes: {speed: 'ultrafast'}, expected: {provider: 'codex', speed: ''}, dictionary: {add: [], remove: []}});
+  assert.equal(saved.ok, true);
+  const old = f.connect(); start(old);
+  await waitFor(() => failure(old));
+  assert.equal(failure(old).code, 'COMPANION_UPDATE_REQUIRED');
+  assert.equal(launches, 0);
+  assert.equal(f.turns.length, 1);
+  assert.equal((await f.rpc('check-connection')).value.update_required, true);
+
+  supportsUltrafast = true;
+  f.ports.at(-1).disconnect();
+  const current = f.connect(); start(current);
+  await waitFor(() => result(current));
+  assert.deepEqual(f.turns.map(turn => turn.method), ['send_ready_with_policy', 'send_ready_with_policy']);
+  assert.deepEqual(f.turns.map(turn => turn.params.service_tier), ['ultrafast', 'ultrafast']);
+  assert.equal(launches, 1);
+  assert.equal((await f.rpc('check-connection')).value.update_required, false);
+});
 test('provider default omits the tier and runs on companions without tier forwarding; explicit choices still refuse', async () => {
   for (const capability of [undefined, false, 'unknown']) {
     const state = {...READY, capabilities: {tool_isolation: true, reasoning_effort: true, ...(capability === undefined ? {} : {service_tier: capability})}};
